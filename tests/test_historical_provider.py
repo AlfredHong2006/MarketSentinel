@@ -7,6 +7,8 @@ from marketsentinel.sources.historical import (
     GdeltHistoricalNewsProvider,
     GoogleNewsHistoricalProvider,
     HistoricalNewsService,
+    _gdelt_failure_message,
+    _is_transient_gdelt_error,
 )
 
 
@@ -74,9 +76,8 @@ def test_gdelt_parses_genuine_articles_and_builds_alias_query() -> None:
     assert result.health.status == "healthy"
     assert result.funnel.retrieved == 3
     assert result.funnel.relevant == 2
-    assert result.funnel.unique == 1
-    assert result.articles[0].source == "mirror.example"
-    assert result.articles[0].published_at == datetime(2026, 8, 10, 13, tzinfo=UTC)
+    assert result.funnel.unique == 2
+    assert {item.source for item in result.articles} == {"publisher.example", "mirror.example"}
     assert requests[0][0].endswith("/api/v2/doc/doc")
     assert '"NVIDIA"' in requests[0][1]["params"]["query"]
     assert '"Nvidia Corporation"' in requests[0][1]["params"]["query"]
@@ -110,6 +111,69 @@ def test_gdelt_reports_failure_without_fabricating_articles() -> None:
     assert result.articles == []
     assert result.health.status == "unavailable"
     assert result.health.message is not None
+
+
+def test_gdelt_failure_diagnostics_include_safe_http_and_timeout_categories() -> None:
+    request = httpx.Request("GET", "https://api.gdeltproject.org/api/v2/doc/doc")
+    response = httpx.Response(
+        429,
+        request=request,
+        headers={"content-type": "text/plain; charset=utf-8"},
+    )
+    rate_limit = httpx.HTTPStatusError("too many", request=request, response=response)
+
+    assert "rate limited" in _gdelt_failure_message(rate_limit, response)
+    assert "HTTP 429" in _gdelt_failure_message(rate_limit, response)
+    assert "content-type text/plain" in _gdelt_failure_message(rate_limit, response)
+    assert "ConnectTimeout" in _gdelt_failure_message(httpx.ConnectTimeout("slow"), None)
+    assert _is_transient_gdelt_error(rate_limit) is False
+    assert _is_transient_gdelt_error(httpx.ConnectTimeout("slow")) is True
+
+
+def test_gdelt_funnel_classifies_date_url_and_relevance_rejections() -> None:
+    def fake_get(*args, **kwargs):
+        return FakeResponse(
+            {
+                "articles": [
+                    {
+                        "title": "NVIDIA Corporation revenue rises",
+                        "url": "https://publisher.example/valid",
+                        "seendate": "20260810T120000Z",
+                    },
+                    {
+                        "title": "NVIDIA Corporation revenue rises",
+                        "url": "https://publisher.example/old",
+                        "seendate": "20260701T120000Z",
+                    },
+                    {
+                        "title": "NVIDIA Corporation revenue rises",
+                        "seendate": "20260810T120000Z",
+                    },
+                    {
+                        "title": "City council meeting",
+                        "url": "https://publisher.example/irrelevant",
+                        "seendate": "20260810T120000Z",
+                    },
+                ]
+            }
+        )
+
+    provider = GdeltHistoricalNewsProvider(
+        window_days=30, request_interval_seconds=0, http_get=fake_get
+    )
+    constituent = Constituent(symbol="NVDA", yahoo_symbol="NVDA", name="NVIDIA", market="S&P 500")
+    result = provider.fetch_history(
+        constituent,
+        since=datetime(2026, 7, 16, tzinfo=UTC),
+        until=datetime(2026, 8, 15, tzinfo=UTC),
+        max_articles=20,
+    )
+
+    assert result.funnel.retrieved == 4
+    assert result.funnel.invalid_dates == 1
+    assert result.funnel.invalid_urls == 1
+    assert result.funnel.irrelevant == 1
+    assert result.funnel.relevant == result.funnel.unique == 1
 
 
 def test_google_historical_fallback_parses_date_bounded_resolved_articles() -> None:

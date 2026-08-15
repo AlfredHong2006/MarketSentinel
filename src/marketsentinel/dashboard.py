@@ -167,6 +167,24 @@ def render_ingestion_funnel(payload: dict[str, Any]) -> None:
         "Counts describe this refresh. Previously stored matching articles are retained without being "
         "rescored, so a repeated refresh can legitimately show zero newly scored items."
     )
+    with st.expander("Funnel diagnostics"):
+        diagnostics = {
+            "Invalid/out-of-range dates": funnel["invalid_dates"],
+            "Irrelevant": funnel["irrelevant"],
+            "Invalid URLs": funnel["invalid_urls"],
+            "Exact/provider-ID duplicates": funnel["exact_duplicates"],
+            "Canonical-URL duplicates": funnel["canonical_url_duplicates"],
+            "Title + publisher + time duplicates": funnel["near_title_duplicates"],
+            "Database conflicts": funnel["database_conflicts"],
+            "Excluded by request limit": funnel["request_limited"],
+            "Previously scored": funnel["previously_scored"],
+            "Provider failures": funnel["provider_failures"],
+        }
+        st.dataframe(
+            pd.DataFrame(diagnostics.items(), columns=["Stage", "Count"]),
+            hide_index=True,
+            use_container_width=True,
+        )
 
 
 def render_forecast(payload: dict[str, Any]) -> None:

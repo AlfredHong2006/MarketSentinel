@@ -96,4 +96,6 @@ def test_service_runs_complete_vertical_slice_without_network_or_real_model(
 
     repeated = service.analyze("ACME")
     assert repeated.ingestion_funnel.scored == 0
+    assert repeated.ingestion_funnel.database_conflicts == 2
+    assert repeated.ingestion_funnel.previously_scored == 2
     assert len(repository.list_scored_articles("ACME")) == 3

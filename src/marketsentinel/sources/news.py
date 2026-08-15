@@ -19,7 +19,12 @@ from marketsentinel.domain import (
     SourceHealth,
 )
 from marketsentinel.errors import ProviderError
-from marketsentinel.normalization import article_fingerprint, deduplicate_articles, relevance_score
+from marketsentinel.normalization import (
+    article_fingerprint,
+    deduplicate_articles,
+    deduplicate_with_diagnostics,
+    relevance_score,
+)
 from marketsentinel.timeutils import ensure_utc, utc_now
 
 LOGGER = logging.getLogger(__name__)
@@ -86,31 +91,39 @@ class GoogleNewsRssProvider:
                     latency_ms=latency,
                     message=f"RSS request failed after retries: {type(exc).__name__}",
                 ),
+                funnel=IngestionFunnel(provider_failures=1),
             )
 
         parsed = feedparser.parse(response.content)
         entries = list(parsed.entries)
         fetched_at = utc_now()
         articles: list[Article] = []
+        invalid_dates = irrelevant = invalid_urls = 0
         for entry in entries:
             published = _entry_datetime(entry)
-            if published is None or published < ensure_utc(since):
-                continue
             title = str(entry.get("title", "")).strip()
             url = str(entry.get("link", "")).strip()
             source = str(entry.get("source", {}).get("title", "Unknown source")).strip()
             if source != "Unknown source" and title.endswith(f" - {source}"):
                 title = title[: -(len(source) + 3)].strip()
+            if published is None or published < ensure_utc(since):
+                invalid_dates += 1
+                continue
+            if not url:
+                invalid_urls += 1
+                continue
             relevance = relevance_score(title, constituent)
-            if not title or not url or relevance < 0.35:
+            if not title or relevance < 0.35:
+                irrelevant += 1
                 continue
             articles.append(
                 Article(
-                    fingerprint=article_fingerprint(title, constituent.symbol),
+                    fingerprint=article_fingerprint(title, constituent.symbol, source, published),
                     ticker=constituent.symbol,
                     title=title,
                     url=url,
                     source=source,
+                    provider_article_id=_google_rss_article_id(url),
                     published_at=published,
                     fetched_at=fetched_at,
                     provider=self.name,
@@ -118,7 +131,8 @@ class GoogleNewsRssProvider:
                 )
             )
 
-        valid = deduplicate_articles(articles)[:max_articles]
+        deduplication = deduplicate_with_diagnostics(articles)
+        valid = deduplication.articles[:max_articles]
         latency = round((time.perf_counter() - started) * 1000)
         if not entries:
             message = "The RSS response contained no entries; HTTP success alone is not healthy."
@@ -141,6 +155,13 @@ class GoogleNewsRssProvider:
             ),
             funnel=IngestionFunnel(
                 retrieved=len(entries),
+                invalid_dates=invalid_dates,
+                irrelevant=irrelevant,
+                invalid_urls=invalid_urls,
+                exact_duplicates=deduplication.exact_duplicates,
+                canonical_url_duplicates=deduplication.canonical_url_duplicates,
+                near_title_duplicates=deduplication.near_title_duplicates,
+                request_limited=len(deduplication.articles) - len(valid),
                 relevant=len(articles),
                 unique=len(valid),
             ),
@@ -152,6 +173,15 @@ def _entry_datetime(entry: object) -> datetime | None:
     if parsed is None:
         return None
     return datetime(*parsed[:6], tzinfo=UTC)
+
+
+def _google_rss_article_id(url: str) -> str | None:
+    """Preserve Google's opaque RSS item identifier without treating it as a publisher URL."""
+
+    marker = "/rss/articles/"
+    if marker not in url:
+        return None
+    return url.split(marker, maxsplit=1)[1].split("?", maxsplit=1)[0] or None
 
 
 class DemoNewsProvider:
@@ -182,7 +212,9 @@ class DemoNewsProvider:
             title = str(template["title"]).format(**values)
             articles.append(
                 Article(
-                    fingerprint=article_fingerprint(title, constituent.symbol),
+                    fingerprint=article_fingerprint(
+                        title, constituent.symbol, template["source"], published
+                    ),
                     ticker=constituent.symbol,
                     title=title,
                     url=str(template["url"]).format(**values),

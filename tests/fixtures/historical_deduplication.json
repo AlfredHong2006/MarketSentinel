@@ -1,0 +1,52 @@
+[
+  {
+    "title": "NVIDIA announces data-center platform",
+    "url": "https://news.google.com/rss/articles/nvda-one?oc=5",
+    "source": "Google News",
+    "published_at": "2026-08-10T12:00:00+00:00",
+    "provider_article_id": "nvda-one"
+  },
+  {
+    "title": "NVIDIA announces data-center platform",
+    "url": "https://news.google.com/rss/articles/nvda-one?oc=9",
+    "source": "Google News",
+    "published_at": "2026-08-10T12:00:00+00:00",
+    "provider_article_id": "nvda-one"
+  },
+  {
+    "title": "NVIDIA announces data-center platform",
+    "url": "https://wire.example/nvidia-platform?utm_source=rss",
+    "source": "Wire Service",
+    "published_at": "2026-08-10T12:00:00+00:00"
+  },
+  {
+    "title": "NVIDIA announces data-center platform update",
+    "url": "https://wire.example/nvidia-platform",
+    "source": "Mirror Service",
+    "published_at": "2026-08-10T12:01:00+00:00"
+  },
+  {
+    "title": "NVIDIA releases networking product",
+    "url": "https://wire.example/nvidia-networking",
+    "source": "Wire Service",
+    "published_at": "2026-08-10T13:00:00+00:00"
+  },
+  {
+    "title": "Apple launches developer tools",
+    "url": "https://wire.example/apple-tools",
+    "source": "Wire Service",
+    "published_at": "2026-08-10T13:00:00+00:00"
+  },
+  {
+    "title": "Apple launches developer tools",
+    "url": "https://wire.example/apple-tools-day-two",
+    "source": "Wire Service",
+    "published_at": "2026-08-11T13:00:00+00:00"
+  },
+  {
+    "title": "Apple launches developer tools",
+    "url": "https://wire.example/apple-tools",
+    "source": "Wire Service",
+    "published_at": "2026-08-10T13:00:00+00:00"
+  }
+]

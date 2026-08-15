@@ -35,6 +35,7 @@ class Article(BaseModel):
     title: str
     url: str
     source: str
+    provider_article_id: str | None = None
     published_at: datetime
     fetched_at: datetime
     provider: str
@@ -68,12 +69,42 @@ class NewsFetchResult(BaseModel):
 
 
 class IngestionFunnel(BaseModel):
-    """Counts retained at each ingestion stage for one analysis request."""
+    """Non-sensitive, stage-specific counts for one ingestion request."""
 
     retrieved: int = Field(default=0, ge=0)
+    invalid_dates: int = Field(default=0, ge=0)
+    irrelevant: int = Field(default=0, ge=0)
+    invalid_urls: int = Field(default=0, ge=0)
+    exact_duplicates: int = Field(default=0, ge=0)
+    canonical_url_duplicates: int = Field(default=0, ge=0)
+    near_title_duplicates: int = Field(default=0, ge=0)
+    database_conflicts: int = Field(default=0, ge=0)
+    request_limited: int = Field(default=0, ge=0)
     relevant: int = Field(default=0, ge=0)
     unique: int = Field(default=0, ge=0)
     scored: int = Field(default=0, ge=0)
+    previously_scored: int = Field(default=0, ge=0)
+    provider_failures: int = Field(default=0, ge=0)
+
+    def merged(self, other: "IngestionFunnel") -> "IngestionFunnel":
+        """Add provider-stage counts while leaving final service-stage counts to the caller."""
+
+        return IngestionFunnel(
+            retrieved=self.retrieved + other.retrieved,
+            invalid_dates=self.invalid_dates + other.invalid_dates,
+            irrelevant=self.irrelevant + other.irrelevant,
+            invalid_urls=self.invalid_urls + other.invalid_urls,
+            exact_duplicates=self.exact_duplicates + other.exact_duplicates,
+            canonical_url_duplicates=self.canonical_url_duplicates + other.canonical_url_duplicates,
+            near_title_duplicates=self.near_title_duplicates + other.near_title_duplicates,
+            database_conflicts=self.database_conflicts + other.database_conflicts,
+            request_limited=self.request_limited + other.request_limited,
+            relevant=self.relevant + other.relevant,
+            unique=self.unique + other.unique,
+            scored=self.scored + other.scored,
+            previously_scored=self.previously_scored + other.previously_scored,
+            provider_failures=self.provider_failures + other.provider_failures,
+        )
 
 
 class DailySentiment(BaseModel):

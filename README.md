@@ -16,8 +16,10 @@ experimental five-trading-day direction baseline behind a FastAPI API and Stream
 - Backfills the previous 30 calendar days through the free GDELT DOC 2.0 provider, querying the
   canonical company name, controlled aliases, and ticker. It falls back to a date-bounded Google
   News RSS discovery query only when GDELT has no accepted records.
-- Normalizes titles and URLs, applies transparent relevance rules, and deduplicates syndicated
-  headlines using a stable fingerprint.
+- Records a stage-by-stage ingestion funnel: retrieved, invalid dates/URLs, irrelevant, each
+  deduplication reason, request-limit exclusions, database conflicts, and scoring state.
+- Normalizes titles and URLs, applies transparent relevance rules, and deduplicates only by stable
+  provider identifier, canonical URL, or identical normalized title + publisher within six hours.
 - Lazily loads `ProsusAI/finbert`, scores new headlines in batches, and maps logits through
   `model.config.id2label` rather than assuming label order.
 - Stores articles, FinBERT results, and daily aggregates in SQLite.
@@ -48,6 +50,11 @@ retains the genuine Google RSS item link and says so in source health; it never 
 URL. It is always labelled as partial/non-archival coverage. A later phase should add a properly
 licensed historical-news source and use walk-forward experiments to measure whether sentiment
 improves out-of-sample performance over price-only baselines.
+
+The dashboard's ingestion diagnostics distinguish an upstream coverage limitation from a local
+filtering decision. In particular, `Excluded by request limit` means the provider produced more
+validated unique candidates than the caller asked to retain; it is not a duplicate or relevance
+rejection.
 
 ## Architecture
 

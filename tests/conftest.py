@@ -35,14 +35,17 @@ def make_article(
     title: str = "Acme Corporation shares rise after earnings",
     published_at: datetime | None = None,
     url: str = "https://example.com/story",
+    source: str = "Test Wire",
+    provider_article_id: str | None = None,
 ) -> Article:
     timestamp = published_at or datetime.now(UTC) - timedelta(hours=2)
     return Article(
-        fingerprint=article_fingerprint(title, "ACME"),
+        fingerprint=article_fingerprint(title, "ACME", source, timestamp),
         ticker="ACME",
         title=title,
         url=url,
-        source="Test Wire",
+        source=source,
+        provider_article_id=provider_article_id,
         published_at=timestamp,
         fetched_at=datetime.now(UTC),
         provider="test-provider",
