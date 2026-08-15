@@ -10,7 +10,13 @@ from urllib.parse import urlsplit
 
 import feedparser
 import httpx
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from marketsentinel.domain import (
     Article,
@@ -21,7 +27,7 @@ from marketsentinel.domain import (
 )
 from marketsentinel.normalization import (
     article_fingerprint,
-    deduplicate_articles,
+    deduplicate_with_diagnostics,
     historical_query_terms,
     relevance_score,
 )
@@ -29,6 +35,14 @@ from marketsentinel.timeutils import ensure_utc, utc_now
 
 LOGGER = logging.getLogger(__name__)
 _GDELT_DOC_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+
+
+def _is_transient_gdelt_error(error: BaseException) -> bool:
+    """Retry network failures and 5xx responses, not rate limits or other client errors."""
+
+    if isinstance(error, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    return isinstance(error, httpx.HTTPStatusError) and error.response.status_code >= 500
 
 
 class HistoricalNewsProvider(Protocol):
@@ -76,7 +90,7 @@ class GdeltHistoricalNewsProvider:
         self._last_request_at: float | None = None
 
     @retry(
-        retry=retry_if_exception_type(httpx.HTTPError),
+        retry=retry_if_exception(_is_transient_gdelt_error),
         stop=stop_after_attempt(3),
         wait=wait_exponential_jitter(initial=0.5, max=4),
         reraise=True,
@@ -134,6 +148,7 @@ class GdeltHistoricalNewsProvider:
         retrieved = 0
         relevant_articles: list[Article] = []
         failures: list[str] = []
+        invalid_dates = irrelevant = invalid_urls = 0
 
         for start, end in windows:
             try:
@@ -147,23 +162,32 @@ class GdeltHistoricalNewsProvider:
                     f"{start.date().isoformat()}–{end.date().isoformat()}: {_error_name(exc)}"
                 )
                 LOGGER.warning("GDELT window failed for %s to %s: %s", start, end, exc)
-                continue
+                failures[-1] = _gdelt_failure_message(exc, locals().get("response"))
+                # `_request` already retries transient failures. Do not repeat a known failed
+                # provider across further time windows in this same application request.
+                break
 
             retrieved += len(raw_articles)
             for raw_article in raw_articles:
-                article = _parse_gdelt_article(
+                article, rejection = _parse_gdelt_candidate(
                     raw_article,
                     constituent,
                     fetched_at,
                     self.relevance_threshold,
+                    normalized_since,
+                    normalized_until,
                 )
-                if (
-                    article is not None
-                    and normalized_since <= ensure_utc(article.published_at) <= normalized_until
-                ):
+                if article is not None:
                     relevant_articles.append(article)
+                elif rejection == "date":
+                    invalid_dates += 1
+                elif rejection == "url":
+                    invalid_urls += 1
+                else:
+                    irrelevant += 1
 
-        unique = _cap_articles_by_date(deduplicate_articles(relevant_articles), max_articles)
+        deduplication = deduplicate_with_diagnostics(relevant_articles)
+        unique, request_limited = _cap_articles_by_date(deduplication.articles, max_articles)
         latency = round((self._monotonic() - started) * 1_000)
         if not unique and failures:
             status = "unavailable" if len(failures) == len(windows) else "degraded"
@@ -191,8 +215,16 @@ class GdeltHistoricalNewsProvider:
             ),
             funnel=IngestionFunnel(
                 retrieved=retrieved,
+                invalid_dates=invalid_dates,
+                irrelevant=irrelevant,
+                invalid_urls=invalid_urls,
+                exact_duplicates=deduplication.exact_duplicates,
+                canonical_url_duplicates=deduplication.canonical_url_duplicates,
+                near_title_duplicates=deduplication.near_title_duplicates,
+                request_limited=request_limited,
                 relevant=len(relevant_articles),
                 unique=len(unique),
+                provider_failures=len(failures),
             ),
         )
 
@@ -212,12 +244,14 @@ class GoogleNewsHistoricalProvider:
         timeout_seconds: float = 10.0,
         user_agent: str = "MarketSentinel/0.1",
         relevance_threshold: float = 0.5,
+        max_redirect_resolutions: int = 10,
         http_get: Callable[..., httpx.Response] = httpx.get,
         resolve_url: Callable[[str], str | None] | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.user_agent = user_agent
         self.relevance_threshold = relevance_threshold
+        self.max_redirect_resolutions = max_redirect_resolutions
         self._http_get = http_get
         self._resolve_url = resolve_url or self._resolve_publisher_url
 
@@ -282,42 +316,41 @@ class GoogleNewsHistoricalProvider:
                     latency_ms=round((time.perf_counter() - started) * 1_000),
                     message=f"Historical RSS request failed after retries: {_error_name(exc)}",
                 ),
+                funnel=IngestionFunnel(provider_failures=1),
             )
 
         parsed = feedparser.parse(response.content)
         entries = list(parsed.entries)
         fetched_at = utc_now()
         relevant_articles: list[Article] = []
-        # Bound publisher redirect checks. The feed itself can contain many more entries than the
-        # caller requested, and every retained record still has to pass local validation.
-        candidate_entries = entries[: min(len(entries), max_articles * 3)]
-        for entry in candidate_entries:
+        invalid_dates = irrelevant = invalid_urls = 0
+        for entry in entries:
             published_at = _rss_entry_datetime(entry)
             title = str(entry.get("title", "")).strip()
             redirect_url = str(entry.get("link", "")).strip()
             source = str(entry.get("source", {}).get("title", "Unknown source")).strip()
             if source != "Unknown source" and title.endswith(f" - {source}"):
                 title = title[: -(len(source) + 3)].strip()
-            relevance = relevance_score(title, constituent)
-            if (
-                not title
-                or not redirect_url
-                or published_at is None
-                or not normalized_since <= published_at <= normalized_until
-                or relevance < self.relevance_threshold
-            ):
+            if published_at is None or not normalized_since <= published_at <= normalized_until:
+                invalid_dates += 1
                 continue
-            # Resolve only eligible entries. This prevents a page of noisy RSS results from
-            # creating requests to arbitrary publishers. If consent blocks the redirect, retain
-            # the genuine provider item URL rather than synthesizing a publisher URL.
-            publisher_url = self._resolve_url(redirect_url) or redirect_url
+            if not redirect_url:
+                invalid_urls += 1
+                continue
+            relevance = relevance_score(title, constituent)
+            if not title or relevance < self.relevance_threshold:
+                irrelevant += 1
+                continue
             relevant_articles.append(
                 Article(
-                    fingerprint=article_fingerprint(title, constituent.symbol),
+                    fingerprint=article_fingerprint(
+                        title, constituent.symbol, source, published_at
+                    ),
                     ticker=constituent.symbol,
                     title=title,
-                    url=publisher_url,
-                    source=source or urlsplit(publisher_url).netloc,
+                    url=redirect_url,
+                    source=source or urlsplit(redirect_url).netloc,
+                    provider_article_id=_google_rss_article_id(redirect_url),
                     published_at=published_at,
                     fetched_at=fetched_at,
                     provider=self.name,
@@ -325,7 +358,20 @@ class GoogleNewsHistoricalProvider:
                 )
             )
 
-        unique = _cap_articles_by_date(deduplicate_articles(relevant_articles), max_articles)
+        deduplication = deduplicate_with_diagnostics(relevant_articles)
+        selected, request_limited = _cap_articles_by_date(deduplication.articles, max_articles)
+        unique = [
+            article.model_copy(
+                update={
+                    "url": (
+                        self._resolve_url(article.url) or article.url
+                        if index < self.max_redirect_resolutions
+                        else article.url
+                    )
+                }
+            )
+            for index, article in enumerate(selected)
+        ]
         latency = round((time.perf_counter() - started) * 1_000)
         unresolved_redirects = sum(
             urlsplit(article.url).netloc.casefold().endswith("google.com") for article in unique
@@ -362,6 +408,13 @@ class GoogleNewsHistoricalProvider:
             ),
             funnel=IngestionFunnel(
                 retrieved=len(entries),
+                invalid_dates=invalid_dates,
+                irrelevant=irrelevant,
+                invalid_urls=invalid_urls,
+                exact_duplicates=deduplication.exact_duplicates,
+                canonical_url_duplicates=deduplication.canonical_url_duplicates,
+                near_title_duplicates=deduplication.near_title_duplicates,
+                request_limited=request_limited,
                 relevant=len(relevant_articles),
                 unique=len(unique),
             ),
@@ -396,10 +449,8 @@ class HistoricalNewsService:
             NewsFetchResult(
                 articles=fallback_result.articles,
                 health=fallback_result.health,
-                funnel=IngestionFunnel(
-                    retrieved=primary_result.funnel.retrieved + fallback_result.funnel.retrieved,
-                    relevant=primary_result.funnel.relevant + fallback_result.funnel.relevant,
-                    unique=fallback_result.funnel.unique,
+                funnel=primary_result.funnel.merged(fallback_result.funnel).model_copy(
+                    update={"unique": fallback_result.funnel.unique}
                 ),
             ),
             health,
@@ -442,33 +493,40 @@ def _time_windows(
     return tuple(reversed(windows))
 
 
-def _parse_gdelt_article(
+def _parse_gdelt_candidate(
     raw_article: object,
     constituent: Constituent,
     fetched_at: datetime,
     relevance_threshold: float,
-) -> Article | None:
+    since: datetime,
+    until: datetime,
+) -> tuple[Article | None, str | None]:
     if not isinstance(raw_article, dict):
-        return None
+        return None, "url"
     title = str(raw_article.get("title", "")).strip()
     url = str(raw_article.get("url", "")).strip()
     published_at = _parse_gdelt_datetime(raw_article.get("seendate"))
-    if not title or not url or published_at is None:
-        return None
+    if not url:
+        return None, "url"
+    if published_at is None or not since <= ensure_utc(published_at) <= until:
+        return None, "date"
     relevance = relevance_score(title, constituent)
-    if relevance < relevance_threshold:
-        return None
+    if not title or relevance < relevance_threshold:
+        return None, "irrelevant"
     source = str(raw_article.get("domain") or urlsplit(url).netloc or "Unknown source").strip()
-    return Article(
-        fingerprint=article_fingerprint(title, constituent.symbol),
-        ticker=constituent.symbol,
-        title=title,
-        url=url,
-        source=source,
-        published_at=published_at,
-        fetched_at=fetched_at,
-        provider="GDELT DOC 2.0",
-        relevance_score=relevance,
+    return (
+        Article(
+            fingerprint=article_fingerprint(title, constituent.symbol, source, published_at),
+            ticker=constituent.symbol,
+            title=title,
+            url=url,
+            source=source,
+            published_at=published_at,
+            fetched_at=fetched_at,
+            provider="GDELT DOC 2.0",
+            relevance_score=relevance,
+        ),
+        None,
     )
 
 
@@ -490,7 +548,14 @@ def _rss_entry_datetime(entry: object) -> datetime | None:
     return datetime(*parsed[:6], tzinfo=UTC)
 
 
-def _cap_articles_by_date(articles: Sequence[Article], maximum: int) -> list[Article]:
+def _google_rss_article_id(url: str) -> str | None:
+    marker = "/rss/articles/"
+    if marker not in url:
+        return None
+    return url.split(marker, maxsplit=1)[1].split("?", maxsplit=1)[0] or None
+
+
+def _cap_articles_by_date(articles: Sequence[Article], maximum: int) -> tuple[list[Article], int]:
     """Cap results fairly so popular dates do not erase the 30-day timeline."""
 
     by_date: dict[object, list[Article]] = defaultdict(list)
@@ -510,10 +575,26 @@ def _cap_articles_by_date(articles: Sequence[Article], maximum: int) -> list[Art
             if values:
                 remaining_dates.append(day)
         dates = remaining_dates
-    return selected
+    return selected, len(articles) - len(selected)
 
 
 def _error_name(error: Exception) -> str:
     if isinstance(error, httpx.HTTPStatusError):
         return f"HTTP {error.response.status_code}"
     return type(error).__name__
+
+
+def _gdelt_failure_message(error: Exception, response: object | None) -> str:
+    """Return actionable, non-sensitive provider diagnostics without response bodies."""
+
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        content_type = error.response.headers.get("content-type", "unknown")
+        category = "rate limited" if status == 429 else "HTTP failure"
+        return f"GDELT {category}: HTTP {status}, content-type {content_type[:80]}"
+    if isinstance(error, httpx.TimeoutException):
+        return f"GDELT timeout: {type(error).__name__}"
+    if isinstance(error, httpx.HTTPError):
+        return f"GDELT transport failure: {type(error).__name__}"
+    content_type = getattr(response, "headers", {}).get("content-type", "unknown")
+    return f"GDELT invalid response: {type(error).__name__}, content-type {content_type[:80]}"

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS articles (
     url TEXT NOT NULL,
     normalized_url TEXT NOT NULL,
     source TEXT NOT NULL,
+    provider_article_id TEXT,
     published_at TEXT NOT NULL,
     fetched_at TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -71,6 +72,10 @@ _DAILY_SENTIMENT_MIGRATIONS = {
     "aggregate_weight": "REAL NOT NULL DEFAULT 0",
 }
 
+_ARTICLE_MIGRATIONS = {
+    "provider_article_id": "TEXT",
+}
+
 
 class SQLiteRepository:
     def __init__(self, path: Path):
@@ -94,6 +99,12 @@ class SQLiteRepository:
                     connection.execute(
                         f"ALTER TABLE daily_sentiment ADD COLUMN {name} {definition}"
                     )
+            article_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(articles)")
+            }
+            for name, definition in _ARTICLE_MIGRATIONS.items():
+                if name not in article_columns:
+                    connection.execute(f"ALTER TABLE articles ADD COLUMN {name} {definition}")
 
     def upsert_articles(self, articles: Iterable[Article]) -> None:
         rows = [
@@ -105,6 +116,7 @@ class SQLiteRepository:
                 item.url,
                 normalize_url(item.url),
                 item.source,
+                item.provider_article_id,
                 item.published_at.isoformat(),
                 item.fetched_at.isoformat(),
                 item.provider,
@@ -120,13 +132,14 @@ class SQLiteRepository:
                 """
                 INSERT INTO articles (
                     fingerprint, ticker, title, normalized_title, url, normalized_url,
-                    source, published_at, fetched_at, provider, relevance_score, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source, provider_article_id, published_at, fetched_at, provider, relevance_score, is_demo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(fingerprint) DO UPDATE SET
                     title = excluded.title,
                     url = excluded.url,
                     normalized_url = excluded.normalized_url,
                     source = excluded.source,
+                    provider_article_id = excluded.provider_article_id,
                     published_at = MAX(articles.published_at, excluded.published_at),
                     fetched_at = excluded.fetched_at,
                     provider = excluded.provider,
@@ -164,6 +177,16 @@ class SQLiteRepository:
         with closing(self._connect()) as connection, connection:
             rows = connection.execute(query, parameters).fetchall()
         return [(str(row["normalized_url"]), str(row["normalized_title"])) for row in rows]
+
+    def list_articles(self, ticker: str, since: datetime | None = None) -> list[Article]:
+        query = "SELECT * FROM articles WHERE ticker = ?"
+        parameters: list[object] = [ticker]
+        if since is not None:
+            query += " AND published_at >= ?"
+            parameters.append(since.isoformat())
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [_row_to_article(row) for row in rows]
 
     def upsert_sentiments(self, articles: Iterable[ScoredArticle]) -> None:
         rows = [
@@ -311,6 +334,7 @@ def _row_to_scored_article(row: sqlite3.Row) -> ScoredArticle:
         title=row["title"],
         url=row["url"],
         source=row["source"],
+        provider_article_id=row["provider_article_id"],
         published_at=datetime.fromisoformat(row["published_at"]),
         fetched_at=datetime.fromisoformat(row["fetched_at"]),
         provider=row["provider"],
@@ -323,4 +347,20 @@ def _row_to_scored_article(row: sqlite3.Row) -> ScoredArticle:
         sentiment_score=row["sentiment_score"],
         model_name=row["model_name"],
         scored_at=datetime.fromisoformat(row["scored_at"]),
+    )
+
+
+def _row_to_article(row: sqlite3.Row) -> Article:
+    return Article(
+        fingerprint=row["fingerprint"],
+        ticker=row["ticker"],
+        title=row["title"],
+        url=row["url"],
+        source=row["source"],
+        provider_article_id=row["provider_article_id"],
+        published_at=datetime.fromisoformat(row["published_at"]),
+        fetched_at=datetime.fromisoformat(row["fetched_at"]),
+        provider=row["provider"],
+        relevance_score=row["relevance_score"],
+        is_demo=bool(row["is_demo"]),
     )

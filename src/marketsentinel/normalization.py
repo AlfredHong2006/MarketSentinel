@@ -2,8 +2,9 @@
 
 import hashlib
 import re
-from collections.abc import Iterable
-from difflib import SequenceMatcher
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from marketsentinel.domain import Article, Constituent
@@ -58,11 +59,22 @@ def normalize_url(value: str) -> str:
     )
 
 
-def article_fingerprint(title: str, ticker: str | None = None) -> str:
-    """Fingerprint a normalized story within an optional ticker context."""
+_TITLE_DUPLICATE_WINDOW_SECONDS = 6 * 60 * 60
+
+
+def article_fingerprint(
+    title: str,
+    ticker: str | None = None,
+    source: str | None = None,
+    published_at: datetime | None = None,
+) -> str:
+    """Fingerprint a stored article without conflating same-title stories on different dates."""
 
     normalized = normalize_text(title)
     identity = f"{ticker.casefold()}|{normalized}" if ticker else normalized
+    if source is not None and published_at is not None:
+        timestamp = published_at.replace(microsecond=0).isoformat()
+        identity = f"{identity}|{normalize_text(source)}|{timestamp}"
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
@@ -136,48 +148,85 @@ def relevance_score(title: str, constituent: Constituent) -> float:
     return score
 
 
-def near_duplicate_titles(first: str, second: str) -> bool:
-    """Conservatively collapse near-identical syndicated headlines."""
+def near_duplicate_titles(first: Article, second: Article) -> bool:
+    """Match only identical normalized titles from one publisher in a six-hour window.
 
-    normalized_first = normalize_text(first)
-    normalized_second = normalize_text(second)
-    if normalized_first == normalized_second:
-        return True
-    if min(len(normalized_first), len(normalized_second)) < 20:
-        return False
-    ratio = SequenceMatcher(None, normalized_first, normalized_second).ratio()
-    tokens_first = set(normalized_first.split())
-    tokens_second = set(normalized_second.split())
-    token_overlap = len(tokens_first & tokens_second) / len(tokens_first | tokens_second)
-    return ratio >= 0.88 and token_overlap >= 0.75
+    This intentionally is not fuzzy text matching. Similar financial headlines can describe
+    separate events, so title similarity alone is never a deduplication key.
+    """
+
+    return (
+        normalize_text(first.title) == normalize_text(second.title)
+        and normalize_text(first.source) == normalize_text(second.source)
+        and abs((first.published_at - second.published_at).total_seconds())
+        <= _TITLE_DUPLICATE_WINDOW_SECONDS
+    )
 
 
-def deduplicate_articles(articles: Iterable[Article]) -> list[Article]:
-    """Keep the newest relevant article per canonical URL or near-duplicate title."""
+@dataclass(frozen=True)
+class DeduplicationResult:
+    articles: list[Article]
+    exact_duplicates: int = 0
+    canonical_url_duplicates: int = 0
+    near_title_duplicates: int = 0
+
+
+def deduplicate_with_diagnostics(articles: Sequence[Article]) -> DeduplicationResult:
+    """Deduplicate with stable provider ID, canonical URL, then constrained title identity."""
 
     ordered = sorted(
         articles,
-        key=lambda article: (article.published_at, article.relevance_score),
+        key=lambda article: (
+            article.published_at,
+            article.relevance_score,
+            article.url,
+        ),
         reverse=True,
     )
-    groups: list[tuple[list[Article], set[str]]] = []
-    for article in ordered:
-        url = normalize_url(article.url)
-        matches = [
-            index
-            for index, (members, urls) in enumerate(groups)
-            if url in urls
-            or any(near_duplicate_titles(article.title, member.title) for member in members)
-        ]
-        if not matches:
-            groups.append(([article], {url}))
-            continue
+    return _deduplicate(ordered)
 
-        target = matches[0]
-        groups[target][0].append(article)
-        groups[target][1].add(url)
-        for index in reversed(matches[1:]):
-            members, urls = groups.pop(index)
-            groups[target][0].extend(members)
-            groups[target][1].update(urls)
-    return [members[0] for members, _ in groups]
+
+def _deduplicate(ordered: Sequence[Article]) -> DeduplicationResult:
+    accepted: list[Article] = []
+    exact_duplicates = canonical_url_duplicates = near_title_duplicates = 0
+    for article in ordered:
+        match = next((item for item in accepted if deduplication_reason(article, item)), None)
+        if match is None:
+            accepted.append(article)
+            continue
+        reason = deduplication_reason(article, match)
+        if reason == "exact":
+            exact_duplicates += 1
+            continue
+        if reason == "canonical_url":
+            canonical_url_duplicates += 1
+            continue
+        if reason == "near_title":
+            near_title_duplicates += 1
+            continue
+    return DeduplicationResult(
+        articles=accepted,
+        exact_duplicates=exact_duplicates,
+        canonical_url_duplicates=canonical_url_duplicates,
+        near_title_duplicates=near_title_duplicates,
+    )
+
+
+def deduplication_reason(first: Article, second: Article) -> str | None:
+    """Return the first matching identity tier, in strict priority order."""
+
+    if first.provider_article_id and first.provider_article_id == second.provider_article_id:
+        return "exact"
+    if first.url == second.url:
+        return "exact"
+    if normalize_url(first.url) == normalize_url(second.url):
+        return "canonical_url"
+    if near_duplicate_titles(first, second):
+        return "near_title"
+    return None
+
+
+def deduplicate_articles(articles: Iterable[Article]) -> list[Article]:
+    """Compatibility wrapper for callers that need only accepted articles."""
+
+    return deduplicate_with_diagnostics(list(articles)).articles

@@ -6,13 +6,15 @@ from marketsentinel.aggregation.sentiment import aggregate_daily_sentiment
 from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import (
     AnalysisResult,
-    IngestionFunnel,
     NewsFetchResult,
     PriceHistory,
     SourceHealth,
 )
 from marketsentinel.forecasting.baseline import BaselineForecaster
-from marketsentinel.normalization import deduplicate_articles, near_duplicate_titles, normalize_url
+from marketsentinel.normalization import (
+    deduplicate_with_diagnostics,
+    deduplication_reason,
+)
 from marketsentinel.sentiment.finbert import SentimentAnalyzer
 from marketsentinel.sources.historical import HistoricalNewsProvider, HistoricalNewsService
 from marketsentinel.sources.news import NewsService
@@ -99,22 +101,33 @@ class MarketAnalysisService:
             since=recent_cutoff,
             max_articles=self.news_max_articles,
         )
-        candidates = deduplicate_articles([*historical_result.articles, *rss_result.articles])
-        known_keys = self.repository.article_dedupe_keys(
+        provider_funnel = historical_result.funnel.merged(rss_result.funnel)
+        combined = deduplicate_with_diagnostics([*historical_result.articles, *rss_result.articles])
+        stored_candidates = self.repository.list_articles(
             constituent.symbol, since=historical_cutoff
         )
-        known_urls = {url for url, _ in known_keys}
-        known_titles = [title for _, title in known_keys]
-        fetched_articles = [
-            article
-            for article in candidates
-            if normalize_url(article.url) not in known_urls
-            and not any(near_duplicate_titles(article.title, title) for title in known_titles)
-        ]
+        fetched_articles = []
+        database_matches = []
+        for article in combined.articles:
+            match = next(
+                (
+                    stored
+                    for stored in stored_candidates
+                    if deduplication_reason(article, stored) is not None
+                ),
+                None,
+            )
+            if match is None:
+                fetched_articles.append(article)
+            else:
+                database_matches.append(match)
         self.repository.upsert_articles(fetched_articles)
 
         already_scored = self.repository.scored_fingerprints(
             article.fingerprint for article in fetched_articles
+        )
+        previously_scored = self.repository.scored_fingerprints(
+            article.fingerprint for article in database_matches
         )
         pending = [
             article for article in fetched_articles if article.fingerprint not in already_scored
@@ -155,11 +168,19 @@ class MarketAnalysisService:
             daily_sentiment=stored_daily,
             forecast=forecast,
             source_health=[price_health, *historical_health, *news_health],
-            ingestion_funnel=IngestionFunnel(
-                retrieved=historical_result.funnel.retrieved + rss_result.funnel.retrieved,
-                relevant=historical_result.funnel.relevant + rss_result.funnel.relevant,
-                unique=len(candidates),
-                scored=len(already_scored) + len(newly_scored),
+            ingestion_funnel=provider_funnel.model_copy(
+                update={
+                    "exact_duplicates": provider_funnel.exact_duplicates
+                    + combined.exact_duplicates,
+                    "canonical_url_duplicates": provider_funnel.canonical_url_duplicates
+                    + combined.canonical_url_duplicates,
+                    "near_title_duplicates": provider_funnel.near_title_duplicates
+                    + combined.near_title_duplicates,
+                    "database_conflicts": len(database_matches),
+                    "unique": len(fetched_articles),
+                    "scored": len(newly_scored),
+                    "previously_scored": len(previously_scored) + len(already_scored),
+                }
             ),
             generated_at=now,
             disclaimer=DISCLAIMER,

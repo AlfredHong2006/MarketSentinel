@@ -10,7 +10,7 @@ from marketsentinel.storage.sqlite import SQLiteRepository
 def test_sqlite_round_trip_preserves_typed_article_and_aggregate(writable_tmp_path) -> None:
     repository = SQLiteRepository(writable_tmp_path / "market.db")
     repository.initialize()
-    article = make_article()
+    article = make_article(provider_article_id="stable-provider-id")
     scored = StaticSentimentAnalyzer().score([article])[0]
     daily = DailySentiment(
         ticker="ACME",
@@ -28,5 +28,6 @@ def test_sqlite_round_trip_preserves_typed_article_and_aggregate(writable_tmp_pa
     stored_articles = repository.list_scored_articles("ACME")
     stored_daily = repository.list_daily_sentiment("ACME")
     assert stored_articles[0].fingerprint == article.fingerprint
+    assert stored_articles[0].provider_article_id == "stable-provider-id"
     assert stored_articles[0].sentiment_score == scored.sentiment_score
     assert stored_daily == [daily]
