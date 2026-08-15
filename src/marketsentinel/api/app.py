@@ -20,6 +20,11 @@ from marketsentinel.errors import (
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.sentiment.finbert import FinBertAnalyzer
 from marketsentinel.service import MarketAnalysisService
+from marketsentinel.sources.historical import (
+    GdeltHistoricalNewsProvider,
+    GoogleNewsHistoricalProvider,
+    HistoricalNewsService,
+)
 from marketsentinel.sources.news import DemoNewsProvider, GoogleNewsRssProvider, NewsService
 from marketsentinel.sources.prices import YFinancePriceProvider
 from marketsentinel.storage.sqlite import SQLiteRepository
@@ -51,6 +56,18 @@ def build_services(settings: Settings) -> Services:
     )
     demo = DemoNewsProvider(settings.demo_news_path) if settings.allow_demo_fallback else None
     news = NewsService(primary=rss, demo_fallback=demo)
+    historical_news = HistoricalNewsService(
+        primary=GdeltHistoricalNewsProvider(
+            timeout_seconds=settings.request_timeout_seconds,
+            user_agent=settings.user_agent,
+            window_days=settings.historical_gdelt_window_days,
+            request_interval_seconds=settings.historical_gdelt_request_interval_seconds,
+        ),
+        rss_fallback=GoogleNewsHistoricalProvider(
+            timeout_seconds=settings.request_timeout_seconds,
+            user_agent=settings.user_agent,
+        ),
+    )
     sentiment = FinBertAnalyzer(
         model_name=settings.finbert_model,
         device=settings.finbert_device,
@@ -60,12 +77,15 @@ def build_services(settings: Settings) -> Services:
     analysis = MarketAnalysisService(
         constituents=constituents,
         news=news,
+        historical_news=historical_news,
         sentiment=sentiment,
         prices=YFinancePriceProvider(),
         repository=repository,
         forecaster=BaselineForecaster(),
         news_lookback_days=settings.news_lookback_days,
         news_max_articles=settings.news_max_articles,
+        historical_news_days=settings.historical_news_days,
+        historical_news_max_articles=settings.historical_news_max_articles,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
     )
     return Services(repository=repository, constituents=constituents, analysis=analysis)

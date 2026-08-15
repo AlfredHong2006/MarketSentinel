@@ -14,6 +14,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 from marketsentinel.domain import (
     Article,
     Constituent,
+    IngestionFunnel,
     NewsFetchResult,
     SourceHealth,
 )
@@ -138,6 +139,11 @@ class GoogleNewsRssProvider:
                 latency_ms=latency,
                 message=message,
             ),
+            funnel=IngestionFunnel(
+                retrieved=len(entries),
+                relevant=len(articles),
+                unique=len(valid),
+            ),
         )
 
 
@@ -198,6 +204,11 @@ class DemoNewsProvider:
                 valid_records=len(articles),
                 message="Synthetic demo headlines are in use because live RSS returned no valid data.",
             ),
+            funnel=IngestionFunnel(
+                retrieved=len(templates),
+                relevant=len(articles),
+                unique=len(articles),
+            ),
         )
 
 
@@ -210,16 +221,16 @@ class NewsService:
         self.primary = primary
         self.demo_fallback = demo_fallback
 
-    def fetch(
+    def fetch_result(
         self,
         constituent: Constituent,
         since: datetime,
         max_articles: int,
-    ) -> tuple[list[Article], list[SourceHealth]]:
+    ) -> tuple[NewsFetchResult, list[SourceHealth]]:
         primary_result = self.primary.fetch(constituent, since, max_articles)
         health = [primary_result.health]
         if primary_result.articles or self.demo_fallback is None:
-            return primary_result.articles, health
+            return primary_result, health
         try:
             fallback_result = self.demo_fallback.fetch(constituent, since, max_articles)
         except ProviderError as exc:
@@ -231,6 +242,21 @@ class NewsService:
                     message=str(exc),
                 )
             )
-            return [], health
+            return NewsFetchResult(
+                articles=[],
+                health=primary_result.health,
+                funnel=primary_result.funnel,
+            ), health
         health.append(fallback_result.health)
-        return fallback_result.articles, health
+        return fallback_result, health
+
+    def fetch(
+        self,
+        constituent: Constituent,
+        since: datetime,
+        max_articles: int,
+    ) -> tuple[list[Article], list[SourceHealth]]:
+        """Compatibility wrapper for callers that only need articles and health."""
+
+        result, health = self.fetch_result(constituent, since, max_articles)
+        return result.articles, health

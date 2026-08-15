@@ -124,10 +124,16 @@ def render_sentiment_chart(payload: dict[str, Any]) -> None:
     figure.add_trace(
         go.Scatter(
             x=frame["date"],
-            y=frame["moving_average_7d"],
-            name="7-day moving average",
+            y=frame["trend_3"],
+            name="3-observation weighted trend",
             mode="lines",
             line={"color": "#F2994A", "width": 3},
+            customdata=frame[["positive_share", "negative_share", "weighted_disagreement"]],
+            hovertemplate=(
+                "%{x}<br>Trend: %{y:.3f}<br>Positive share: %{customdata[0]:.1%}"
+                "<br>Negative share: %{customdata[1]:.1%}<br>Disagreement: %{customdata[2]:.3f}"
+                "<extra></extra>"
+            ),
         ),
         secondary_y=False,
     )
@@ -135,16 +141,31 @@ def render_sentiment_chart(payload: dict[str, Any]) -> None:
     figure.update_yaxes(title_text="Sentiment index (-1 to +1)", range=[-1, 1], secondary_y=False)
     figure.update_yaxes(title_text="Article count", rangemode="tozero", secondary_y=True)
     figure.update_layout(
-        title="Stored daily sentiment history",
+        title="Historical daily sentiment (calendar dates with genuine scored articles)",
         height=390,
         margin={"l": 20, "r": 20, "t": 55, "b": 20},
         hovermode="x unified",
         legend={"orientation": "h", "y": 1.12},
     )
     st.plotly_chart(figure, use_container_width=True)
+    coverage = len(frame)
     st.caption(
-        "RSS supplies recent articles only. This history grows as MarketSentinel stores new daily "
-        "observations; it is not presented as 30 days of historical news."
+        f"Coverage: {coverage} calendar date(s) with scored articles in the requested 30-day backfill. "
+        "Missing dates are absent, not neutral. Price uses trading sessions; sentiment uses calendar dates."
+    )
+
+
+def render_ingestion_funnel(payload: dict[str, Any]) -> None:
+    funnel = payload["ingestion_funnel"]
+    st.subheader("Ingestion funnel")
+    labels = ["Retrieved", "Relevant", "Unique", "Scored"]
+    values = [funnel["retrieved"], funnel["relevant"], funnel["unique"], funnel["scored"]]
+    columns = st.columns(4)
+    for column, label, value in zip(columns, labels, values, strict=True):
+        column.metric(label, value)
+    st.caption(
+        "Counts describe this refresh. Previously stored matching articles are retained without being "
+        "rescored, so a repeated refresh can legitimately show zero newly scored items."
     )
 
 
@@ -183,12 +204,45 @@ def render_forecast(payload: dict[str, Any]) -> None:
 
 
 def render_articles(payload: dict[str, Any]) -> None:
-    st.subheader("Recent scored articles")
+    st.subheader("Scored articles")
     articles = payload["articles"]
     if not articles:
-        st.info("No recent scored articles are available.")
+        st.info("No scored articles are available for this 30-calendar-day range.")
         return
-    for article in articles:
+
+    frame = pd.DataFrame(articles)
+    frame["publication_date"] = pd.to_datetime(frame["published_at"], utc=True).dt.date
+    earliest, latest = frame["publication_date"].min(), frame["publication_date"].max()
+    filter_columns = st.columns(2)
+    selected_dates = filter_columns[0].date_input(
+        "Publication dates (calendar)",
+        value=(earliest, latest),
+        min_value=earliest,
+        max_value=latest,
+    )
+    sources = sorted(frame["source"].dropna().unique().tolist())
+    selected_sources = filter_columns[1].multiselect("Sources", sources, default=sources)
+    if isinstance(selected_dates, tuple) and len(selected_dates) == 2:
+        start_date, end_date = selected_dates
+    else:
+        start_date = end_date = selected_dates
+    filtered = [
+        article
+        for article in articles
+        if start_date <= pd.Timestamp(article["published_at"]).date() <= end_date
+        and article["source"] in selected_sources
+    ]
+    st.caption(
+        f"{len(filtered)} article(s) match the filters across "
+        f"{len({pd.Timestamp(item['published_at']).date() for item in filtered})} calendar date(s)."
+    )
+
+    symbol = payload["constituent"]["symbol"]
+    limit_key = f"article_limit_{symbol}"
+    if limit_key not in st.session_state:
+        st.session_state[limit_key] = 10
+    visible_articles = filtered[: st.session_state[limit_key]]
+    for article in visible_articles:
         demo = " · **DEMO DATA**" if article["is_demo"] else ""
         st.markdown(f"#### [{article['title']}]({article['url']})")
         st.caption(
@@ -202,6 +256,11 @@ def render_articles(payload: dict[str, Any]) -> None:
             unsafe_allow_html=True,
         )
         st.divider()
+    if len(visible_articles) < len(filtered) and st.button(
+        f"Show more ({len(filtered) - len(visible_articles)} remaining)"
+    ):
+        st.session_state[limit_key] += 10
+        st.rerun()
 
 
 def render_health(payload: dict[str, Any]) -> None:
@@ -277,5 +336,6 @@ else:
         render_price_chart(analysis)
     with sentiment_column:
         render_sentiment_chart(analysis)
+    render_ingestion_funnel(analysis)
     render_forecast(analysis)
     render_articles(analysis)

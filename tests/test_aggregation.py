@@ -52,3 +52,39 @@ def test_moving_average_uses_previous_seven_calendar_days(
     result = aggregate_daily_sentiment("ACME", articles)
 
     assert result[-1].moving_average_7d == pytest.approx(0.75)
+
+
+def test_daily_aggregate_includes_probability_shares_disagreement_and_trend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 8, 14, 20, tzinfo=UTC)
+    monkeypatch.setattr(aggregation_module, "utc_now", lambda: now)
+    first = ScoredArticle(
+        **make_article("Acme first", datetime(2026, 8, 14, 12, tzinfo=UTC)).model_dump(),
+        label="positive",
+        positive=0.9,
+        negative=0.05,
+        neutral=0.05,
+        sentiment_score=0.85,
+        model_name="test",
+        scored_at=now,
+    )
+    second = ScoredArticle(
+        **make_article("Acme second", datetime(2026, 8, 14, 12, tzinfo=UTC)).model_dump(),
+        label="negative",
+        positive=0.05,
+        negative=0.9,
+        neutral=0.05,
+        sentiment_score=-0.85,
+        model_name="test",
+        scored_at=now,
+    )
+
+    result = aggregate_daily_sentiment("ACME", [first, second])
+
+    assert result[0].score == pytest.approx(0)
+    assert result[0].positive_share == pytest.approx(0.475)
+    assert result[0].negative_share == pytest.approx(0.475)
+    assert result[0].weighted_disagreement == pytest.approx(0.85)
+    assert result[0].trend_3 == pytest.approx(0)
+    assert result[0].aggregate_weight > 0

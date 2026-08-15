@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     news_lookback_days: int = Field(default=7, ge=1, le=30)
     news_max_articles: int = Field(default=50, ge=1, le=200)
+    historical_news_days: int = Field(default=30, ge=1, le=30)
+    historical_news_max_articles: int = Field(default=180, ge=1, le=500)
+    historical_gdelt_window_days: int = Field(default=30, ge=1, le=30)
+    historical_gdelt_request_interval_seconds: float = Field(default=5.25, ge=5, le=30)
     request_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     sentiment_half_life_hours: float = Field(default=24.0, gt=0)
     allow_demo_fallback: bool = True

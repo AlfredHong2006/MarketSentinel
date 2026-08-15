@@ -47,7 +47,12 @@ CREATE TABLE IF NOT EXISTS daily_sentiment (
     date TEXT NOT NULL,
     score REAL NOT NULL,
     moving_average_7d REAL NOT NULL,
+    trend_3 REAL NOT NULL DEFAULT 0,
     article_count INTEGER NOT NULL,
+    positive_share REAL NOT NULL DEFAULT 0,
+    negative_share REAL NOT NULL DEFAULT 0,
+    weighted_disagreement REAL NOT NULL DEFAULT 0,
+    aggregate_weight REAL NOT NULL DEFAULT 0,
     computed_at TEXT NOT NULL,
     PRIMARY KEY (ticker, date)
 );
@@ -55,8 +60,16 @@ CREATE TABLE IF NOT EXISTS daily_sentiment (
 CREATE INDEX IF NOT EXISTS idx_daily_sentiment_ticker_date
     ON daily_sentiment (ticker, date DESC);
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 """
+
+_DAILY_SENTIMENT_MIGRATIONS = {
+    "trend_3": "REAL NOT NULL DEFAULT 0",
+    "positive_share": "REAL NOT NULL DEFAULT 0",
+    "negative_share": "REAL NOT NULL DEFAULT 0",
+    "weighted_disagreement": "REAL NOT NULL DEFAULT 0",
+    "aggregate_weight": "REAL NOT NULL DEFAULT 0",
+}
 
 
 class SQLiteRepository:
@@ -73,6 +86,14 @@ class SQLiteRepository:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as connection, connection:
             connection.executescript(_SCHEMA)
+            existing_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(daily_sentiment)")
+            }
+            for name, definition in _DAILY_SENTIMENT_MIGRATIONS.items():
+                if name not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE daily_sentiment ADD COLUMN {name} {definition}"
+                    )
 
     def upsert_articles(self, articles: Iterable[Article]) -> None:
         rows = [
@@ -127,6 +148,22 @@ class SQLiteRepository:
                 values,
             ).fetchall()
         return {str(row["article_fingerprint"]) for row in rows}
+
+    def article_dedupe_keys(
+        self,
+        ticker: str,
+        since: datetime | None = None,
+    ) -> list[tuple[str, str]]:
+        """Return persisted canonical URLs and normalized titles for idempotent refresh filtering."""
+
+        query = "SELECT normalized_url, normalized_title FROM articles WHERE ticker = ?"
+        parameters: list[object] = [ticker]
+        if since is not None:
+            query += " AND published_at >= ?"
+            parameters.append(since.isoformat())
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [(str(row["normalized_url"]), str(row["normalized_title"])) for row in rows]
 
     def upsert_sentiments(self, articles: Iterable[ScoredArticle]) -> None:
         rows = [
@@ -193,7 +230,12 @@ class SQLiteRepository:
                 item.date.isoformat(),
                 item.score,
                 item.moving_average_7d,
+                item.trend_3,
                 item.article_count,
+                item.positive_share,
+                item.negative_share,
+                item.weighted_disagreement,
+                item.aggregate_weight,
                 item.computed_at.isoformat(),
             )
             for item in values
@@ -204,22 +246,38 @@ class SQLiteRepository:
             connection.executemany(
                 """
                 INSERT INTO daily_sentiment (
-                    ticker, date, score, moving_average_7d, article_count, computed_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    ticker, date, score, moving_average_7d, trend_3, article_count,
+                    positive_share, negative_share, weighted_disagreement, aggregate_weight, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(ticker, date) DO UPDATE SET
                     score = excluded.score,
                     moving_average_7d = excluded.moving_average_7d,
+                    trend_3 = excluded.trend_3,
                     article_count = excluded.article_count,
+                    positive_share = excluded.positive_share,
+                    negative_share = excluded.negative_share,
+                    weighted_disagreement = excluded.weighted_disagreement,
+                    aggregate_weight = excluded.aggregate_weight,
                     computed_at = excluded.computed_at
                 """,
                 rows,
+            )
+
+    def delete_daily_sentiment(self, ticker: str, since: date) -> None:
+        """Remove derived values before recomputing a ticker's bounded historical window."""
+
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                "DELETE FROM daily_sentiment WHERE ticker = ? AND date >= ?",
+                (ticker, since.isoformat()),
             )
 
     def list_daily_sentiment(self, ticker: str, limit: int = 365) -> list[DailySentiment]:
         with closing(self._connect()) as connection, connection:
             rows = connection.execute(
                 """
-                SELECT ticker, date, score, moving_average_7d, article_count, computed_at
+                SELECT ticker, date, score, moving_average_7d, trend_3, article_count,
+                       positive_share, negative_share, weighted_disagreement, aggregate_weight, computed_at
                 FROM daily_sentiment
                 WHERE ticker = ?
                 ORDER BY date DESC
@@ -233,7 +291,12 @@ class SQLiteRepository:
                 date=date.fromisoformat(row["date"]),
                 score=row["score"],
                 moving_average_7d=row["moving_average_7d"],
+                trend_3=row["trend_3"],
                 article_count=row["article_count"],
+                positive_share=row["positive_share"],
+                negative_share=row["negative_share"],
+                weighted_disagreement=row["weighted_disagreement"],
+                aggregate_weight=row["aggregate_weight"],
                 computed_at=datetime.fromisoformat(row["computed_at"]),
             )
             for row in rows

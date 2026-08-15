@@ -34,6 +34,17 @@ _SOURCES = {
     ),
 }
 
+# Limited, reviewed names used only to improve search recall for well-known renamed entities.
+_CONTROLLED_ALIASES: dict[str, tuple[str, ...]] = {
+    "GOOGL": ("Google",),
+    "META": ("Facebook",),
+    "NVDA": ("Nvidia",),
+    "BRK.B": ("Berkshire Hathaway",),
+    "AZN": ("AstraZeneca PLC",),
+    "HSBA": ("HSBC",),
+    "SHEL": ("Shell plc",),
+}
+
 # This is deliberately only an offline demo subset, never presented as the full current universe.
 _FALLBACK = (
     Constituent(symbol="AAPL", yahoo_symbol="AAPL", name="Apple Inc.", market="S&P 500"),
@@ -114,6 +125,7 @@ class WikipediaConstituentService:
                     yahoo_symbol=yahoo_symbol,
                     name=name,
                     market=market,
+                    aliases=_CONTROLLED_ALIASES.get(symbol, ()),
                 )
             )
 

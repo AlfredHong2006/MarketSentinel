@@ -13,13 +13,16 @@ experimental five-trading-day direction baseline behind a FastAPI API and Stream
 - Searches the current S&P 500 and FTSE 100 constituent tables, with a 24-hour local cache.
 - Fetches three years of adjusted daily price/volume data with `yfinance` and displays the latest 30
   trading sessions.
-- Fetches **recent** Google News RSS items through a replaceable provider interface.
+- Backfills the previous 30 calendar days through the free GDELT DOC 2.0 provider, querying the
+  canonical company name, controlled aliases, and ticker. It falls back to a date-bounded Google
+  News RSS discovery query only when GDELT has no accepted records.
 - Normalizes titles and URLs, applies transparent relevance rules, and deduplicates syndicated
   headlines using a stable fingerprint.
 - Lazily loads `ProsusAI/finbert`, scores new headlines in batches, and maps logits through
   `model.config.id2label` rather than assuming label order.
 - Stores articles, FinBERT results, and daily aggregates in SQLite.
-- Shows the genuine sentiment dates accumulated so far and a seven-calendar-day moving average.
+- Shows only genuine, scored historical sentiment dates, a three-observation weighted trend, and
+  article coverage. It never fills a missing day with neutral sentiment.
 - Produces an experimental probability that the adjusted close will be higher in five trading
   sessions, with chronological validation and visible naive baselines.
 - Reports source health. An HTTP 200 with no valid records is degraded, not healthy.
@@ -28,32 +31,37 @@ experimental five-trading-day direction baseline behind a FastAPI API and Stream
 
 ## Data honesty
 
-RSS is a recent-news feed, not a reliable historical-news archive. MarketSentinel therefore does
-**not** manufacture a 30-day sentiment series from RSS:
+GDELT and the Google News fallback return genuine provider records, but neither is a complete,
+licensed historical-news archive. MarketSentinel therefore does **not** manufacture a 30-day
+sentiment series:
 
 - The price chart displays 30 trading sessions.
 - The sentiment chart displays only dates backed by available scored articles.
-- SQLite retains new observations, so this chart becomes richer through actual use.
+- SQLite retains accepted articles, FinBERT scores, and daily aggregates, so the chart becomes
+  richer through actual use.
 - Missing sentiment dates are not backfilled with invented values.
 - The forecast begins as a price/volume baseline. Sentiment features activate only after at least 10
   stored sentiment dates are present, and the UI reports the exact coverage.
 
-A later phase should integrate a properly licensed historical-news source and use walk-forward
-experiments to measure whether sentiment improves out-of-sample performance over price-only
-baselines.
+The Google fallback prefers a resolved publisher URL. If Google consent blocks that resolution, it
+retains the genuine Google RSS item link and says so in source health; it never invents a publisher
+URL. It is always labelled as partial/non-archival coverage. A later phase should add a properly
+licensed historical-news source and use walk-forward experiments to measure whether sentiment
+improves out-of-sample performance over price-only baselines.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     U["Current index constituents"] --> API["FastAPI service"]
-    RSS["Google News RSS"] --> V["Validate + source health"]
+    GDELT["GDELT DOC 2.0 historical backfill"] --> V["Validate + source health"]
+    RSS["Google News RSS recent + date-bounded fallback"] --> V
     DEMO["Marked demo fallback"] --> V
     V --> N["Normalize + relevance + deduplicate"]
-    N --> DB[("SQLite")]
+    N --> DB[("SQLite articles + scores")]
     N --> F["Lazy batched FinBERT"]
     F --> DB
-    DB --> A["Daily aggregation + 7-day MA"]
+    DB --> A["Daily aggregation + 3-observation trend"]
     YF["yfinance adjusted bars"] --> M["Leakage-safe logistic baseline"]
     A --> M
     A --> API
@@ -92,15 +100,21 @@ from the model configuration. For `ProsusAI/finbert`, the published mapping is p
 negative at index 1, and neutral at index 2; a regression test protects this historically error-prone
 boundary.
 
-For an article age `a_i` in hours and configurable half-life `h` (24 hours by default):
+For an article age `a_i` in hours, relevance score `r_i`, configurable half-life `h` (24 hours by
+default), and FinBERT probability entropy `H(p_i)`, the confidence and weight are:
 
 ```text
-w_i = 2 ^ (-a_i / h)
-daily_sentiment = sum(w_i * s_i) / sum(w_i)
+confidence_i = 1 - H(p_i) / log(3)
+lambda = log(2) / h
+w_i = r_i * confidence_i * exp(-lambda * a_i)
+S_t = sum(w_i * s_i) / sum(w_i)
 ```
 
-The seven-day line is the arithmetic mean of available daily aggregates in the current date and the
-previous six calendar days. Dates with no articles are absent rather than silently imputed as neutral.
+For each calendar date with genuine scored articles, the API also returns article count, weighted
+positive and negative probability shares, and weighted disagreement (the weighted standard deviation
+of headline-level signed scores). The visual trend is a three-observation, aggregate-weighted mean;
+it uses the three most recent observed dates, not invented calendar rows. Dates with no articles are
+absent rather than silently imputed as neutral.
 
 ## Experimental forecast
 
@@ -172,6 +186,10 @@ starter configuration.
 | `FINBERT_BATCH_SIZE` | `8` | Inference batch size |
 | `NEWS_LOOKBACK_DAYS` | `7` | RSS recency window |
 | `NEWS_MAX_ARTICLES` | `50` | Maximum articles per analysis |
+| `HISTORICAL_NEWS_DAYS` | `30` | Calendar range passed to the historical provider |
+| `HISTORICAL_NEWS_MAX_ARTICLES` | `180` | Maximum accepted historical articles per analysis |
+| `HISTORICAL_GDELT_WINDOW_DAYS` | `30` | One bounded GDELT query span (shorten only if needed) |
+| `HISTORICAL_GDELT_REQUEST_INTERVAL_SECONDS` | `5.25` | Public GDELT request pacing |
 | `ALLOW_DEMO_FALLBACK` | `true` | Permit visibly labelled synthetic fallback headlines |
 
 The `.env`, SQLite databases, model caches, virtual environments, and provider caches are ignored by
@@ -211,11 +229,14 @@ gating, chronological forecast targets, and the complete service orchestration p
 
 ## Known limitations
 
-- Google News RSS offers recent discovery, not dependable historical coverage or a guaranteed API.
+- GDELT and Google News RSS are free discovery sources, not complete historical-news archives. GDELT
+  can rate-limit or return malformed/non-JSON responses; the dashboard displays that health failure
+  and the date-bounded RSS fallback remains explicitly partial.
 - The relevance stage is transparent and testable but still title-based and imperfect, especially for
   short or ambiguous tickers.
-- Google News links may be redirect URLs, and different publishers can describe the same event with
-  different headlines.
+- The historical RSS fallback prefers direct publisher URLs. Google consent can block resolution, in
+  which case the app retains the real Google RSS item URL and marks it as an unresolved redirect.
+  Different publishers can still describe the same event with different titles.
 - The constituent list depends on validated Wikipedia table structure. A cached or small offline
   fallback is clearly identified if refresh fails.
 - `yfinance` is suitable for a portfolio demonstration, not a contractual production market-data
@@ -227,7 +248,8 @@ gating, chronological forecast targets, and the complete service orchestration p
 
 ## Next engineering steps
 
-1. Add a licensed historical-news provider behind the existing adapter interface.
+1. Add a licensed historical-news provider behind the existing adapter interface and evaluate
+   backfill completeness against it.
 2. Compare price-only and price-plus-sentiment models with walk-forward evaluation and confidence
    intervals.
 3. Add a small opt-in real-model integration test and a labelled financial-language evaluation.

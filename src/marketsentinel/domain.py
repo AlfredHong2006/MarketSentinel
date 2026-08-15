@@ -64,6 +64,16 @@ class SourceHealth(BaseModel):
 class NewsFetchResult(BaseModel):
     articles: list[Article]
     health: SourceHealth
+    funnel: "IngestionFunnel" = Field(default_factory=lambda: IngestionFunnel())
+
+
+class IngestionFunnel(BaseModel):
+    """Counts retained at each ingestion stage for one analysis request."""
+
+    retrieved: int = Field(default=0, ge=0)
+    relevant: int = Field(default=0, ge=0)
+    unique: int = Field(default=0, ge=0)
+    scored: int = Field(default=0, ge=0)
 
 
 class DailySentiment(BaseModel):
@@ -71,7 +81,12 @@ class DailySentiment(BaseModel):
     date: date
     score: float = Field(ge=-1, le=1)
     moving_average_7d: float = Field(ge=-1, le=1)
+    trend_3: float = Field(default=0, ge=-1, le=1)
     article_count: int = Field(ge=0)
+    positive_share: float = Field(default=0, ge=0, le=1)
+    negative_share: float = Field(default=0, ge=0, le=1)
+    weighted_disagreement: float = Field(default=0, ge=0, le=1)
+    aggregate_weight: float = Field(default=0, ge=0)
     computed_at: datetime
 
 
@@ -117,5 +132,6 @@ class AnalysisResult(BaseModel):
     daily_sentiment: list[DailySentiment]
     forecast: ForecastResult
     source_health: list[SourceHealth]
+    ingestion_funnel: IngestionFunnel
     generated_at: datetime
     disclaimer: str
