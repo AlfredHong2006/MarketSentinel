@@ -1,0 +1,49 @@
+# Byte-compiled files and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test, coverage, type-checker, and linter caches
+.pytest_cache/
+.pytest-tmp/
+pytest-cache-files-*/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.uv-cache/
+.hf-cache/
+.mypy_cache/
+.pyright/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Runtime data and downloaded artifacts
+*.log
+data/*.db
+data/*.db-*
+data/*.sqlite*
+data/constituents_cache.json
+data/test-runtime/
+models/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+[
+  {
+    "published_hours_ago": 3,
+    "title": "{company} shares rise after a stronger quarterly earnings update",
+    "source": "MarketSentinel demo wire",
+    "url": "https://example.invalid/demo/{symbol}/earnings"
+  },
+  {
+    "published_hours_ago": 19,
+    "title": "Analysts review {company} revenue outlook after management briefing",
+    "source": "MarketSentinel demo wire",
+    "url": "https://example.invalid/demo/{symbol}/outlook"
+  },
+  {
+    "published_hours_ago": 31,
+    "title": "{company} faces uncertainty as costs weigh on profit expectations",
+    "source": "MarketSentinel demo wire",
+    "url": "https://example.invalid/demo/{symbol}/costs"
+  }
+]
