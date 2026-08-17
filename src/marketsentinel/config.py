@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     finbert_batch_size: int = Field(default=8, ge=1, le=64)
     hf_token: str | None = None
 
+    # Optional OpenAI-compatible structured-output provider. The app remains usable without it.
+    llm_api_key: str | None = None
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    article_analysis_evidence_limit: int = Field(default=5, ge=0, le=8)
+
     news_lookback_days: int = Field(default=7, ge=1, le=30)
     news_max_articles: int = Field(default=50, ge=1, le=200)
     historical_news_days: int = Field(default=30, ge=1, le=30)

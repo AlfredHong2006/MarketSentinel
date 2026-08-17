@@ -9,6 +9,7 @@ dependencies = [
     "feedparser>=6.0",
     "httpx>=0.28",
     "numpy>=2.2",
+    "openai>=3.1.0",
     "pandas>=2.2",
     "plotly>=6.2",
     "pydantic-settings>=2.10",

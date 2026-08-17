@@ -1,6 +1,7 @@
 """Typed domain objects shared across pipeline stages and API responses."""
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,6 +41,9 @@ class Article(BaseModel):
     fetched_at: datetime
     provider: str
     relevance_score: float = Field(ge=0, le=1)
+    # RSS descriptions are optional and deliberately bounded: the application does not scrape or
+    # retain full publisher article bodies for event analysis.
+    snippet: str | None = Field(default=None, max_length=4_000)
     is_demo: bool = False
 
 
@@ -166,3 +170,169 @@ class AnalysisResult(BaseModel):
     ingestion_funnel: IngestionFunnel
     generated_at: datetime
     disclaimer: str
+
+
+class EventType(StrEnum):
+    EARNINGS = "earnings"
+    PRODUCT_LAUNCH = "product_launch"
+    INVESTMENT = "investment"
+    ACQUISITION = "acquisition"
+    REGULATION = "regulation"
+    LITIGATION = "litigation"
+    SUPPLY_DISRUPTION = "supply_disruption"
+    MANAGEMENT_CHANGE = "management_change"
+    FINANCING = "financing"
+    MACROECONOMIC_EXPOSURE = "macroeconomic_exposure"
+    PARTNERSHIP = "partnership"
+    CONTRACT_AWARD = "contract_award"
+    CONTRACT_LOSS = "contract_loss"
+    ANALYST_OR_GUIDANCE_CHANGE = "analyst_or_guidance_change"
+    OTHER = "other"
+    UNCERTAIN = "uncertain"
+
+
+class EventDirection(StrEnum):
+    """Possible business direction, not a prediction of a security's price."""
+
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    MIXED = "mixed"
+    NEUTRAL = "neutral"
+    UNCERTAIN = "uncertain"
+
+
+class TimeHorizon(StrEnum):
+    IMMEDIATE = "immediate"
+    DAYS = "days"
+    WEEKS = "weeks"
+    MONTHS = "months"
+    LONG_TERM = "long_term"
+    UNCERTAIN = "uncertain"
+
+
+class EvidenceStatus(StrEnum):
+    CORROBORATED = "corroborated"
+    CONTRADICTED = "contradicted"
+    UNSUPPORTED = "unsupported"
+    UNCERTAIN = "uncertain"
+
+
+class SourceClass(StrEnum):
+    OFFICIAL_COMPANY = "official_company"
+    REGULATORY_OR_FILING = "regulatory_or_filing"
+    MAJOR_FINANCIAL_NEWS = "major_financial_news"
+    INDUSTRY_SPECIALIST = "industry_specialist"
+    GENERAL_NEWS = "general_news"
+    COMMENTARY_OR_OPINION = "commentary_or_opinion"
+    UNKNOWN = "unknown"
+
+
+class CompanyReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    symbol: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class ArticleEvidenceReference(BaseModel):
+    """A compact pointer to an item already stored by MarketSentinel."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    article_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=500)
+    publisher: str = Field(min_length=1, max_length=200)
+    published_at: datetime
+    url: str = Field(min_length=1, max_length=2_000)
+
+
+class EventExtraction(BaseModel):
+    """Stage A: a bounded extraction from one stored article; identity stays application-owned."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    event_type: EventType
+    summary: str = Field(min_length=1, max_length=2_000)
+    direction: EventDirection
+    magnitude: float = Field(ge=0, le=1, multiple_of=0.05)
+    time_horizon: TimeHorizon
+    model_confidence: float = Field(ge=0, le=1, multiple_of=0.05)
+    important_claims: list[str] = Field(default_factory=list, max_length=8)
+    uncertainties: list[str] = Field(default_factory=list, max_length=8)
+    positive_channels: list[str] = Field(default_factory=list, max_length=8)
+    negative_channels: list[str] = Field(default_factory=list, max_length=8)
+
+
+class ClaimAssessment(BaseModel):
+    """Stage B: evidence assessment for one application-assigned claim identifier."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claim_id: str = Field(min_length=1, max_length=32)
+    status: EvidenceStatus
+    reasoning: str = Field(min_length=1, max_length=1_000)
+    evidence_article_ids: list[str] = Field(default_factory=list, max_length=6)
+    confidence: float = Field(ge=0, le=1, multiple_of=0.05)
+
+
+class ClaimAssessments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    assessments: list[ClaimAssessment] = Field(default_factory=list, max_length=8)
+
+
+class RelatedCompanyProposal(BaseModel):
+    """Stage C proposal. Tickers are normalised against an application-supplied candidate set."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    ticker: str = Field(min_length=1, max_length=20)
+    relationship_context: str = Field(min_length=1, max_length=500)
+    possible_effect_direction: EventDirection
+    reasoning: str = Field(min_length=1, max_length=1_000)
+    confidence: float = Field(ge=0, le=1, multiple_of=0.05)
+
+
+class RelatedCompanyProposals(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    related_companies: list[RelatedCompanyProposal] = Field(default_factory=list, max_length=10)
+
+
+class RelatedCompanyAnalysis(RelatedCompanyProposal):
+    """A persisted Stage C result whose company name comes from the supported universe."""
+
+    company: CompanyReference
+
+
+class ArticleAnalysis(BaseModel):
+    """Persisted, versioned three-stage article intelligence; never a price prediction."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    article_id: str = Field(min_length=1, max_length=128)
+    source_reference: ArticleEvidenceReference
+    source_class: SourceClass
+    subject_company: CompanyReference
+    event: EventExtraction
+    claims: list[ClaimAssessment] = Field(default_factory=list, max_length=8)
+    related_companies: list[RelatedCompanyAnalysis] = Field(default_factory=list, max_length=10)
+    evidence_count: int = Field(ge=0, le=8)
+    evidence_strength: float = Field(ge=0, le=1)
+    evidence_sources: list[ArticleEvidenceReference] = Field(default_factory=list, max_length=8)
+    evidence_fingerprint: str = Field(min_length=1, max_length=128)
+    model_version: str = Field(min_length=1, max_length=200)
+    stage_a_prompt_version: str = Field(min_length=1, max_length=100)
+    stage_b_prompt_version: str = Field(min_length=1, max_length=100)
+    stage_c_prompt_version: str = Field(min_length=1, max_length=100)
+    schema_version: str = Field(min_length=1, max_length=100)
+    analysis_created_at: datetime
+
+
+class ArticleAnalysisResponse(BaseModel):
+    """Safe on-demand API result; a failure never substitutes a made-up analysis."""
+
+    article_id: str
+    status: Literal["cached", "generated", "unavailable", "failed", "not_found"]
+    analysis: ArticleAnalysis | None = None
+    message: str | None = None

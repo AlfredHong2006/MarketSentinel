@@ -10,12 +10,17 @@ from pydantic import BaseModel, Field
 
 from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import WikipediaConstituentService
-from marketsentinel.domain import AnalysisResult, UniverseResult
+from marketsentinel.domain import AnalysisResult, ArticleAnalysisResponse, UniverseResult
 from marketsentinel.errors import (
     ConstituentNotFoundError,
     ForecastError,
     ProviderError,
     SentimentModelError,
+)
+from marketsentinel.event_analysis import (
+    ArticleEventAnalysisService,
+    OpenAIArticleIntelligenceProvider,
+    UnavailableArticleAnalysisProvider,
 )
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.sentiment.finbert import FinBertAnalyzer
@@ -36,11 +41,16 @@ class AnalysisRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=20)
 
 
+class ArticleAnalysisRequest(BaseModel):
+    article_id: str = Field(min_length=1, max_length=128)
+
+
 @dataclass
 class Services:
     repository: SQLiteRepository
     constituents: WikipediaConstituentService
     analysis: MarketAnalysisService
+    article_events: ArticleEventAnalysisService
 
 
 def build_services(settings: Settings) -> Services:
@@ -88,7 +98,28 @@ def build_services(settings: Settings) -> Services:
         historical_news_max_articles=settings.historical_news_max_articles,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
     )
-    return Services(repository=repository, constituents=constituents, analysis=analysis)
+    provider = (
+        OpenAIArticleIntelligenceProvider(
+            api_key=settings.llm_api_key,
+            model_version=settings.llm_model,
+            base_url=settings.llm_base_url,
+            timeout_seconds=settings.llm_timeout_seconds,
+        )
+        if settings.llm_api_key
+        else UnavailableArticleAnalysisProvider()
+    )
+    article_events = ArticleEventAnalysisService(
+        repository=repository,
+        provider=provider,
+        constituents=constituents,
+        evidence_limit=settings.article_analysis_evidence_limit,
+    )
+    return Services(
+        repository=repository,
+        constituents=constituents,
+        analysis=analysis,
+        article_events=article_events,
+    )
 
 
 def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
@@ -145,6 +176,12 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         except Exception as exc:
             LOGGER.exception("Unexpected analysis failure")
             raise HTTPException(status_code=500, detail="Unexpected analysis failure") from exc
+
+    @app.post("/api/v1/articles/analyze", response_model=ArticleAnalysisResponse)
+    def analyze_article(request: ArticleAnalysisRequest) -> ArticleAnalysisResponse:
+        """Generate one deliberate, cached event analysis for a genuine stored article."""
+
+        return services.article_events.analyze_article(request.article_id)
 
     return app
 

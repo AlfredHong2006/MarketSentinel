@@ -9,6 +9,11 @@ import requests
 import streamlit as st
 from plotly.subplots import make_subplots
 
+from marketsentinel.article_presentation import (
+    EMPTY_RELATED_COMPANIES_MESSAGE,
+    bullet_items,
+)
+
 API_BASE_URL = os.getenv("MARKETSENTINEL_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 REQUEST_TIMEOUT = 180
 
@@ -67,6 +72,16 @@ def request_analysis(symbol: str) -> dict[str, Any]:
     except requests.JSONDecodeError:
         detail = response.text
     raise RuntimeError(f"API returned {response.status_code}: {detail}")
+
+
+def request_article_analysis(article_id: str) -> dict[str, Any]:
+    response = requests.post(
+        f"{API_BASE_URL}/api/v1/articles/analyze",
+        json={"article_id": article_id},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def percent(value: float) -> str:
@@ -273,12 +288,142 @@ def render_articles(payload: dict[str, Any]) -> None:
             f'<span class="source-pill">Negative {percent(article["negative"])}</span>',
             unsafe_allow_html=True,
         )
+        with st.expander("Open AI-generated event analysis"):
+            st.markdown(f"**Original headline:** [{article['title']}]({article['url']})")
+            st.caption(
+                f"{article['source']} · {article['published_at']} · stored article ID: {article['fingerprint']}"
+            )
+            st.info(
+                "AI-generated event analysis — verify important claims against original sources."
+            )
+            event_key = f"article_event_{article['fingerprint']}"
+            if st.button("Analyse this article", key=f"analyse_{article['fingerprint']}"):
+                with st.spinner("Generating a bounded, structured event analysis…"):
+                    try:
+                        st.session_state[event_key] = request_article_analysis(
+                            article["fingerprint"]
+                        )
+                    except requests.RequestException as exc:
+                        st.session_state[event_key] = {
+                            "status": "failed",
+                            "message": f"Article analysis request failed: {exc}",
+                        }
+            response = st.session_state.get(event_key)
+            if response is not None:
+                render_article_event_analysis(response)
         st.divider()
     if len(visible_articles) < len(filtered) and st.button(
         f"Show more ({len(filtered) - len(visible_articles)} remaining)"
     ):
         st.session_state[limit_key] += 10
         st.rerun()
+
+
+def render_evidence_list(values: list[str]) -> None:
+    for value in bullet_items(values):
+        st.write(value)
+
+
+def render_article_event_analysis(response: dict[str, Any]) -> None:
+    status = response["status"]
+    if status in {"failed", "unavailable", "not_found"}:
+        st.warning(response.get("message") or "Article analysis is unavailable.")
+        return
+    analysis = response.get("analysis")
+    if analysis is None:
+        st.warning("The analysis response did not contain usable structured data.")
+        return
+    st.caption("Result source: " + ("SQLite cache" if status == "cached" else "freshly generated"))
+    event = analysis["event"]
+    columns = st.columns(6)
+    columns[0].metric("Event", event["event_type"].replace("_", " ").title())
+    columns[1].metric("Direction", event["direction"].title())
+    columns[2].metric(
+        "Possible magnitude",
+        percent(event["magnitude"]),
+        help=(
+            "Estimated qualitative significance of the event to the selected company; "
+            "not an expected stock-price move."
+        ),
+    )
+    columns[3].metric("Time horizon", event["time_horizon"].replace("_", " ").title())
+    columns[4].metric(
+        "Extraction confidence",
+        percent(event["model_confidence"]),
+        help="Confidence that Stage A correctly identified the event described by the supplied text.",
+    )
+    columns[5].metric(
+        "Evidence strength",
+        percent(analysis["evidence_strength"]),
+        help=(
+            "Deterministic indicator of supplied-evidence quality and corroboration; "
+            "not a probability that the article is true."
+        ),
+    )
+    st.markdown("**What happened**")
+    st.write(event["summary"])
+    st.caption(
+        "Primarily affected supported company: "
+        f"{analysis['subject_company']['name']} ({analysis['subject_company']['symbol']}) "
+        f"· Source type: {analysis['source_class'].replace('_', ' ')}"
+    )
+    if analysis["claims"]:
+        st.markdown("**Claims and supplied-evidence assessment**")
+        evidence_titles = {
+            item["article_id"]: item["title"] for item in analysis["evidence_sources"]
+        }
+        claim_rows = [
+            {
+                "Claim ID": item["claim_id"],
+                "Claim": event["important_claims"][
+                    int(item["claim_id"].removeprefix("claim_")) - 1
+                ],
+                "Evidence status": item["status"],
+                "Reasoning": item["reasoning"],
+                "Supporting sources": ", ".join(
+                    evidence_titles.get(item_id, item_id)
+                    for item_id in item["evidence_article_ids"]
+                )
+                or "None",
+                "Confidence": percent(item["confidence"]),
+            }
+            for item in analysis["claims"]
+        ]
+        st.dataframe(pd.DataFrame(claim_rows), hide_index=True, use_container_width=True)
+    if event["uncertainties"]:
+        st.markdown("**Uncertainties**")
+        for item in event["uncertainties"]:
+            st.caption(f"• {item}")
+    channel_columns = st.columns(2)
+    with channel_columns[0]:
+        st.markdown("**Possible positive channels**")
+        render_evidence_list(event["positive_channels"])
+    with channel_columns[1]:
+        st.markdown("**Possible negative channels**")
+        render_evidence_list(event["negative_channels"])
+    if analysis["related_companies"]:
+        st.markdown("**Related companies**")
+        for item in analysis["related_companies"]:
+            st.markdown(
+                f"**{item['company']['name']} ({item['ticker']}) — {item['relationship_context']}**"
+            )
+            st.write(f"Possible mechanism: {item['reasoning']}")
+            st.caption(
+                f"Possible direction: {item['possible_effect_direction'].title()} · "
+                f"Confidence: {percent(item['confidence'])}"
+            )
+    else:
+        st.caption(EMPTY_RELATED_COMPANIES_MESSAGE)
+    st.caption(
+        "Model: {model} · Evidence records: {evidence} · Schema: {schema} · Created: {created}".format(
+            model=analysis["model_version"],
+            evidence=analysis["evidence_count"],
+            schema=analysis["schema_version"],
+            created=analysis["analysis_created_at"],
+        )
+    )
+    with st.expander("Structured-data debug view"):
+        st.json(analysis)
 
 
 def render_health(payload: dict[str, Any]) -> None:

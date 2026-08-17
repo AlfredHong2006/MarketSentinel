@@ -162,16 +162,11 @@ uv sync --dev
 Copy-Item .env.example .env
 ```
 
-Start the API:
+Start the API and dashboard together from one PowerShell session. Both processes load the same
+working-directory `.env` configuration:
 
 ```powershell
-uv run uvicorn marketsentinel.api.app:app --reload
-```
-
-Then start the dashboard in a second terminal:
-
-```powershell
-uv run streamlit run src/marketsentinel/dashboard.py
+.\scripts\run_local.ps1
 ```
 
 Open `http://localhost:8501`. API documentation is available at `http://127.0.0.1:8000/docs`.
@@ -198,6 +193,8 @@ starter configuration.
 | `HISTORICAL_GDELT_WINDOW_DAYS` | `30` | One bounded GDELT query span (shorten only if needed) |
 | `HISTORICAL_GDELT_REQUEST_INTERVAL_SECONDS` | `5.25` | Public GDELT request pacing |
 | `ALLOW_DEMO_FALLBACK` | `true` | Permit visibly labelled synthetic fallback headlines |
+| `LLM_API_KEY` | unset | Enables the optional typed OpenAI article-intelligence stages |
+| `LLM_MODEL` | `gpt-4o-mini` | OpenAI model used by all three intelligence stages |
 
 The `.env`, SQLite databases, model caches, virtual environments, and provider caches are ignored by
 Git. API credentials can be added to the settings/provider boundary later; they must never be
