@@ -9,6 +9,7 @@ from typing import Protocol
 
 import feedparser
 import httpx
+from bs4 import BeautifulSoup
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from marketsentinel.domain import (
@@ -128,6 +129,7 @@ class GoogleNewsRssProvider:
                     fetched_at=fetched_at,
                     provider=self.name,
                     relevance_score=relevance,
+                    snippet=_rss_snippet(entry),
                 )
             )
 
@@ -182,6 +184,16 @@ def _google_rss_article_id(url: str) -> str | None:
     if marker not in url:
         return None
     return url.split(marker, maxsplit=1)[1].split("?", maxsplit=1)[0] or None
+
+
+def _rss_snippet(entry: object) -> str | None:
+    """Keep only the permitted RSS summary text, not publisher article bodies."""
+
+    raw = str(getattr(entry, "get", lambda *_: "")("summary", "")).strip()
+    if not raw:
+        return None
+    text = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+    return text[:4_000] or None
 
 
 class DemoNewsProvider:

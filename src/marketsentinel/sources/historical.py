@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import feedparser
 import httpx
+from bs4 import BeautifulSoup
 from tenacity import (
     retry,
     retry_if_exception,
@@ -355,6 +356,7 @@ class GoogleNewsHistoricalProvider:
                     fetched_at=fetched_at,
                     provider=self.name,
                     relevance_score=relevance,
+                    snippet=_rss_snippet(entry),
                 )
             )
 
@@ -546,6 +548,16 @@ def _rss_entry_datetime(entry: object) -> datetime | None:
     if parsed is None:
         return None
     return datetime(*parsed[:6], tzinfo=UTC)
+
+
+def _rss_snippet(entry: object) -> str | None:
+    """Preserve at most the RSS-provided description; do not retrieve article bodies."""
+
+    raw = str(getattr(entry, "get", lambda *_: "")("summary", "")).strip()
+    if not raw:
+        return None
+    text = BeautifulSoup(raw, "html.parser").get_text(" ", strip=True)
+    return text[:4_000] or None
 
 
 def _google_rss_article_id(url: str) -> str | None:

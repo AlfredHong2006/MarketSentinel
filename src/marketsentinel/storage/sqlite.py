@@ -6,7 +6,7 @@ from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
 
-from marketsentinel.domain import Article, DailySentiment, ScoredArticle
+from marketsentinel.domain import Article, ArticleAnalysis, DailySentiment, ScoredArticle
 from marketsentinel.normalization import normalize_text, normalize_url
 
 _SCHEMA = """
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS articles (
     fetched_at TEXT NOT NULL,
     provider TEXT NOT NULL,
     relevance_score REAL NOT NULL CHECK (relevance_score BETWEEN 0 AND 1),
+    snippet TEXT,
     is_demo INTEGER NOT NULL DEFAULT 0
 );
 
@@ -61,7 +62,20 @@ CREATE TABLE IF NOT EXISTS daily_sentiment (
 CREATE INDEX IF NOT EXISTS idx_daily_sentiment_ticker_date
     ON daily_sentiment (ticker, date DESC);
 
-PRAGMA user_version = 2;
+CREATE TABLE IF NOT EXISTS article_intelligence_analyses (
+    article_fingerprint TEXT NOT NULL REFERENCES articles(fingerprint) ON DELETE CASCADE,
+    model_version TEXT NOT NULL,
+    cache_version TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    analysis_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (article_fingerprint, model_version, cache_version, schema_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_article_intelligence_analyses_lookup
+    ON article_intelligence_analyses (article_fingerprint, model_version, cache_version, schema_version);
+
+PRAGMA user_version = 4;
 """
 
 _DAILY_SENTIMENT_MIGRATIONS = {
@@ -74,6 +88,7 @@ _DAILY_SENTIMENT_MIGRATIONS = {
 
 _ARTICLE_MIGRATIONS = {
     "provider_article_id": "TEXT",
+    "snippet": "TEXT",
 }
 
 
@@ -121,6 +136,7 @@ class SQLiteRepository:
                 item.fetched_at.isoformat(),
                 item.provider,
                 item.relevance_score,
+                item.snippet,
                 int(item.is_demo),
             )
             for item in articles
@@ -132,8 +148,8 @@ class SQLiteRepository:
                 """
                 INSERT INTO articles (
                     fingerprint, ticker, title, normalized_title, url, normalized_url,
-                    source, provider_article_id, published_at, fetched_at, provider, relevance_score, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source, provider_article_id, published_at, fetched_at, provider, relevance_score, snippet, is_demo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(fingerprint) DO UPDATE SET
                     title = excluded.title,
                     url = excluded.url,
@@ -144,6 +160,7 @@ class SQLiteRepository:
                     fetched_at = excluded.fetched_at,
                     provider = excluded.provider,
                     relevance_score = MAX(articles.relevance_score, excluded.relevance_score),
+                    snippet = COALESCE(excluded.snippet, articles.snippet),
                     is_demo = MIN(articles.is_demo, excluded.is_demo)
                 """,
                 rows,
@@ -187,6 +204,76 @@ class SQLiteRepository:
         with closing(self._connect()) as connection, connection:
             rows = connection.execute(query, parameters).fetchall()
         return [_row_to_article(row) for row in rows]
+
+    def get_article(self, fingerprint: str) -> Article | None:
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                "SELECT * FROM articles WHERE fingerprint = ?", (fingerprint,)
+            ).fetchone()
+        return _row_to_article(row) if row is not None else None
+
+    def list_evidence_articles(
+        self,
+        ticker: str,
+        exclude_fingerprint: str,
+        limit: int = 5,
+    ) -> list[Article]:
+        """Return a deliberately small, same-company set of stored comparison records."""
+
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM articles
+                WHERE ticker = ? AND fingerprint != ? AND is_demo = 0
+                ORDER BY published_at DESC
+                LIMIT ?
+                """,
+                (ticker, exclude_fingerprint, limit),
+            ).fetchall()
+        return [_row_to_article(row) for row in rows]
+
+    def get_article_analysis(
+        self,
+        article_id: str,
+        model_version: str,
+        cache_version: str,
+        schema_version: str,
+    ) -> ArticleAnalysis | None:
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                """
+                SELECT analysis_json FROM article_intelligence_analyses
+                WHERE article_fingerprint = ? AND model_version = ?
+                  AND cache_version = ? AND schema_version = ?
+                """,
+                (article_id, model_version, cache_version, schema_version),
+            ).fetchone()
+        return (
+            ArticleAnalysis.model_validate_json(row["analysis_json"]) if row is not None else None
+        )
+
+    def store_article_analysis(self, analysis: ArticleAnalysis, cache_version: str) -> None:
+        """Append a versioned successful result; never overwrite a prior version's payload."""
+
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO article_intelligence_analyses (
+                    article_fingerprint, model_version, cache_version, schema_version,
+                    analysis_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(article_fingerprint, model_version, cache_version, schema_version)
+                DO NOTHING
+                """,
+                (
+                    analysis.article_id,
+                    analysis.model_version,
+                    cache_version,
+                    analysis.schema_version,
+                    analysis.model_dump_json(),
+                    analysis.analysis_created_at.isoformat(),
+                ),
+            )
 
     def upsert_sentiments(self, articles: Iterable[ScoredArticle]) -> None:
         rows = [
@@ -339,6 +426,7 @@ def _row_to_scored_article(row: sqlite3.Row) -> ScoredArticle:
         fetched_at=datetime.fromisoformat(row["fetched_at"]),
         provider=row["provider"],
         relevance_score=row["relevance_score"],
+        snippet=row["snippet"],
         is_demo=bool(row["is_demo"]),
         label=row["label"],
         positive=row["positive"],
@@ -362,5 +450,6 @@ def _row_to_article(row: sqlite3.Row) -> Article:
         fetched_at=datetime.fromisoformat(row["fetched_at"]),
         provider=row["provider"],
         relevance_score=row["relevance_score"],
+        snippet=row["snippet"],
         is_demo=bool(row["is_demo"]),
     )
