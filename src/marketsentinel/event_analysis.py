@@ -43,7 +43,7 @@ from marketsentinel.ownership_patterns import text_describes_external_institutio
 from marketsentinel.storage.sqlite import SQLiteRepository
 from marketsentinel.timeutils import utc_now
 
-STAGE_A_PROMPT_VERSION = "event-extraction-v4"
+STAGE_A_PROMPT_VERSION = "event-extraction-v5"
 STAGE_B_PROMPT_VERSION = "claim-evidence-v1"
 STAGE_C_PROMPT_VERSION = "related-company-v5"
 ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v4"
@@ -59,13 +59,22 @@ record uncertainty.
 
 First distinguish a concrete corporate event from analyst commentary, opinion, a stock-price
 prediction, a vague roundup, or insufficient information. Do not turn predictions or opinions into
-established corporate facts. Event magnitude is not headline drama, sentiment strength, a
-stock-return probability, or confidence: it is the estimated qualitative economic or strategic
-significance of this event to the subject company. Calibrate it as follows: 0.00-0.10 for no
-concrete event, trivial external activity, or negligible company relevance; 0.10-0.30 for a minor
-event with limited likely significance; 0.30-0.55 for a meaningful operational or commercial event;
-0.55-0.80 for a major earnings, product, regulatory, or strategic event; and 0.80-1.00 only for an
-exceptional, transformative, or existential-scale event. Use 1.0 extremely rarely.
+established corporate facts. Stock-price movement, market-cap movement, investor reaction, trading
+demand, and valuation movement are market reactions, not the underlying subject-company economic
+event. When supplied text describes a market reaction caused by a corporate event, extract only the
+underlying corporate event and only when the supplied record describes it sufficiently. Do not use
+the market reaction as the main event or a transmission channel, and do not infer missing earnings,
+operating, or financial details. If the record supplies only market reaction without a sufficiently
+described underlying company event, prefer an other/non-material extraction consistent with the
+existing magnitude policy rather than manufacturing a high-impact event.
+
+Event magnitude is not headline drama, sentiment strength, a stock-return probability, or
+confidence: it is the estimated qualitative economic or strategic significance of this event to the
+subject company. Calibrate it as follows: 0.00-0.10 for no concrete event, trivial external activity,
+or negligible company relevance; 0.10-0.30 for a minor event with limited likely significance;
+0.30-0.55 for a meaningful operational or commercial event; 0.55-0.80 for a major earnings, product,
+regulatory, or strategic event; and 0.80-1.00 only for an exceptional, transformative, or
+existential-scale event. Use 1.0 extremely rarely.
 
 Extraction confidence is separate: it is confidence that the supplied text was correctly
 understood and its event, if any, correctly identified. It may be high for a low-magnitude event.
@@ -100,16 +109,20 @@ merely to fill a side.
 
 Each channel must be company-specific, economically interpretable, concise, distinct, causally tied
 to the event, and understandable without hidden reasoning. A channel must not merely restate the
-event. A channel must identify a concrete effect on the subject company's operations, revenue,
-costs, cash flow, supply/demand position, competitive position, regulatory exposure, execution
-burden, or capital allocation. Do not use share-price, valuation, investor-perception, reputation,
-sentiment, or generic uncertainty effects unless the event itself directly and concretely changes
-an operating or financial exposure. Name the specific company mechanism that changes. Omit a
-mechanism that cannot be stated concretely. Do not use generic statements such as market sentiment,
-investor sentiment, stock may rise or fall, analysts may react, positive or negative outlook, may
-affect business, could have an impact, uncertainty, or market reaction. Do not fabricate precise
-financial impacts, revenue amounts, probabilities, price targets, expected stock returns, or
-regulatory outcomes that are neither stated nor reasonably implied.
+event. A channel must identify a concrete causal change to the subject company's revenue or demand,
+costs, cash flow or capital commitment, operating capacity, supply availability or dependence,
+customer access or retention, competitive capability or market share, regulatory or legal exposure,
+execution requirements, or product development or delivery. Do not emit a channel whose primary
+effect is investor confidence or perception, stock demand, share price, market capitalization,
+generic valuation, brand or reputation alone, local employment, local economic activity, broad
+ecosystem benefit, generic market position, or generic growth potential unless the supplied evidence
+supports a concrete causal bridge to one of those subject-company operating or financial mechanisms.
+Name the specific company mechanism that changes. Omit a mechanism that cannot be stated concretely.
+Do not use generic statements such as market sentiment, investor sentiment, stock may rise or fall,
+analysts may react, positive or negative outlook, may affect business, could have an impact,
+uncertainty, or market reaction. Do not fabricate precise financial impacts, revenue amounts,
+probabilities, price targets, expected stock returns, or regulatory outcomes that are neither stated
+nor reasonably implied.
 
 Examples of the intended granularity include increasing available AI infrastructure capacity,
 expanding access to specialised compute, strengthening distribution through a new partnership,

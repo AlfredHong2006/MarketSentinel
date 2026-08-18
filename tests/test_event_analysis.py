@@ -229,14 +229,22 @@ class FakeResponses:
 
 def test_stage_a_prompt_version_and_core_channel_guidance_are_current() -> None:
     normalized_instructions = " ".join(_STAGE_A_INSTRUCTIONS.split())
-    assert STAGE_A_PROMPT_VERSION == "event-extraction-v4"
-    assert STAGE_A_PROMPT_VERSION != "event-extraction-v3"
+    assert STAGE_A_PROMPT_VERSION == "event-extraction-v5"
+    assert STAGE_A_PROMPT_VERSION != "event-extraction-v4"
     assert "concrete causal mechanism" in normalized_instructions
     assert "Never invent a channel" in normalized_instructions
     assert "Return at most three concise channels per side" in normalized_instructions
     assert "important_claims contain factual assertions" in normalized_instructions
-    assert "share-price, valuation, investor-perception" in normalized_instructions
+    assert "investor confidence or perception, stock demand" in normalized_instructions
     assert "not the time until the event begins" in normalized_instructions
+    assert "are market reactions, not the underlying subject-company economic event" in (
+        normalized_instructions
+    )
+    assert "do not infer missing earnings, operating, or financial details" in (
+        normalized_instructions
+    )
+    assert "local employment, local economic activity" in normalized_instructions
+    assert "subject company's revenue or demand" in normalized_instructions
     assert (
         "Do not choose uncertain merely because exact timing is absent" in normalized_instructions
     )
@@ -431,7 +439,7 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     assert (provider.stage_a_calls, provider.stage_b_calls, provider.stage_c_calls) == (1, 1, 1)
 
 
-def test_previous_stage_a_exact_cache_is_not_reused_by_current_service(
+def test_v4_stage_a_exact_cache_is_not_reused_by_v5_service(
     writable_tmp_path,
 ) -> None:
     provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
@@ -441,14 +449,14 @@ def test_previous_stage_a_exact_cache_is_not_reused_by_current_service(
         provider=provider,
         constituents=current_service.constituents,
         evidence_limit=current_service.evidence_limit,
-        stage_a_prompt_version="event-extraction-v3",
+        stage_a_prompt_version="event-extraction-v4",
     )
 
     previous = previous_service.analyze_article(primary.fingerprint)
     current = current_service.analyze_article(primary.fingerprint)
 
     assert previous.status == "generated"
-    assert previous.analysis.stage_a_prompt_version == "event-extraction-v3"
+    assert previous.analysis.stage_a_prompt_version == "event-extraction-v4"
     assert current.status == "generated"
     assert current.analysis.stage_a_prompt_version == STAGE_A_PROMPT_VERSION
     assert provider.stage_a_calls == 2
@@ -462,7 +470,7 @@ def test_previous_stage_a_exact_cache_is_not_reused_by_current_service(
                 (primary.fingerprint,),
             )
         }
-    assert any("a=event-extraction-v3" in value for value in stored_versions)
+    assert any("a=event-extraction-v4" in value for value in stored_versions)
     assert any(f"a={STAGE_A_PROMPT_VERSION}" in value for value in stored_versions)
 
 
