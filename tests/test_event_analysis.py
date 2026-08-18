@@ -1,4 +1,6 @@
+import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -32,6 +34,7 @@ from marketsentinel.event_analysis import (
     RelatedCompanyRequest,
     _article_reference,
     _candidate_companies,
+    _is_external_institutional_holding_change,
     _source_class,
 )
 from marketsentinel.storage.sqlite import SQLiteRepository
@@ -43,15 +46,21 @@ def event(
     confidence: float = 0.7,
     event_type: EventType = EventType.PARTNERSHIP,
     uncertainties: list[str] | None = None,
+    summary: str = "Acme announced a limited partnership with NVIDIA.",
+    important_claims: list[str] | None = None,
 ) -> EventExtraction:
     return EventExtraction(
         event_type=event_type,
-        summary="Acme announced a limited partnership with NVIDIA.",
+        summary=summary,
         direction=EventDirection.MIXED,
         magnitude=magnitude,
         time_horizon=TimeHorizon.MONTHS,
         model_confidence=confidence,
-        important_claims=["Acme announced a partnership with NVIDIA."],
+        important_claims=(
+            important_claims
+            if important_claims is not None
+            else ["Acme announced a partnership with NVIDIA."]
+        ),
         uncertainties=uncertainties
         if uncertainties is not None
         else ["Only headline and RSS snippet metadata were available."],
@@ -361,7 +370,7 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     provider = FakeProvider(
         event(magnitude=0.65, confidence=0.8), ClaimAssessments(), RelatedCompanyProposals()
     )
-    service, _, primary, _ = prepared_service(writable_tmp_path, provider)
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
 
     generated = service.analyze_article(primary.fingerprint)
     cached = service.analyze_article(primary.fingerprint)
@@ -372,7 +381,107 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     assert (
         generated.analysis.event.model_confidence == cached.analysis.event.model_confidence == 0.8
     )
+    with sqlite3.connect(repository.path) as connection:
+        cache_version = connection.execute(
+            "SELECT cache_version FROM article_intelligence_analyses WHERE article_fingerprint = ?",
+            (primary.fingerprint,),
+        ).fetchone()[0]
+    assert "c=related-company-v5" in cache_version
+    legacy_payload = generated.analysis.model_dump(mode="json")
+    legacy_payload.pop("evidence_strength")
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO article_intelligence_analyses (
+                article_fingerprint, model_version, cache_version, schema_version,
+                analysis_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                primary.fingerprint,
+                "legacy-model",
+                "legacy-cache",
+                "legacy-schema",
+                json.dumps(legacy_payload),
+                "9999-01-01T00:00:00+00:00",
+            ),
+        )
+    stored = repository.list_article_analyses("ACME")
+    assert [item.article_id for item in stored] == [primary.fingerprint]
     assert (provider.stage_a_calls, provider.stage_b_calls, provider.stage_c_calls) == (1, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "stage_a_prompt_version",
+        "stage_b_prompt_version",
+        "stage_c_prompt_version",
+        "schema_version",
+    ],
+)
+def test_analysis_compatibility_rejects_stale_display_interpretation_version(
+    writable_tmp_path, field: str
+) -> None:
+    provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    generated = service.analyze_article(primary.fingerprint).analysis
+    compatibility = service.compatibility
+
+    assert compatibility.accepts_for_display(generated)
+    assert compatibility.accepts_for_cache(
+        generated, evidence_fingerprint=generated.evidence_fingerprint
+    )
+    stale = generated.model_copy(update={field: "stale-version"})
+    assert not compatibility.accepts_for_display(stale)
+    assert not compatibility.accepts_for_cache(
+        stale, evidence_fingerprint=generated.evidence_fingerprint
+    )
+    repository.store_article_analysis(stale, f"stale-{field}")
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            "DELETE FROM article_intelligence_analyses WHERE cache_version != ?",
+            (f"stale-{field}",),
+        )
+
+    assert repository.list_article_analyses("ACME", compatibility=compatibility) == []
+
+
+def test_model_version_is_cache_strict_but_display_compatible(writable_tmp_path) -> None:
+    provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    generated = service.analyze_article(primary.fingerprint).analysis
+    changed_model = generated.model_copy(update={"model_version": "previous-model"})
+
+    assert service.compatibility.accepts_for_display(changed_model)
+    assert not service.compatibility.accepts_for_cache(
+        changed_model, evidence_fingerprint=generated.evidence_fingerprint
+    )
+    repository.store_article_analysis(changed_model, "previous-model")
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            "DELETE FROM article_intelligence_analyses WHERE cache_version != ?",
+            ("previous-model",),
+        )
+
+    assert repository.list_article_analyses("ACME", compatibility=service.compatibility) == [
+        changed_model
+    ]
+
+
+def test_v4_related_company_interpretation_is_not_displayed_under_v5(writable_tmp_path) -> None:
+    provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    generated = service.analyze_article(primary.fingerprint).analysis
+    v4_analysis = generated.model_copy(update={"stage_c_prompt_version": "related-company-v4"})
+    repository.store_article_analysis(v4_analysis, "related-company-v4")
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            "DELETE FROM article_intelligence_analyses WHERE cache_version != ?",
+            ("related-company-v4",),
+        )
+
+    assert repository.list_article_analyses("ACME", compatibility=service.compatibility) == []
 
 
 def test_genuine_zero_event_values_remain_zero(writable_tmp_path) -> None:
@@ -392,13 +501,20 @@ def test_genuine_zero_event_values_remain_zero(writable_tmp_path) -> None:
 
 def test_small_external_fund_purchase_is_not_a_subject_acquisition(writable_tmp_path) -> None:
     provider = FakeProvider(
-        event(magnitude=1.0, confidence=0.9, event_type=EventType.ACQUISITION),
+        event(
+            magnitude=1.0,
+            confidence=0.9,
+            event_type=EventType.ACQUISITION,
+            summary="GKV Capital Management acquires 9,902 Apple shares.",
+            important_claims=["GKV Capital Management acquires 9,902 Apple shares."],
+        ),
         ClaimAssessments(),
         RelatedCompanyProposals(related_companies=[proposal("MSFT"), proposal("GOOGL")]),
     )
     service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
     holding = primary.model_copy(
         update={
+            "fingerprint": "external-fund-purchase",
             "ticker": "AAPL",
             "title": "GKV Capital Management acquires 9,902 Apple shares",
             "snippet": "The investment manager increased its Apple stock position.",
@@ -418,13 +534,20 @@ def test_small_external_fund_purchase_is_not_a_subject_acquisition(writable_tmp_
 
 def test_small_external_fund_sale_has_low_magnitude_and_no_propagation(writable_tmp_path) -> None:
     provider = FakeProvider(
-        event(magnitude=0.5, confidence=0.8, event_type=EventType.OTHER),
+        event(
+            magnitude=0.5,
+            confidence=0.8,
+            event_type=EventType.OTHER,
+            summary="Concorde Asset Management LLC sells 3,255 Apple shares.",
+            important_claims=["Concorde Asset Management LLC sells 3,255 Apple shares."],
+        ),
         ClaimAssessments(),
         RelatedCompanyProposals(related_companies=[proposal("MSFT"), proposal("GOOGL")]),
     )
     service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
     holding = primary.model_copy(
         update={
+            "fingerprint": "external-fund-sale",
             "ticker": "AAPL",
             "title": "Concorde Asset Management LLC sells 3,255 Apple shares",
             "snippet": "The fund reduced its Apple holding.",
@@ -438,6 +561,101 @@ def test_small_external_fund_sale_has_low_magnitude_and_no_propagation(writable_
     assert response.analysis.event.magnitude == 0.1
     assert response.analysis.related_companies == []
     assert provider.stage_c_calls == 0
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Fund X acquires 5,301 shares of Apple Inc.",
+        "Berkshire buys 10 million shares of Apple",
+        "BlackRock sells $800m of Apple shares",
+        "Asset manager reduces its position in NVIDIA",
+        "Institution reports $800m holding in Apple",
+    ],
+)
+def test_external_institutional_holding_detector_requires_explicit_ownership(title: str) -> None:
+    article = make_article(title=title)
+    subject = (
+        CompanyReference(symbol="NVDA", name="NVIDIA")
+        if "NVIDIA" in title
+        else CompanyReference(symbol="AAPL", name="Apple Inc.")
+    )
+
+    assert _is_external_institutional_holding_change(article, subject)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Acme raises funding to acquire a supplier, sending shares higher",
+        "Apple acquires another company",
+        "NVIDIA shares rise after product launch",
+        "Institutional demand helps fund new semiconductor plant",
+    ],
+)
+def test_institutional_holding_detector_rejects_generic_keyword_overlap(title: str) -> None:
+    article = make_article(title=title)
+    subject = CompanyReference(symbol="AAPL", name="Apple Inc.")
+
+    assert not _is_external_institutional_holding_change(article, subject)
+
+
+def test_material_corporate_event_is_not_downgraded_by_generic_finance_words(
+    writable_tmp_path,
+) -> None:
+    provider = FakeProvider(
+        event(magnitude=0.8, confidence=0.9, event_type=EventType.ACQUISITION),
+        ClaimAssessments(),
+        RelatedCompanyProposals(),
+    )
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    material_event = primary.model_copy(
+        update={
+            "fingerprint": "material-corporate-acquisition",
+            "ticker": "AAPL",
+            "title": "Apple raises funding to acquire a supplier, sending shares higher",
+        }
+    )
+    repository.upsert_articles([material_event])
+
+    response = service.analyze_article(material_event.fingerprint)
+
+    assert response.analysis.event.event_type is EventType.ACQUISITION
+    assert response.analysis.event.magnitude == 0.8
+
+
+def test_primary_subject_investment_is_not_downgraded_by_an_incidental_holding_mention(
+    writable_tmp_path,
+) -> None:
+    provider = FakeProvider(
+        event(
+            magnitude=0.8,
+            confidence=0.9,
+            event_type=EventType.INVESTMENT,
+            summary="Apple announced a strategic investment in new manufacturing capacity.",
+            important_claims=[
+                "Apple announced a strategic investment in new manufacturing capacity."
+            ],
+        ),
+        ClaimAssessments(),
+        RelatedCompanyProposals(related_companies=[proposal("MSFT")]),
+    )
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    mixed_article = primary.model_copy(
+        update={
+            "fingerprint": "subject-investment-with-incidental-holding",
+            "ticker": "AAPL",
+            "title": "Fund reports $800m holding in Apple as Apple announces strategic investment",
+        }
+    )
+    repository.upsert_articles([mixed_article])
+
+    response = service.analyze_article(mixed_article.fingerprint)
+
+    assert response.status == "generated"
+    assert response.analysis.event.event_type is EventType.INVESTMENT
+    assert response.analysis.event.magnitude == 0.8
+    assert provider.stage_c_calls == 1
 
 
 def test_vague_forecast_preserves_zero_magnitude_and_uncertainty(writable_tmp_path) -> None:
@@ -458,6 +676,46 @@ def test_vague_forecast_preserves_zero_magnitude_and_uncertainty(writable_tmp_pa
     assert response.status == "generated"
     assert response.analysis.event.magnitude == 0.0
     assert response.analysis.event.uncertainties
+    assert response.analysis.related_companies == []
+    assert provider.stage_c_calls == 0
+
+
+def test_commentary_without_a_concrete_event_never_reaches_stage_c(writable_tmp_path) -> None:
+    provider = FakeProvider(
+        event(magnitude=0.0, confidence=0.0, event_type=EventType.UNCERTAIN),
+        ClaimAssessments(),
+        RelatedCompanyProposals(related_companies=[proposal("MSFT"), proposal("GOOGL")]),
+    )
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    commentary = primary.model_copy(
+        update={
+            "title": "Prediction: Apple faces an uncertain market outlook",
+            "source": "The Motley Fool",
+            "snippet": "Commentary offers no concrete company event.",
+        }
+    )
+    repository.upsert_articles([commentary])
+
+    response = service.analyze_article(commentary.fingerprint)
+
+    assert response.status == "generated"
+    assert response.analysis.related_companies == []
+    assert provider.stage_c_calls == 0
+
+
+def test_concrete_material_event_still_allows_related_company_analysis(writable_tmp_path) -> None:
+    provider = FakeProvider(
+        event(magnitude=0.65, confidence=0.9, event_type=EventType.PARTNERSHIP),
+        ClaimAssessments(),
+        RelatedCompanyProposals(related_companies=[proposal("AMD")]),
+    )
+    service, _, primary, _ = prepared_service(writable_tmp_path, provider, nvda=True)
+
+    response = service.analyze_article(primary.fingerprint)
+
+    assert response.status == "generated"
+    assert [item.ticker for item in response.analysis.related_companies] == ["AMD"]
+    assert provider.stage_c_calls == 1
 
 
 def test_major_investment_can_remain_meaningful_with_high_extraction_confidence(
@@ -593,6 +851,88 @@ def test_candidates_prioritise_mentions_then_add_manual_peers() -> None:
     assert [item.symbol for item in candidates] == ["AMD", "AVGO", "INTC"]
 
 
+@pytest.mark.parametrize(
+    "title",
+    ["on the market", "also announced", "general outlook", "large increase"],
+)
+def test_short_ticker_candidates_do_not_match_ordinary_words(title: str) -> None:
+    companies = [
+        Constituent(symbol="ON", yahoo_symbol="ON", name="ON Semiconductor", market="S&P 500"),
+        Constituent(symbol="SO", yahoo_symbol="SO", name="Southern Company", market="S&P 500"),
+        Constituent(symbol="GE", yahoo_symbol="GE", name="GE Aerospace", market="S&P 500"),
+    ]
+    article = make_article(title=title)
+    subject = CompanyReference(symbol="ACME", name="Acme Corporation")
+
+    assert _candidate_companies(companies, [article], subject) == []
+
+
+@pytest.mark.parametrize(
+    "title", ["all investors are considering the news now", "now is a good time"]
+)
+def test_long_common_word_tickers_do_not_match_lowercase_prose(title: str) -> None:
+    companies = [
+        Constituent(symbol="ALL", yahoo_symbol="ALL", name="Allstate", market="S&P 500"),
+        Constituent(
+            symbol="ARE", yahoo_symbol="ARE", name="Alexandria Real Estate", market="S&P 500"
+        ),
+        Constituent(symbol="NOW", yahoo_symbol="NOW", name="ServiceNow", market="S&P 500"),
+    ]
+    article = make_article(title=title)
+    subject = CompanyReference(symbol="ACME", name="Acme Corporation")
+
+    assert _candidate_companies(companies, [article], subject) == []
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("ALL reports earnings", ["ALL"]),
+        ("NYSE: ARE announces a project", ["ARE"]),
+        ("$now wins a contract", ["NOW"]),
+        ("Apple completes a deal with ServiceNow", ["NOW", "AAPL"]),
+    ],
+)
+def test_candidate_matching_accepts_uppercase_or_explicit_tickers_and_legal_suffixes(
+    title, expected
+) -> None:
+    companies = [
+        Constituent(symbol="ALL", yahoo_symbol="ALL", name="Allstate", market="S&P 500"),
+        Constituent(
+            symbol="ARE", yahoo_symbol="ARE", name="Alexandria Real Estate", market="S&P 500"
+        ),
+        Constituent(symbol="NOW", yahoo_symbol="NOW", name="ServiceNow", market="S&P 500"),
+        Constituent(symbol="AAPL", yahoo_symbol="AAPL", name="Apple Inc.", market="S&P 500"),
+    ]
+    article = make_article(title=title)
+    subject = CompanyReference(symbol="ACME", name="Acme Corporation")
+
+    assert [item.symbol for item in _candidate_companies(companies, [article], subject)] == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("ON Semiconductor reports results", ["ON"]),
+        ("$ON wins a new contract", ["ON"]),
+        ("GE Aerospace expands capacity", ["GE"]),
+        ("NYSE: GE announces results", ["GE"]),
+        ("AAPL and NVDA announce a partnership", ["AAPL", "NVDA"]),
+    ],
+)
+def test_candidate_matching_preserves_unambiguous_company_references(title, expected) -> None:
+    companies = [
+        Constituent(symbol="ON", yahoo_symbol="ON", name="ON Semiconductor", market="S&P 500"),
+        Constituent(symbol="GE", yahoo_symbol="GE", name="GE Aerospace", market="S&P 500"),
+        Constituent(symbol="AAPL", yahoo_symbol="AAPL", name="Apple Inc.", market="S&P 500"),
+        Constituent(symbol="NVDA", yahoo_symbol="NVDA", name="NVIDIA", market="S&P 500"),
+    ]
+    article = make_article(title=title)
+    subject = CompanyReference(symbol="ACME", name="Acme Corporation")
+
+    assert [item.symbol for item in _candidate_companies(companies, [article], subject)] == expected
+
+
 def test_stage_c_can_return_no_companies(writable_tmp_path) -> None:
     provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
     service, _, primary, _ = prepared_service(writable_tmp_path, provider, nvda=True)
@@ -625,6 +965,11 @@ def test_api_returns_generated_then_cached(writable_tmp_path) -> None:
 
     assert generated.json()["status"] == "generated"
     assert cached.json()["status"] == "cached"
+    assert 0 <= generated.json()["analysis"]["evidence_strength"] <= 1
+    assert (
+        generated.json()["analysis"]["evidence_strength"]
+        == cached.json()["analysis"]["evidence_strength"]
+    )
     assert generated.json()["analysis"]["event"]["magnitude"] == 0.5
     assert generated.json()["analysis"]["event"]["model_confidence"] == 0.7
 

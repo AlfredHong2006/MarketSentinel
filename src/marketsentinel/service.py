@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from marketsentinel.aggregation.sentiment import aggregate_daily_sentiment
+from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import (
     AnalysisResult,
@@ -43,6 +44,7 @@ class MarketAnalysisService:
         historical_news_days: int = 30,
         historical_news_max_articles: int = 180,
         sentiment_half_life_hours: float = 24.0,
+        article_analysis_compatibility: ArticleAnalysisCompatibility | None = None,
     ) -> None:
         self.constituents = constituents
         self.news = news
@@ -56,6 +58,7 @@ class MarketAnalysisService:
         self.historical_news_days = historical_news_days
         self.historical_news_max_articles = historical_news_max_articles
         self.sentiment_half_life_hours = sentiment_half_life_hours
+        self.article_analysis_compatibility = article_analysis_compatibility
 
     def analyze(self, symbol: str) -> AnalysisResult:
         constituent = self.constituents.resolve(symbol)
@@ -155,17 +158,28 @@ class MarketAnalysisService:
         forecast = self.forecaster.forecast(price_history.points, stored_daily)
 
         display_articles = real_articles or stored_articles
+        latest_price_date = price_history.points[-1].date
+        display_price_cutoff = latest_price_date - timedelta(days=366)
         display_history = PriceHistory(
             symbol=price_history.symbol,
-            points=price_history.points[-30:],
+            points=[point for point in price_history.points if point.date >= display_price_cutoff],
             source=price_history.source,
             fetched_at=price_history.fetched_at,
         )
+        stored_analyses = self.repository.list_article_analyses(
+            constituent.symbol,
+            since=now - timedelta(days=366),
+            compatibility=self.article_analysis_compatibility,
+        )
+        analyzed_events = [item.to_analyzed_event() for item in stored_analyses]
+        intelligence_events = [item.to_company_intelligence_event() for item in stored_analyses]
         return AnalysisResult(
             constituent=constituent,
             price_history=display_history,
             articles=display_articles,
             daily_sentiment=stored_daily,
+            analyzed_events=analyzed_events,
+            intelligence_events=intelligence_events,
             forecast=forecast,
             source_health=[price_health, *historical_health, *news_health],
             ingestion_funnel=provider_funnel.model_copy(

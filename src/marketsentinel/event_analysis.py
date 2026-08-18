@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 
+from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.domain import (
     Article,
     ArticleAnalysis,
@@ -37,13 +38,14 @@ from marketsentinel.errors import (
     ArticleAnalysisUnavailableError,
     ArticleAnalysisValidationError,
 )
+from marketsentinel.event_policy import is_meaningful_event
 from marketsentinel.storage.sqlite import SQLiteRepository
 from marketsentinel.timeutils import utc_now
 
 STAGE_A_PROMPT_VERSION = "event-extraction-v3"
 STAGE_B_PROMPT_VERSION = "claim-evidence-v1"
-STAGE_C_PROMPT_VERSION = "related-company-v3"
-ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v3"
+STAGE_C_PROMPT_VERSION = "related-company-v5"
+ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v4"
 _MAX_RECORD_TEXT = 4_000
 _MAX_EVIDENCE_CANDIDATES = 40
 LOGGER = logging.getLogger(__name__)
@@ -332,6 +334,18 @@ class ArticleEventAnalysisService:
             f"c={self.stage_c_prompt_version}"
         )
 
+    @property
+    def compatibility(self) -> ArticleAnalysisCompatibility:
+        """Display/cache interpretation contract for this running analysis implementation."""
+
+        return ArticleAnalysisCompatibility(
+            model_version=self.provider.model_version,
+            stage_a_prompt_version=self.stage_a_prompt_version,
+            stage_b_prompt_version=self.stage_b_prompt_version,
+            stage_c_prompt_version=self.stage_c_prompt_version,
+            schema_version=self.schema_version,
+        )
+
     def analyze_article(self, article_id: str) -> ArticleAnalysisResponse:
         article = self.repository.get_article(article_id)
         if article is None:
@@ -352,7 +366,9 @@ class ArticleEventAnalysisService:
             cached = self.repository.get_article_analysis(
                 article_id, self.provider.model_version, cache_version, self.schema_version
             )
-            if cached is not None:
+            if cached is not None and self.compatibility.accepts_for_cache(
+                cached, evidence_fingerprint=context.evidence_fingerprint
+            ):
                 LOGGER.info("Article intelligence cache: status=hit article_id=%s", article_id)
                 return ArticleAnalysisResponse(
                     article_id=article_id, status="cached", analysis=cached
@@ -435,7 +451,7 @@ class ArticleEventAnalysisService:
                 _bounded_text(article.snippet),
                 _source_class(article.source, article.url, article.title),
             ),
-            _is_external_institutional_holding_change(article),
+            _is_external_institutional_holding_change(article, subject),
         )
 
     def _assess_claims(
@@ -490,10 +506,9 @@ class ArticleEventAnalysisService:
     def _select_related(
         self, event: EventExtraction, context: "_AnalysisContext"
     ) -> list[RelatedCompanyAnalysis]:
-        if context.is_external_institutional_holding:
+        if not _event_supports_related_company_analysis(event, context):
             LOGGER.info(
-                "Article intelligence normalisation: stage=stage_c "
-                "action=skip_external_institutional_holding"
+                "Article intelligence normalisation: stage=stage_c action=skip_ineligible_event"
             )
             return []
         if not context.candidates:
@@ -566,38 +581,31 @@ def _bounded_text(value: str | None) -> str | None:
     return value[:_MAX_RECORD_TEXT] if value else None
 
 
-def _is_external_institutional_holding_change(article: Article) -> bool:
-    """Identify unambiguous third-party holding news without interpreting article instructions."""
+def _is_external_institutional_holding_change(article: Article, subject: CompanyReference) -> bool:
+    """Detect explicit third-party ownership changes in the selected company's security.
 
-    text = f"{article.title} {article.snippet or ''}".casefold()
-    investor_terms = (
-        "asset management",
-        "investment partners",
-        "investment management",
-        "capital management",
-        "hedge fund",
-        "institutional",
-        "fund",
-        " llc",
-        " lp",
-        " llp",
+    This intentionally favors false negatives: generic references to funding, shares,
+    acquisitions, or institutional activity must not downgrade a real company event.
+    """
+
+    return _text_describes_external_institutional_holding(
+        f"{article.title} {article.snippet or ''}", subject
     )
-    holding_terms = ("share", "stock position", "holding", "stake")
-    change_terms = (
-        "buy",
-        "sell",
-        "acquir",
-        "increased",
-        "decreased",
-        "raised",
-        "lowered",
-        "trimmed",
+
+
+def _text_describes_external_institutional_holding(text: str, subject: CompanyReference) -> bool:
+    """Recognize explicit ownership reporting without treating generic finance terms as signals."""
+
+    text = text.casefold()
+    subject_pattern = _company_reference_pattern(subject)
+    external_actor = r"\b(?:fund|hedge fund|asset manager|investment manager|investment management|capital management|capital partners|institution(?:al investor)?|investors?|berkshire|blackrock|vanguard|llc|lp|llp)\b"
+    owned_security = (
+        rf"(?:shares?\s+(?:of|in)\s+{subject_pattern}|(?:of\s+)?{subject_pattern}\s+shares?)"
     )
-    return (
-        any(term in text for term in investor_terms)
-        and any(term in text for term in holding_terms)
-        and any(term in text for term in change_terms)
-    )
+    owned_position = rf"(?:\b(?:position|stake|holding)s?\s+(?:in|of)\s+{subject_pattern}|{subject_pattern}\s+(?:position|stake|holding)s?)"
+    quantity = r"(?:[$£€]?\d[\d,.]*(?:\s?(?:k|m|bn|b|thousand|million|billion))?\s+)?"
+    ownership_change = rf"(?:{external_actor}).{{0,100}}?(?:\b(?:buy|buys|bought|sell|sells|sold|acquire|acquires|acquired|purchase|purchases|purchased)\b\s+{quantity}{owned_security}|\b(?:raise|raises|raised|reduce|reduces|reduced|increase|increases|increased|decrease|decreases|decreased|trim|trims|trimmed|take|takes|took)\b\s+(?:its\s+)?{owned_position}|\b(?:report|reports|reported|disclose|discloses|disclosed)\b.{{0,80}}?{quantity}{owned_position})"
+    return re.search(ownership_change, text) is not None
 
 
 def _normalise_external_institutional_holding(
@@ -605,7 +613,7 @@ def _normalise_external_institutional_holding(
 ) -> EventExtraction:
     """Keep a clearly external holding change from becoming a subject-company transaction."""
 
-    if not context.is_external_institutional_holding:
+    if not _primary_event_is_external_institutional_holding(event, context):
         return event
     normalised = event.model_copy(
         update={"event_type": EventType.OTHER, "magnitude": min(event.magnitude, 0.1)}
@@ -619,6 +627,38 @@ def _normalise_external_institutional_holding(
         normalised.magnitude,
     )
     return normalised
+
+
+def _primary_event_is_external_institutional_holding(
+    event: EventExtraction, context: _AnalysisContext
+) -> bool:
+    """Only override Stage A when its own extracted event is the ownership change."""
+
+    if not context.is_external_institutional_holding:
+        return False
+    return any(
+        _text_describes_external_institutional_holding(text, context.subject_company)
+        for text in (event.summary, *event.important_claims)
+    )
+
+
+def _event_supports_related_company_analysis(
+    event: EventExtraction, context: _AnalysisContext
+) -> bool:
+    """Return whether this is a concrete, material event worth propagating to peers.
+
+    Stage C is intentionally not a general company-association search.  The guard is
+    deterministic so commentary, predictions, vague roundups, and small third-party
+    holding changes cannot create related-company output merely because a model was
+    asked to suggest connections.
+    """
+
+    return is_meaningful_event(
+        event,
+        is_external_institutional_holding=_primary_event_is_external_institutional_holding(
+            event, context
+        ),
+    )
 
 
 def _evidence_strength(context: _AnalysisContext, claims: Sequence[ClaimAssessment]) -> float:
@@ -754,15 +794,15 @@ def _candidate_companies(
     articles: Sequence[Article],
     subject: CompanyReference,
 ) -> list[CompanyReference]:
-    corpus = " ".join(f"{article.title} {article.snippet or ''}".casefold() for article in articles)
+    raw_corpus = " ".join(f"{article.title} {article.snippet or ''}" for article in articles)
+    named_entity_corpus = raw_corpus.casefold()
     by_symbol = {company.symbol.upper(): company for company in constituents}
     matches: list[CompanyReference] = []
     selected: set[str] = set()
     for company in constituents:
         if company.symbol.upper() == subject.symbol.upper():
             continue
-        terms = (company.name, company.symbol, *company.aliases)
-        if any(term.casefold() in corpus for term in terms if len(term) > 1):
+        if _company_is_mentioned(company, named_entity_corpus, raw_corpus):
             matches.append(CompanyReference(symbol=company.symbol.upper(), name=company.name))
             selected.add(company.symbol.upper())
     for symbol in _CURATED_PEER_SYMBOLS.get(subject.symbol.upper(), ()):
@@ -771,6 +811,74 @@ def _candidate_companies(
             matches.append(CompanyReference(symbol=company.symbol.upper(), name=company.name))
             selected.add(symbol)
     return matches
+
+
+def _company_is_mentioned(company: Constituent, named_entity_corpus: str, raw_corpus: str) -> bool:
+    """Match companies as named entities or discrete ticker references, never substrings."""
+
+    named_terms = (
+        *_company_name_variants(company.name),
+        *(alias for alias in company.aliases if len(alias) > 2),
+    )
+    if any(_phrase_is_mentioned(term, named_entity_corpus) for term in named_terms):
+        return True
+    ticker = company.symbol
+    escaped_ticker = re.escape(ticker)
+    if len(ticker) <= 2:
+        return (
+            re.search(
+                rf"(?:\${escaped_ticker}\b|\b(?:nasdaq|nyse|lse)\s*:\s*{escaped_ticker}\b)",
+                raw_corpus,
+                re.IGNORECASE,
+            )
+            is not None
+        )
+    explicit_reference = re.search(
+        rf"(?:\${escaped_ticker}\b|\b(?:nasdaq|nyse|lse)\s*:\s*{escaped_ticker}\b)",
+        raw_corpus,
+        re.IGNORECASE,
+    )
+    if explicit_reference is not None:
+        return True
+    return re.search(rf"(?<![A-Za-z0-9]){escaped_ticker}(?![A-Za-z0-9])", raw_corpus) is not None
+
+
+def _company_reference_pattern(subject: CompanyReference) -> str:
+    """Return a boundary-aware pattern for a selected company name or ticker."""
+
+    names = _company_name_variants(subject.name)
+    patterns = [_phrase_pattern(name) for name in names if name]
+    ticker = re.escape(subject.symbol.casefold())
+    if len(subject.symbol) <= 2:
+        patterns.append(rf"(?:\${ticker}\b|\b(?:nasdaq|nyse|lse)\s*:\s*{ticker}\b)")
+    else:
+        patterns.append(rf"(?<![a-z0-9]){ticker}(?![a-z0-9])")
+    return rf"(?:{'|'.join(patterns)})"
+
+
+_LEGAL_SUFFIX_PATTERN = re.compile(
+    r"\s+(?:inc\.?|incorporated|corporation|corp\.?|plc|ltd\.?|limited|llc|llp|lp)$",
+    re.I,
+)
+_TRAILING_PARENTHETICAL_PATTERN = re.compile(r"\s*\([^)]*\)$")
+
+
+def _company_name_variants(name: str) -> set[str]:
+    """Return the canonical name plus safe legal-suffix and share-class variants."""
+
+    without_parenthetical = _TRAILING_PARENTHETICAL_PATTERN.sub("", name).strip()
+    variants = {name, without_parenthetical}
+    variants.update(_LEGAL_SUFFIX_PATTERN.sub("", value).strip() for value in tuple(variants))
+    return {value for value in variants if value}
+
+
+def _phrase_is_mentioned(phrase: str, corpus: str) -> bool:
+    return re.search(_phrase_pattern(phrase), corpus) is not None
+
+
+def _phrase_pattern(phrase: str) -> str:
+    escaped = re.escape(phrase.casefold()).replace(r"\ ", r"\s+")
+    return rf"(?<![a-z0-9]){escaped}(?![a-z0-9])"
 
 
 def _related_analysis(

@@ -138,6 +138,20 @@ class PriceHistory(BaseModel):
     fetched_at: datetime
 
 
+class AnalyzedEvent(BaseModel):
+    """Compact product-facing view of one genuine stored article analysis."""
+
+    article_id: str
+    event_date: date
+    article_url: str
+    event_type: str
+    summary: str
+    direction: str
+    magnitude: float = Field(ge=0, le=1)
+    extraction_confidence: float = Field(ge=0, le=1)
+    evidence_strength: float = Field(ge=0, le=1)
+
+
 class ForecastMetrics(BaseModel):
     validation_accuracy: float = Field(ge=0, le=1)
     majority_baseline_accuracy: float = Field(ge=0, le=1)
@@ -165,6 +179,8 @@ class AnalysisResult(BaseModel):
     price_history: PriceHistory
     articles: list[ScoredArticle]
     daily_sentiment: list[DailySentiment]
+    analyzed_events: list[AnalyzedEvent] = Field(default_factory=list)
+    intelligence_events: list["CompanyIntelligenceEvent"] = Field(default_factory=list)
     forecast: ForecastResult
     source_health: list[SourceHealth]
     ingestion_funnel: IngestionFunnel
@@ -328,6 +344,52 @@ class ArticleAnalysis(BaseModel):
     schema_version: str = Field(min_length=1, max_length=100)
     analysis_created_at: datetime
 
+    def to_analyzed_event(self) -> AnalyzedEvent:
+        """Project one compatible stored analysis into the dashboard marker contract."""
+
+        return AnalyzedEvent(
+            article_id=self.article_id,
+            event_date=self.source_reference.published_at.date(),
+            article_url=self.source_reference.url,
+            event_type=self.event.event_type,
+            summary=self.event.summary,
+            direction=self.event.direction,
+            magnitude=self.event.magnitude,
+            extraction_confidence=self.event.model_confidence,
+            evidence_strength=self.evidence_strength,
+        )
+
+    def to_company_intelligence_event(self) -> "CompanyIntelligenceEvent":
+        """Project compatible stored analysis into the product intelligence contract."""
+
+        return CompanyIntelligenceEvent(
+            article_id=self.article_id,
+            source_reference=self.source_reference,
+            source_class=self.source_class,
+            subject_company=self.subject_company,
+            event=self.event,
+            claims=self.claims,
+            related_companies=self.related_companies,
+            evidence_strength=self.evidence_strength,
+            evidence_sources=self.evidence_sources,
+        )
+
+
+class CompanyIntelligenceEvent(BaseModel):
+    """Product-facing stored event detail for the dashboard's intelligence section."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    article_id: str = Field(min_length=1, max_length=128)
+    source_reference: ArticleEvidenceReference
+    source_class: SourceClass
+    subject_company: CompanyReference
+    event: EventExtraction
+    claims: list[ClaimAssessment] = Field(default_factory=list, max_length=8)
+    related_companies: list[RelatedCompanyAnalysis] = Field(default_factory=list, max_length=10)
+    evidence_strength: float = Field(ge=0, le=1)
+    evidence_sources: list[ArticleEvidenceReference] = Field(default_factory=list, max_length=8)
+
 
 class ArticleAnalysisResponse(BaseModel):
     """Safe on-demand API result; a failure never substitutes a made-up analysis."""
@@ -336,3 +398,6 @@ class ArticleAnalysisResponse(BaseModel):
     status: Literal["cached", "generated", "unavailable", "failed", "not_found"]
     analysis: ArticleAnalysis | None = None
     message: str | None = None
+
+
+AnalysisResult.model_rebuild()
