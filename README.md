@@ -23,6 +23,8 @@ experimental five-trading-day direction baseline behind a FastAPI API and Stream
 - Lazily loads `ProsusAI/finbert`, scores new headlines in batches, and maps logits through
   `model.config.id2label` rather than assuming label order.
 - Stores articles, FinBERT results, and daily aggregates in SQLite.
+- Optionally extracts cached structured event facts, concrete positive and negative transmission
+  channels, and a broad economic-consequence persistence horizon from genuine stored articles.
 - Shows only genuine, scored historical sentiment dates, a three-observation weighted trend, and
   article coverage. It never fills a missing day with neutral sentiment.
 - Produces an experimental probability that the adjusted close will be higher in five trading

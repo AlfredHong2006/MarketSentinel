@@ -15,7 +15,10 @@ from marketsentinel.ownership_patterns import (
 )
 
 MIN_USEFUL_RELEVANCE = 0.5
+MEDIUM_RELEVANCE_THRESHOLD = 0.70
+HIGH_RELEVANCE_THRESHOLD = 0.85
 DEFAULT_PUBLISHER_CAP = 3
+DEFAULT_OFFICIAL_COMPANY_CAP = 3
 NEAR_TITLE_WINDOW_HOURS = 48
 NEAR_TITLE_OVERLAP = 0.75
 
@@ -35,6 +38,40 @@ _PREDICTION_PATTERNS = (
     re.compile(r"\bwill\b.{0,45}\b(?:stock|shares?)\b.{0,20}\b(?:rise|fall|go up|drop)\b", re.I),
     re.compile(r"\bwhere will\b.{0,45}\b(?:stock|shares?)\b", re.I),
     re.compile(r"\b(?:stock|shares?)\b.{0,25}\b(?:overvalued|undervalued)\b", re.I),
+)
+_MARKET_REACTION_ONLY_PATTERNS = (
+    re.compile(r"\bstocks?\s+making\s+the\s+biggest\s+moves\b", re.I),
+    re.compile(r"\bprice\s+today\b.*\b(?:live|chart|market\s+data)\b", re.I),
+    # A record/biggest + market-capitalisation rule was removed: "record" and "biggest" are the
+    # commonest earnings and buyback adjectives, so it rejected genuine results announcements
+    # while failing to catch the pure market-value milestone it targeted.
+    re.compile(
+        r"\bshares?\s+(?:are\s+)?(?:surging|soaring|jumping|falling|sliding)\b"
+        r".{0,80}\b(?:make\s+money|trade|trading)\b",
+        re.I,
+    ),
+)
+_EXTERNAL_OWNER_MARKER = (
+    r"(?:advisors?|advisory|associates?|asset\s+manag(?:e)?ment|capital\s+partners|"
+    r"financial\s+partners?|"
+    r"investment\s+(?:manager|management|partners?)|investments|"
+    r"institution(?:al\s+investor)?|"
+    r"investors?|fund|hedge\s+fund|retirement\s+systems?|llc|llp|l\s*p|ltd|limited)"
+)
+_EXTERNAL_ENTITY_MARKER = (
+    rf"(?:{_EXTERNAL_OWNER_MARKER}|co|company|corp|corporation|group|inc|partners|plc|trust)"
+)
+_OWNERSHIP_ACTION = (
+    r"(?:buy|buys|bought|sell|sells|sold|acquire|acquires|acquired|purchase|purchases|purchased)"
+)
+_OWNED_SECURITY_NOUN = re.compile(r"\b(?:shares?|stakes?|positions?|holdings?)\b")
+_CORPORATE_NAME_TOKEN = r"(?:inc|incorporated|corp|corporation|llc|llp|ltd|limited|plc|trust)"
+# Routine Rule 10b5-1 sales are pre-scheduled and non-discretionary, so they are not company
+# events. Both the literal marker and an explicit sale/disposition are required: a title merely
+# mentioning a plan (for example cancelling one) stays eligible.
+_RULE_10B5_1_MARKER = re.compile(r"\b10b5[-\s]?1\b", re.I)
+_RULE_10B5_1_DISPOSAL = re.compile(
+    r"\b(?:sell|sells|selling|sold|sale|sales|dispose[sd]?|disposal|disposition)\b", re.I
 )
 _SUBJECT_ACTIONS = (
     "acquire",
@@ -116,6 +153,7 @@ def select_analysis_candidates(
     subject_company: CompanyIdentity,
     relevance_floor: float = MIN_USEFUL_RELEVANCE,
     publisher_cap: int = DEFAULT_PUBLISHER_CAP,
+    official_company_cap: int = DEFAULT_OFFICIAL_COMPANY_CAP,
 ) -> list[Article]:
     """Return an ordered candidate list with no I/O or implicit clock access."""
 
@@ -127,6 +165,7 @@ def select_analysis_candidates(
             subject_company=subject_company,
             relevance_floor=relevance_floor,
             publisher_cap=publisher_cap,
+            official_company_cap=official_company_cap,
         ).candidates
     )
 
@@ -139,6 +178,7 @@ def select_analysis_candidates_with_diagnostics(
     subject_company: CompanyIdentity,
     relevance_floor: float = MIN_USEFUL_RELEVANCE,
     publisher_cap: int = DEFAULT_PUBLISHER_CAP,
+    official_company_cap: int = DEFAULT_OFFICIAL_COMPANY_CAP,
 ) -> CandidateSelection:
     """Filter, rank, and diversify candidates deterministically."""
 
@@ -146,10 +186,13 @@ def select_analysis_candidates_with_diagnostics(
         raise ValueError("candidate limit must be between 0 and 40")
     if publisher_cap < 1:
         raise ValueError("publisher cap must be at least 1")
+    if official_company_cap < 1:
+        raise ValueError("official company cap must be at least 1")
 
     eligible: list[Article] = []
     demo_rejected = low_relevance_rejected = obvious_holdings_rejected = 0
-    excluded_prediction = commentary_deprioritized = 0
+    excluded_prediction = commentary_deprioritized = market_reaction_rejected = 0
+    scheduled_insider_sale_rejected = 0
     for article in articles:
         if article.is_demo:
             demo_rejected += 1
@@ -163,6 +206,12 @@ def select_analysis_candidates_with_diagnostics(
         if _is_obvious_prediction(article.title):
             excluded_prediction += 1
             continue
+        if _is_market_reaction_only(article.title):
+            market_reaction_rejected += 1
+            continue
+        if _is_routine_rule_10b5_1_sale(article.title, subject_company):
+            scheduled_insider_sale_rejected += 1
+            continue
         if (
             classify_article_source(article.source, article.url, article.title)
             is SourceClass.COMMENTARY_OR_OPINION
@@ -173,12 +222,20 @@ def select_analysis_candidates_with_diagnostics(
     ranked = sorted(eligible, key=lambda article: _ranking_key(article, now))
     accepted: list[Article] = []
     publisher_counts: Counter[str] = Counter()
-    publisher_cap_rejected = near_title_rejected = 0
+    official_company_count = 0
+    publisher_cap_rejected = official_family_cap_rejected = near_title_rejected = 0
     for article in ranked:
         if len(accepted) >= limit:
             break
         if any(_near_title(article, previous) for previous in accepted):
             near_title_rejected += 1
+            continue
+        source_class = classify_article_source(article.source, article.url, article.title)
+        if (
+            source_class is SourceClass.OFFICIAL_COMPANY
+            and official_company_count >= official_company_cap
+        ):
+            official_family_cap_rejected += 1
             continue
         publisher = normalize_text(article.source) or "unknown source"
         if publisher_counts[publisher] >= publisher_cap:
@@ -186,6 +243,8 @@ def select_analysis_candidates_with_diagnostics(
             continue
         accepted.append(article)
         publisher_counts[publisher] += 1
+        if source_class is SourceClass.OFFICIAL_COMPANY:
+            official_company_count += 1
 
     diagnostics = AutomaticAnalysisDiagnostics(
         considered=len(articles),
@@ -196,34 +255,129 @@ def select_analysis_candidates_with_diagnostics(
         excluded_prediction=excluded_prediction,
         commentary_deprioritized=commentary_deprioritized,
         publisher_cap_rejected=publisher_cap_rejected,
+        official_family_cap_rejected=official_family_cap_rejected,
         near_title_rejected=near_title_rejected,
+        market_reaction_rejected=market_reaction_rejected,
+        scheduled_insider_sale_rejected=scheduled_insider_sale_rejected,
     )
     return CandidateSelection(tuple(accepted), diagnostics)
 
 
-def _ranking_key(article: Article, now: datetime) -> tuple[float, float, float, str]:
+def _ranking_key(article: Article, now: datetime) -> tuple[float, int, float, float, str]:
     source_class = classify_article_source(article.source, article.url, article.title)
     age_seconds = max(0.0, (now - article.published_at).total_seconds())
     return (
         -float(SOURCE_PRIORITY[source_class]),
-        -article.relevance_score,
+        -_relevance_band(article.relevance_score),
         age_seconds,
+        -article.relevance_score,
         article.fingerprint,
     )
+
+
+def _relevance_band(relevance_score: float) -> int:
+    if relevance_score >= HIGH_RELEVANCE_THRESHOLD:
+        return 2
+    if relevance_score >= MEDIUM_RELEVANCE_THRESHOLD:
+        return 1
+    return 0
 
 
 def _is_obvious_prediction(title: str) -> bool:
     return any(pattern.search(title) is not None for pattern in _PREDICTION_PATTERNS)
 
 
-def _is_obvious_holding_title(title: str, subject: CompanyIdentity) -> bool:
-    if not text_describes_external_institutional_holding(title, subject):
+def _is_market_reaction_only(title: str) -> bool:
+    return any(pattern.search(title) is not None for pattern in _MARKET_REACTION_ONLY_PATTERNS)
+
+
+def _is_routine_rule_10b5_1_sale(title: str, subject: CompanyIdentity) -> bool:
+    """Reject a pre-scheduled insider disposal, never a mere mention of a trading plan.
+
+    The raw title is used so the hyphenated rule marker stays detectable, and the shared
+    subject-company-action escape hatch still applies.
+    """
+
+    if _RULE_10B5_1_MARKER.search(title) is None:
+        return False
+    if _RULE_10B5_1_DISPOSAL.search(title) is None:
         return False
     return not _title_contains_subject_company_action(title, subject)
 
 
-def _title_contains_subject_company_action(title: str, subject: CompanyIdentity) -> bool:
+def _is_obvious_holding_title(title: str, subject: CompanyIdentity) -> bool:
+    """Reject external portfolio updates only when the subject itself took no action.
+
+    Every ownership-title path shares one escape hatch: a title that also states a genuine
+    subject-company action is never treated as a routine third-party holding report.
+    """
+
+    if not (
+        _title_has_reverse_external_holding_structure(title, subject)
+        or text_describes_external_institutional_holding(title, subject)
+    ):
+        return False
+    return not _title_contains_subject_company_action(title, subject)
+
+
+def _title_has_reverse_external_holding_structure(title: str, subject: CompanyIdentity) -> bool:
     normalized = normalize_text(title)
+    subject_names = _subject_names(subject)
+    quantity = r"(?:\$?\d[\d ]*(?:k|m|bn|b|thousand|million|billion)?\s+)?"
+    for name in sorted(subject_names, key=len, reverse=True):
+        subject_pattern = re.escape(name)
+        security_first = re.compile(
+            rf"\b{subject_pattern}\b.{{0,25}}?\bshares?\b\s+{_OWNERSHIP_ACTION}"
+            rf"\s+by\s+.{{1,80}}?\b{_EXTERNAL_ENTITY_MARKER}\b"
+        )
+        actor_first = re.compile(
+            rf"\b{_EXTERNAL_ENTITY_MARKER}\b.{{0,50}}?\b{_OWNERSHIP_ACTION}\b\s+{quantity}"
+            rf"shares?\s+(?:of|in)\s+\b{subject_pattern}\b"
+        )
+        actor_first_reordered_quantity = re.compile(
+            rf"\b{_EXTERNAL_ENTITY_MARKER}\b.{{0,50}}?\b{_OWNERSHIP_ACTION}\b\s+shares?\s+"
+            rf"(?:of|in)\s+{quantity}\b{subject_pattern}\b"
+        )
+        actor_position = re.compile(
+            rf"\b{_EXTERNAL_ENTITY_MARKER}\b.{{0,60}}?"
+            rf"\b(?:has|holds|raises?|reduces?|trims?|increases?|decreases?|{_OWNERSHIP_ACTION})\b"
+            rf".{{0,30}}?\b(?:new\s+)?(?:stake|position|holding)s?\s+(?:of|in)\s+"
+            rf"\b{subject_pattern}\b"
+        )
+        subject_position = re.compile(
+            rf"\b{subject_pattern}\b.{{0,25}}?\bis\b.{{0,60}}?\b{_EXTERNAL_ENTITY_MARKER}\b"
+            rf".{{0,30}}?\b(?:largest|top)\s+(?:stake|position|holding)\b"
+        )
+        # A cash investment into the subject uses the tighter portfolio-owner marker: a corporate
+        # legal suffix alone is not evidence of routine portfolio activity, and a strategic
+        # investment by an operating company is a material subject-company event.
+        actor_investment = re.compile(
+            rf"\b{_EXTERNAL_OWNER_MARKER}\b.{{0,60}}?\binvests?\b\s+"
+            rf"\$?\d[\d ]*(?:k|m|bn|b|thousand|million|billion)?\s+in\s+"
+            rf"\b{subject_pattern}\b"
+        )
+        subject_position_change = re.compile(
+            rf"\b{subject_pattern}\b.{{0,25}}?\b(?:stock\s+)?(?:stake|position|holding)s?\b"
+            rf"\s+(?:decreased|lifted|raised|increased|reduced|trimmed)\s+by\s+.{{1,80}}?"
+            rf"\b{_EXTERNAL_OWNER_MARKER}\b"
+        )
+        if any(
+            pattern.search(normalized)
+            for pattern in (
+                security_first,
+                actor_first,
+                actor_first_reordered_quantity,
+                actor_position,
+                subject_position,
+                actor_investment,
+                subject_position_change,
+            )
+        ):
+            return True
+    return False
+
+
+def _subject_names(subject: CompanyIdentity) -> set[str]:
     names = {normalize_text(subject.name), normalize_text(subject.symbol)}
     legal_suffixes = (" inc", " incorporated", " corporation", " corp", " plc", " limited", " ltd")
     names.update(
@@ -232,16 +386,43 @@ def _title_contains_subject_company_action(title: str, subject: CompanyIdentity)
         for suffix in legal_suffixes
         if name.endswith(suffix)
     )
-    for name in sorted((name for name in names if name), key=len, reverse=True):
+    return {name for name in names if name}
+
+
+def _title_contains_subject_company_action(title: str, subject: CompanyIdentity) -> bool:
+    """Whether the subject company itself is described as acting in this title.
+
+    This escape hatch guards every ownership-rejection path, so it must not mistake the
+    ownership construction itself for a subject action. Several verbs are shared between the
+    two readings ("acquired", "invests"), and some are also nouns inside an investor's name
+    ("... General Partner Inc."), so a match is ignored when its context marks it as part of
+    the ownership phrase rather than something the subject did.
+    """
+
+    normalized = normalize_text(title)
+    for name in sorted(_subject_names(subject), key=len, reverse=True):
         start = 0
         while (position := normalized.find(name, start)) >= 0:
             following = normalized[position + len(name) : position + len(name) + 45]
             if any(
-                re.search(rf"\b{re.escape(action)}\b", following) for action in _SUBJECT_ACTIONS
+                _is_subject_action_context(following, match)
+                for action in _SUBJECT_ACTIONS
+                if (match := re.search(rf"\b{re.escape(action)}\b", following)) is not None
             ):
                 return True
             start = position + len(name)
     return False
+
+
+def _is_subject_action_context(following: str, match: re.Match[str]) -> bool:
+    """Reject a candidate action that belongs to the ownership phrase, not to the subject."""
+
+    if _OWNED_SECURITY_NOUN.search(following[: match.start()]) is not None:
+        # "<subject> shares acquired by ..." — the subject is the object, not the actor.
+        return False
+    # "... acquired by <fund>", or a noun inside an investor's name ("General Partner Inc").
+    trailing = following[match.end() :]
+    return re.match(rf"\s+(?:by\b|{_CORPORATE_NAME_TOKEN}\b)", trailing) is None
 
 
 def _near_title(first: Article, second: Article) -> bool:

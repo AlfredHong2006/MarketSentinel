@@ -28,7 +28,10 @@ from marketsentinel.errors import (
     ArticleAnalysisStructuralValidationError,
 )
 from marketsentinel.event_analysis import (
+    _STAGE_A_INSTRUCTIONS,
+    STAGE_A_PROMPT_VERSION,
     ArticleEventAnalysisService,
+    ClaimAssessmentRequest,
     EventExtractionRequest,
     OpenAIArticleIntelligenceProvider,
     RelatedCompanyRequest,
@@ -145,6 +148,7 @@ class FakeProvider:
     stage_b_calls: int = 0
     stage_c_calls: int = 0
     last_event_request: EventExtractionRequest | None = None
+    last_claim_request: ClaimAssessmentRequest | None = None
     last_related_request: RelatedCompanyRequest | None = None
 
     def extract_event(self, request: EventExtractionRequest) -> EventExtraction:
@@ -161,8 +165,8 @@ class FakeProvider:
         return self.event_output
 
     def assess_claims(self, request):
-        del request
         self.stage_b_calls += 1
+        self.last_claim_request = request
         if isinstance(self.claim_output, Exception):
             raise self.claim_output
         return self.claim_output
@@ -221,6 +225,29 @@ class FakeResponses:
             usage=SimpleNamespace(input_tokens=5, output_tokens=3),
             _request_id="req_test",
         )
+
+
+def test_stage_a_prompt_version_and_core_channel_guidance_are_current() -> None:
+    normalized_instructions = " ".join(_STAGE_A_INSTRUCTIONS.split())
+    assert STAGE_A_PROMPT_VERSION == "event-extraction-v5"
+    assert STAGE_A_PROMPT_VERSION != "event-extraction-v4"
+    assert "concrete causal mechanism" in normalized_instructions
+    assert "Never invent a channel" in normalized_instructions
+    assert "Return at most three concise channels per side" in normalized_instructions
+    assert "important_claims contain factual assertions" in normalized_instructions
+    assert "investor confidence or perception, stock demand" in normalized_instructions
+    assert "not the time until the event begins" in normalized_instructions
+    assert "are market reactions, not the underlying subject-company economic event" in (
+        normalized_instructions
+    )
+    assert "do not infer missing earnings, operating, or financial details" in (
+        normalized_instructions
+    )
+    assert "local employment, local economic activity" in normalized_instructions
+    assert "subject company's revenue or demand" in normalized_instructions
+    assert (
+        "Do not choose uncertain merely because exact timing is absent" in normalized_instructions
+    )
 
 
 def test_sdk_stage_a_contract_explicitly_contains_required_fields() -> None:
@@ -386,6 +413,7 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
             "SELECT cache_version FROM article_intelligence_analyses WHERE article_fingerprint = ?",
             (primary.fingerprint,),
         ).fetchone()[0]
+    assert f"a={STAGE_A_PROMPT_VERSION}" in cache_version
     assert "c=related-company-v5" in cache_version
     legacy_payload = generated.analysis.model_dump(mode="json")
     legacy_payload.pop("evidence_strength")
@@ -409,6 +437,41 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     stored = repository.list_article_analyses("ACME")
     assert [item.article_id for item in stored] == [primary.fingerprint]
     assert (provider.stage_a_calls, provider.stage_b_calls, provider.stage_c_calls) == (1, 1, 1)
+
+
+def test_v4_stage_a_exact_cache_is_not_reused_by_v5_service(
+    writable_tmp_path,
+) -> None:
+    provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
+    current_service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    previous_service = ArticleEventAnalysisService(
+        repository=repository,
+        provider=provider,
+        constituents=current_service.constituents,
+        evidence_limit=current_service.evidence_limit,
+        stage_a_prompt_version="event-extraction-v4",
+    )
+
+    previous = previous_service.analyze_article(primary.fingerprint)
+    current = current_service.analyze_article(primary.fingerprint)
+
+    assert previous.status == "generated"
+    assert previous.analysis.stage_a_prompt_version == "event-extraction-v4"
+    assert current.status == "generated"
+    assert current.analysis.stage_a_prompt_version == STAGE_A_PROMPT_VERSION
+    assert provider.stage_a_calls == 2
+    assert not current_service.compatibility.accepts_for_display(previous.analysis)
+    with sqlite3.connect(repository.path) as connection:
+        stored_versions = {
+            row[0]
+            for row in connection.execute(
+                "SELECT cache_version FROM article_intelligence_analyses "
+                "WHERE article_fingerprint = ?",
+                (primary.fingerprint,),
+            )
+        }
+    assert any("a=event-extraction-v4" in value for value in stored_versions)
+    assert any(f"a={STAGE_A_PROMPT_VERSION}" in value for value in stored_versions)
 
 
 @pytest.mark.parametrize(
@@ -734,6 +797,145 @@ def test_major_investment_can_remain_meaningful_with_high_extraction_confidence(
     assert response.analysis.event.event_type is EventType.INVESTMENT
     assert response.analysis.event.magnitude == 0.65
     assert response.analysis.event.model_confidence == 0.9
+
+
+def test_material_channels_and_horizon_survive_generation_persistence_and_reload(
+    writable_tmp_path,
+) -> None:
+    extracted = event(
+        magnitude=0.7,
+        confidence=0.9,
+        event_type=EventType.INVESTMENT,
+        summary="Acme committed capital to expand specialised compute infrastructure.",
+        important_claims=["Acme announced an infrastructure investment."],
+    ).model_copy(
+        update={
+            "direction": EventDirection.MIXED,
+            "time_horizon": TimeHorizon.MONTHS,
+            "positive_channels": ["increases available specialised compute capacity"],
+            "negative_channels": ["increases capital committed before utilisation is proven"],
+        }
+    )
+    provider = FakeProvider(extracted, ClaimAssessments(), RelatedCompanyProposals())
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+
+    generated = service.analyze_article(primary.fingerprint)
+    reloaded = repository.list_article_analyses(
+        "ACME",
+        compatibility=service.compatibility,
+    )
+
+    assert generated.status == "generated"
+    assert len(reloaded) == 1
+    assert reloaded[0].event.positive_channels == [
+        "increases available specialised compute capacity"
+    ]
+    assert reloaded[0].event.negative_channels == [
+        "increases capital committed before utilisation is proven"
+    ]
+    assert reloaded[0].event.time_horizon is TimeHorizon.MONTHS
+    assert reloaded[0].stage_a_prompt_version == STAGE_A_PROMPT_VERSION
+
+
+@pytest.mark.parametrize(
+    ("direction", "positive_channels", "negative_channels"),
+    [
+        (
+            EventDirection.NEGATIVE,
+            [],
+            ["raises near-term operating costs while remediation is completed"],
+        ),
+        (
+            EventDirection.POSITIVE,
+            ["expands access to specialised compute capacity"],
+            [],
+        ),
+    ],
+)
+def test_material_event_allows_one_sided_channels(
+    writable_tmp_path,
+    direction: EventDirection,
+    positive_channels: list[str],
+    negative_channels: list[str],
+) -> None:
+    extracted = event(magnitude=0.65, confidence=0.9).model_copy(
+        update={
+            "direction": direction,
+            "time_horizon": TimeHorizon.WEEKS,
+            "positive_channels": positive_channels,
+            "negative_channels": negative_channels,
+        }
+    )
+    provider = FakeProvider(extracted, ClaimAssessments(), RelatedCompanyProposals())
+    service, _, primary, _ = prepared_service(writable_tmp_path, provider)
+
+    response = service.analyze_article(primary.fingerprint)
+
+    assert response.status == "generated"
+    assert response.analysis.event.positive_channels == positive_channels
+    assert response.analysis.event.negative_channels == negative_channels
+
+
+def test_stage_b_request_contains_only_important_claims_not_channels(
+    writable_tmp_path,
+) -> None:
+    factual_claim = "Acme committed $3bn to specialised infrastructure."
+    positive_channel = "increases available specialised compute capacity"
+    negative_channel = "increases capital committed before utilisation is proven"
+    extracted = event(important_claims=[factual_claim]).model_copy(
+        update={
+            "positive_channels": [positive_channel],
+            "negative_channels": [negative_channel],
+        }
+    )
+    provider = FakeProvider(extracted, ClaimAssessments(), RelatedCompanyProposals())
+    service, _, primary, _ = prepared_service(writable_tmp_path, provider)
+
+    response = service.analyze_article(primary.fingerprint)
+
+    assert response.status == "generated"
+    assert provider.last_claim_request is not None
+    assert provider.last_claim_request.claims == (("claim_1", factual_claim),)
+    claim_text = " ".join(text for _, text in provider.last_claim_request.claims)
+    assert positive_channel not in claim_text
+    assert negative_channel not in claim_text
+
+
+def test_channel_ownership_words_do_not_trigger_external_holding_clamp(
+    writable_tmp_path,
+) -> None:
+    extracted = event(
+        magnitude=0.7,
+        confidence=0.9,
+        event_type=EventType.INVESTMENT,
+        summary="Apple announced a manufacturing-capacity investment.",
+        important_claims=["Apple committed capital to new manufacturing capacity."],
+    ).model_copy(
+        update={
+            "positive_channels": ["selling new shares could increase financing capacity"],
+            "negative_channels": [],
+        }
+    )
+    provider = FakeProvider(extracted, ClaimAssessments(), RelatedCompanyProposals())
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    holding_headline = primary.model_copy(
+        update={
+            "fingerprint": "holding-context-channel-invariant",
+            "ticker": "AAPL",
+            "title": "Fund reports $800m holding in Apple",
+            "snippet": "The institution disclosed its Apple position.",
+        }
+    )
+    repository.upsert_articles([holding_headline])
+
+    response = service.analyze_article(holding_headline.fingerprint)
+
+    assert response.status == "generated"
+    assert response.analysis.event.event_type is EventType.INVESTMENT
+    assert response.analysis.event.magnitude == 0.7
+    assert response.analysis.event.positive_channels == [
+        "selling new shares could increase financing capacity"
+    ]
 
 
 def test_extraction_confidence_and_magnitude_are_independent(writable_tmp_path) -> None:

@@ -43,7 +43,7 @@ from marketsentinel.ownership_patterns import text_describes_external_institutio
 from marketsentinel.storage.sqlite import SQLiteRepository
 from marketsentinel.timeutils import utc_now
 
-STAGE_A_PROMPT_VERSION = "event-extraction-v3"
+STAGE_A_PROMPT_VERSION = "event-extraction-v5"
 STAGE_B_PROMPT_VERSION = "claim-evidence-v1"
 STAGE_C_PROMPT_VERSION = "related-company-v5"
 ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v4"
@@ -59,13 +59,22 @@ record uncertainty.
 
 First distinguish a concrete corporate event from analyst commentary, opinion, a stock-price
 prediction, a vague roundup, or insufficient information. Do not turn predictions or opinions into
-established corporate facts. Event magnitude is not headline drama, sentiment strength, a
-stock-return probability, or confidence: it is the estimated qualitative economic or strategic
-significance of this event to the subject company. Calibrate it as follows: 0.00-0.10 for no
-concrete event, trivial external activity, or negligible company relevance; 0.10-0.30 for a minor
-event with limited likely significance; 0.30-0.55 for a meaningful operational or commercial event;
-0.55-0.80 for a major earnings, product, regulatory, or strategic event; and 0.80-1.00 only for an
-exceptional, transformative, or existential-scale event. Use 1.0 extremely rarely.
+established corporate facts. Stock-price movement, market-cap movement, investor reaction, trading
+demand, and valuation movement are market reactions, not the underlying subject-company economic
+event. When supplied text describes a market reaction caused by a corporate event, extract only the
+underlying corporate event and only when the supplied record describes it sufficiently. Do not use
+the market reaction as the main event or a transmission channel, and do not infer missing earnings,
+operating, or financial details. If the record supplies only market reaction without a sufficiently
+described underlying company event, prefer an other/non-material extraction consistent with the
+existing magnitude policy rather than manufacturing a high-impact event.
+
+Event magnitude is not headline drama, sentiment strength, a stock-return probability, or
+confidence: it is the estimated qualitative economic or strategic significance of this event to the
+subject company. Calibrate it as follows: 0.00-0.10 for no concrete event, trivial external activity,
+or negligible company relevance; 0.10-0.30 for a minor event with limited likely significance;
+0.30-0.55 for a meaningful operational or commercial event; 0.55-0.80 for a major earnings, product,
+regulatory, or strategic event; and 0.80-1.00 only for an exceptional, transformative, or
+existential-scale event. Use 1.0 extremely rarely.
 
 Extraction confidence is separate: it is confidence that the supplied text was correctly
 understood and its event, if any, correctly identified. It may be high for a low-magnitude event.
@@ -76,7 +85,67 @@ subject company; it has very low magnitude but can have high extraction confiden
 investment announcement or earnings release can have high confidence and meaningful magnitude when
 the supplied scale and context support it. Use 0.0 magnitude when there is no discernible event and
 0.0 confidence only when the record provides no usable basis for extraction. Extract concise
-important claims whenever the supplied record supports them."""
+important claims whenever the supplied record supports them.
+
+A transmission channel is the concrete causal mechanism through which the reported event could
+affect the subject company's operations, revenue, costs, cash flow, competitive position,
+regulatory exposure, supply/demand position, execution burden, or capital allocation. A channel is
+an analytical consequence of the supplied event, not an additional asserted fact. For example, the
+fact "the company committed $3bn to infrastructure" can support the mechanism "increases capital
+committed before utilisation is proven"; do not present the mechanism as a quoted or independently
+verified claim. important_claims contain factual assertions supported by the supplied record;
+positive_channels and negative_channels contain analytical causal mechanisms. Do not put an
+inferred transmission mechanism into important_claims merely because it is plausible.
+
+For a meaningful or material event, explicitly consider both positive and negative transmission
+mechanisms. For a positive event, normally return concrete positive channels and return negative
+channels only when a plausible countervailing downside follows from the event. For a negative event,
+normally return concrete negative channels; positive channels may be empty unless a genuine offset
+exists. For a mixed event, normally represent both sides when both mechanisms genuinely exist. Weak,
+non-event, or genuinely uncertain material may use empty lists. Never invent a channel to fill a
+side. Return at most three concise channels per side. Returning zero channels on a side is correct
+when no concrete mechanism follows from the supplied event and evidence; never create a channel
+merely to fill a side.
+
+Each channel must be company-specific, economically interpretable, concise, distinct, causally tied
+to the event, and understandable without hidden reasoning. A channel must not merely restate the
+event. A channel must identify a concrete causal change to the subject company's revenue or demand,
+costs, cash flow or capital commitment, operating capacity, supply availability or dependence,
+customer access or retention, competitive capability or market share, regulatory or legal exposure,
+execution requirements, or product development or delivery. Do not emit a channel whose primary
+effect is investor confidence or perception, stock demand, share price, market capitalization,
+generic valuation, brand or reputation alone, local employment, local economic activity, broad
+ecosystem benefit, generic market position, or generic growth potential unless the supplied evidence
+supports a concrete causal bridge to one of those subject-company operating or financial mechanisms.
+Name the specific company mechanism that changes. Omit a mechanism that cannot be stated concretely.
+Do not use generic statements such as market sentiment, investor sentiment, stock may rise or fall,
+analysts may react, positive or negative outlook, may affect business, could have an impact,
+uncertainty, or market reaction. Do not fabricate precise financial impacts, revenue amounts,
+probabilities, price targets, expected stock returns, or regulatory outcomes that are neither stated
+nor reasonably implied.
+
+Examples of the intended granularity include increasing available AI infrastructure capacity,
+expanding access to specialised compute, strengthening distribution through a new partnership,
+increasing capital committed before demand is proven, creating dependence on a constrained
+supplier, or exposing revenue to regulatory restrictions. These illustrate granularity, not a
+taxonomy: do not emit a mechanism merely because it appears here, and use it only when the supplied
+event supports that causal connection.
+
+time_horizon is the approximate period over which the event's material economic consequences are
+expected to remain relevant to the subject company; it is not the time until the event begins.
+Choose it from the existing enum using these extraction ranges: immediate means the material
+economic effect is principally transient and expected to persist for roughly zero to one day; days
+means the effect principally persists for several days through roughly two weeks; weeks means
+roughly two to eight weeks; months means roughly two to twelve months; long_term means beyond roughly
+one year or a durable structural exposure; and uncertain means the duration of the material economic
+consequence genuinely cannot be inferred from the supplied evidence. These ranges guide extraction,
+not financial forecasts. Do not choose uncertain merely because exact timing is absent, and do not
+pretend to know a precise duration that the evidence does not support. A short-lived operational
+outage resolved quickly is normally days; acquisition integration burden is normally months; a major
+manufacturing-capacity build is months or long_term depending on the evidence, preferably long_term
+when its economic commitment or exposure is clearly durable; and a newly imposed export restriction
+with persistent market-access consequences is months or long_term, not immediate merely because it
+takes effect now. A vague strategic ambition with no inferable persistence may remain uncertain."""
 _STAGE_B_INSTRUCTIONS = """Assess supplied claims only against supplied stored evidence. Pretrained
 knowledge is not evidence. Corroborated means independent supplied support; contradicted means
 supplied material conflict; unsupported means no supplied substantiation; uncertain means evidence
@@ -654,7 +723,7 @@ def _event_supports_related_company_analysis(
 
 
 def _evidence_strength(context: _AnalysisContext, claims: Sequence[ClaimAssessment]) -> float:
-    """Return a deterministic evidence-quality indicator, not a probability of truth."""
+    """Measure supplied evidence-context strength/breadth, not claim corroboration probability."""
 
     primary_quality = {
         SourceClass.OFFICIAL_COMPANY: 0.45,

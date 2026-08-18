@@ -364,6 +364,9 @@ def test_automatic_candidate_analysis_reaches_same_company_response(
         {item["article_id"] for item in payload["intelligence_events"]}
     )
     assert set(runner.calls).issubset({item["article_id"] for item in payload["analyzed_events"]})
+    stored = repository.list_article_analyses("ACME", compatibility=compatibility)
+    assert stored
+    assert all(item.stage_a_prompt_version == STAGE_A_PROMPT_VERSION for item in stored)
     cards = prepare_todays_intelligence(
         compatible_intelligence_events(payload["intelligence_events"])
     )
