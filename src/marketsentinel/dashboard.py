@@ -314,6 +314,32 @@ def render_ingestion_funnel(payload: dict[str, Any]) -> None:
             hide_index=True,
             width="stretch",
         )
+    automatic = payload.get("automatic_analysis")
+    if automatic is not None:
+        with st.expander("Automatic article analysis"):
+            diagnostics = {
+                "Considered": automatic["considered"],
+                "Selected": automatic["selected"],
+                "Demo articles rejected": automatic["demo_rejected"],
+                "Below relevance floor": automatic["low_relevance_rejected"],
+                "Obvious holding reports rejected": automatic["obvious_holdings_rejected"],
+                "Predictions excluded": automatic["excluded_prediction"],
+                "Commentary deprioritized": automatic["commentary_deprioritized"],
+                "Publisher cap rejected": automatic["publisher_cap_rejected"],
+                "Near-title variants rejected": automatic["near_title_rejected"],
+                "Exact cache hits": automatic["cached"],
+                "Newly generated": automatic["newly_generated"],
+                "Failed": automatic["failed"],
+                "Unavailable": automatic["unavailable"],
+                "Skipped after budget/breaker": automatic["budget_skipped"],
+            }
+            st.dataframe(
+                pd.DataFrame(diagnostics.items(), columns=["Stage", "Count"]),
+                hide_index=True,
+                width="stretch",
+            )
+            if automatic["circuit_breaker_tripped"]:
+                st.caption("Stopped after two consecutive failed or unavailable responses.")
 
 
 def render_forecast(payload: dict[str, Any]) -> None:

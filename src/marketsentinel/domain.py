@@ -111,6 +111,26 @@ class IngestionFunnel(BaseModel):
         )
 
 
+class AutomaticAnalysisDiagnostics(BaseModel):
+    """Small, non-sensitive counters for one automatic article-analysis pass."""
+
+    considered: int = Field(default=0, ge=0)
+    selected: int = Field(default=0, ge=0)
+    demo_rejected: int = Field(default=0, ge=0)
+    low_relevance_rejected: int = Field(default=0, ge=0)
+    obvious_holdings_rejected: int = Field(default=0, ge=0)
+    excluded_prediction: int = Field(default=0, ge=0)
+    commentary_deprioritized: int = Field(default=0, ge=0)
+    publisher_cap_rejected: int = Field(default=0, ge=0)
+    near_title_rejected: int = Field(default=0, ge=0)
+    cached: int = Field(default=0, ge=0)
+    newly_generated: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    unavailable: int = Field(default=0, ge=0)
+    budget_skipped: int = Field(default=0, ge=0)
+    circuit_breaker_tripped: bool = False
+
+
 class DailySentiment(BaseModel):
     ticker: str
     date: date
@@ -184,6 +204,9 @@ class AnalysisResult(BaseModel):
     forecast: ForecastResult
     source_health: list[SourceHealth]
     ingestion_funnel: IngestionFunnel
+    automatic_analysis: AutomaticAnalysisDiagnostics = Field(
+        default_factory=AutomaticAnalysisDiagnostics
+    )
     generated_at: datetime
     disclaimer: str
 
