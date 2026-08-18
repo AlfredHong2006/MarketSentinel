@@ -17,7 +17,7 @@ class PriceProvider(Protocol):
 
 
 class YFinancePriceProvider:
-    """Fetch adjusted daily bars; the dashboard displays only the final 30 sessions."""
+    """Fetch adjusted daily bars for forecasting and the dashboard's one-year display window."""
 
     def __init__(self, training_period: str = "3y") -> None:
         self.training_period = training_period

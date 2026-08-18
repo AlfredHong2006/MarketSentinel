@@ -42,8 +42,8 @@ from marketsentinel.timeutils import utc_now
 
 STAGE_A_PROMPT_VERSION = "event-extraction-v3"
 STAGE_B_PROMPT_VERSION = "claim-evidence-v1"
-STAGE_C_PROMPT_VERSION = "related-company-v3"
-ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v3"
+STAGE_C_PROMPT_VERSION = "related-company-v4"
+ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v4"
 _MAX_RECORD_TEXT = 4_000
 _MAX_EVIDENCE_CANDIDATES = 40
 LOGGER = logging.getLogger(__name__)
@@ -490,10 +490,9 @@ class ArticleEventAnalysisService:
     def _select_related(
         self, event: EventExtraction, context: "_AnalysisContext"
     ) -> list[RelatedCompanyAnalysis]:
-        if context.is_external_institutional_holding:
+        if not _event_supports_related_company_analysis(event, context):
             LOGGER.info(
-                "Article intelligence normalisation: stage=stage_c "
-                "action=skip_external_institutional_holding"
+                "Article intelligence normalisation: stage=stage_c action=skip_ineligible_event"
             )
             return []
         if not context.candidates:
@@ -517,7 +516,9 @@ class ArticleEventAnalysisService:
                 continue
             seen.add(ticker)
             normalised.append(_related_analysis(proposal, allowed[ticker], ticker))
-        return normalised
+        # Keep this boundary even though the provider is only called for eligible events:
+        # no persisted Stage C proposal may outlive an ineligible primary event.
+        return normalised if _event_supports_related_company_analysis(event, context) else []
 
 
 @dataclass(frozen=True)
@@ -619,6 +620,26 @@ def _normalise_external_institutional_holding(
         normalised.magnitude,
     )
     return normalised
+
+
+def _event_supports_related_company_analysis(
+    event: EventExtraction, context: _AnalysisContext
+) -> bool:
+    """Return whether this is a concrete, material event worth propagating to peers.
+
+    Stage C is intentionally not a general company-association search.  The guard is
+    deterministic so commentary, predictions, vague roundups, and small third-party
+    holding changes cannot create related-company output merely because a model was
+    asked to suggest connections.
+    """
+
+    if context.is_external_institutional_holding:
+        return False
+    if event.event_type is EventType.UNCERTAIN:
+        return False
+    if event.magnitude < 0.30:
+        return False
+    return event.model_confidence > 0
 
 
 def _evidence_strength(context: _AnalysisContext, claims: Sequence[ClaimAssessment]) -> float:

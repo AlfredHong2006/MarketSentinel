@@ -84,9 +84,18 @@ def test_service_runs_complete_vertical_slice_without_network_or_real_model(
     result = service.analyze("ACME")
 
     assert result.constituent.symbol == "ACME"
-    assert len(result.price_history.points) == 30
+    assert len(result.price_history.points) > 250
+    assert result.price_history.points[0].date >= (
+        result.price_history.points[-1].date - timedelta(days=366)
+    )
+    six_month_cutoff = result.price_history.points[-1].date - timedelta(days=183)
+    assert (
+        len([point for point in result.price_history.points if point.date >= six_month_cutoff])
+        > 120
+    )
     assert len(result.articles) == 2
     assert len(result.daily_sentiment) == 2
+    assert result.analyzed_events == []
     assert result.daily_sentiment[0].article_count == 1
     assert result.forecast.sentiment_features_used is False
     assert result.ingestion_funnel == IngestionFunnel(retrieved=2, relevant=2, unique=2, scored=2)

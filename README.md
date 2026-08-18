@@ -37,8 +37,9 @@ GDELT and the Google News fallback return genuine provider records, but neither 
 licensed historical-news archive. MarketSentinel therefore does **not** manufacture a 30-day
 sentiment series:
 
-- The price chart displays 30 trading sessions.
-- The sentiment chart displays only dates backed by available scored articles.
+- The company chart supports 1M, 3M, 6M, and 1Y calendar windows, with 6M as the default.
+- Price, FinBERT sentiment, and meaningful stored event analyses can be viewed together or separately.
+- Sentiment displays only dates backed by available scored articles.
 - SQLite retains accepted articles, FinBERT scores, and daily aggregates, so the chart becomes
   richer through actual use.
 - Missing sentiment dates are not backfilled with invented values.

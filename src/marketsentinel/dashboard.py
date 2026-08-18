@@ -4,14 +4,33 @@ import os
 from typing import Any
 
 import pandas as pd
-import plotly.graph_objects as go
 import requests
 import streamlit as st
-from plotly.subplots import make_subplots
 
 from marketsentinel.article_presentation import (
     EMPTY_RELATED_COMPANIES_MESSAGE,
     bullet_items,
+)
+from marketsentinel.dashboard_charts import (
+    CHART_LAYERS,
+    DEFAULT_TIMEFRAME,
+    TIMEFRAME_MONTHS,
+    build_combined_figure,
+    build_price_figure,
+    build_sentiment_figure,
+    observed_sentiment_frame,
+    price_frame_for_timeframe,
+    select_meaningful_events,
+)
+from marketsentinel.dashboard_event_state import (
+    compatible_article_analysis_response,
+    updated_event_markers,
+    updated_intelligence_events,
+)
+from marketsentinel.dashboard_intelligence import (
+    CompanyIntelligenceEvent,
+    compatible_intelligence_events,
+    prepare_todays_intelligence,
 )
 
 API_BASE_URL = os.getenv("MARKETSENTINEL_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -42,6 +61,20 @@ st.markdown(
         margin-right: 0.35rem;
         font-size: 0.78rem;
     }
+    .company-price {
+        text-align: right;
+        padding-top: 0.4rem;
+        font-size: 1.45rem;
+        font-weight: 650;
+    }
+    .company-price small {
+        display: block;
+        color: rgba(120, 120, 120, 0.95);
+        font-size: 0.78rem;
+        font-weight: 400;
+    }
+    .price-positive { color: #15803d; }
+    .price-negative { color: #b91c1c; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -84,90 +117,171 @@ def request_article_analysis(article_id: str) -> dict[str, Any]:
     return response.json()
 
 
+def add_event_marker_to_current_analysis(response: dict[str, Any]) -> None:
+    """Make a newly stored analysis visible on the next dashboard rerun."""
+
+    current = st.session_state.get("analysis")
+    if current is None:
+        return
+    updated_markers = updated_event_markers(
+        response,
+        current["constituent"]["symbol"],
+        current.get("analyzed_events", []),
+    )
+    if updated_markers is None:
+        return
+    current["analyzed_events"] = updated_markers
+    updated_intelligence = updated_intelligence_events(
+        response,
+        current["constituent"]["symbol"],
+        current.get("intelligence_events", []),
+    )
+    if updated_intelligence is not None:
+        current["intelligence_events"] = updated_intelligence
+
+
 def percent(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
-def render_price_chart(payload: dict[str, Any]) -> None:
-    frame = pd.DataFrame(payload["price_history"]["points"])
-    figure = go.Figure(
-        go.Scatter(
-            x=frame["date"],
-            y=frame["close"],
-            mode="lines",
-            line={"color": "#2F80ED", "width": 2.5},
-            hovertemplate="%{x}<br>%{y:.2f}<extra></extra>",
+def render_company_header(payload: dict[str, Any]) -> None:
+    company = payload["constituent"]
+    points = payload["price_history"]["points"]
+    title_column, price_column = st.columns([3, 2])
+    title_column.markdown(f"## {company['name']} ({company['symbol']})")
+    if not points:
+        price_column.markdown(
+            '<div class="company-price">Price unavailable</div>', unsafe_allow_html=True
         )
-    )
-    figure.update_layout(
-        title="Last 30 trading sessions",
-        xaxis_title=None,
-        yaxis_title="Adjusted close",
-        height=360,
-        margin={"l": 20, "r": 20, "t": 55, "b": 20},
-        hovermode="x unified",
-    )
-    st.plotly_chart(figure, use_container_width=True)
-
-
-def render_sentiment_chart(payload: dict[str, Any]) -> None:
-    values = payload["daily_sentiment"]
-    if not values:
-        st.info("No scored articles have been stored for this ticker yet.")
         return
-    frame = pd.DataFrame(values)
-    figure = make_subplots(specs=[[{"secondary_y": True}]])
-    figure.add_trace(
-        go.Bar(
-            x=frame["date"],
-            y=frame["article_count"],
-            name="Articles",
-            marker_color="rgba(130, 130, 150, 0.25)",
-        ),
-        secondary_y=True,
+    latest = float(points[-1]["close"])
+    delta = None
+    if len(points) > 1 and float(points[-2]["close"]):
+        delta = f"{(latest / float(points[-2]['close']) - 1):+.2%} last session"
+    delta_class = "price-positive" if delta and not delta.startswith("-") else "price-negative"
+    delta_markup = f'<small class="{delta_class}">{delta}</small>' if delta else ""
+    price_column.markdown(
+        f'<div class="company-price">{latest:,.2f}{delta_markup}</div>', unsafe_allow_html=True
     )
-    figure.add_trace(
-        go.Scatter(
-            x=frame["date"],
-            y=frame["score"],
-            name="Daily sentiment",
-            mode="lines+markers",
-            line={"color": "#27AE60", "width": 2},
-        ),
-        secondary_y=False,
-    )
-    figure.add_trace(
-        go.Scatter(
-            x=frame["date"],
-            y=frame["trend_3"],
-            name="3-observation weighted trend",
-            mode="lines",
-            line={"color": "#F2994A", "width": 3},
-            customdata=frame[["positive_share", "negative_share", "weighted_disagreement"]],
-            hovertemplate=(
-                "%{x}<br>Trend: %{y:.3f}<br>Positive share: %{customdata[0]:.1%}"
-                "<br>Negative share: %{customdata[1]:.1%}<br>Disagreement: %{customdata[2]:.3f}"
-                "<extra></extra>"
-            ),
-        ),
-        secondary_y=False,
-    )
-    figure.add_hline(y=0, line_dash="dot", line_color="gray", secondary_y=False)
-    figure.update_yaxes(title_text="Sentiment index (-1 to +1)", range=[-1, 1], secondary_y=False)
-    figure.update_yaxes(title_text="Article count", rangemode="tozero", secondary_y=True)
-    figure.update_layout(
-        title="Historical daily sentiment (calendar dates with genuine scored articles)",
-        height=390,
-        margin={"l": 20, "r": 20, "t": 55, "b": 20},
-        hovermode="x unified",
-        legend={"orientation": "h", "y": 1.12},
-    )
-    st.plotly_chart(figure, use_container_width=True)
-    coverage = len(frame)
+
+
+def render_company_chart(payload: dict[str, Any]) -> None:
+    symbol = payload["constituent"]["symbol"]
+    timeframe_column, view_column, layers_column = st.columns([4, 3, 5])
+    with timeframe_column:
+        timeframe = st.segmented_control(
+            "Timeframe",
+            list(TIMEFRAME_MONTHS),
+            default=DEFAULT_TIMEFRAME,
+            key=f"timeframe_{symbol}",
+        )
+    with view_column:
+        view = st.segmented_control(
+            "Layout",
+            ["Combined", "Separate"],
+            default="Combined",
+            key=f"chart_layout_{symbol}",
+        )
+    with layers_column:
+        layers = st.segmented_control(
+            "Layers",
+            list(CHART_LAYERS),
+            selection_mode="multi",
+            default=list(CHART_LAYERS),
+            format_func=lambda layer: "News sentiment" if layer == "Sentiment" else layer,
+            key=f"chart_layers_{symbol}",
+        )
+    if not layers:
+        st.info("Select at least one chart layer.")
+        return
+
+    price_frame = price_frame_for_timeframe(payload["price_history"]["points"], timeframe)
+    if price_frame.empty:
+        st.warning("No price observations are available for this company.")
+        return
+    start, end = price_frame["date"].min(), price_frame["date"].max()
+    sentiment_frame = observed_sentiment_frame(payload["daily_sentiment"], start, end)
+    events = select_meaningful_events(payload.get("analyzed_events", []), start, end)
+
+    if view == "Separate":
+        if {"Price", "Events"}.intersection(layers):
+            st.plotly_chart(
+                build_price_figure(price_frame, events, layers),
+                width="stretch",
+                key=f"price_{timeframe}",
+            )
+        if "Sentiment" in layers:
+            if sentiment_frame.empty:
+                st.info("No genuine news-sentiment observations exist in this timeframe.")
+            else:
+                st.plotly_chart(
+                    build_sentiment_figure(sentiment_frame),
+                    width="stretch",
+                    key=f"sentiment_{timeframe}",
+                )
+    else:
+        st.plotly_chart(
+            build_combined_figure(price_frame, sentiment_frame, events, layers),
+            width="stretch",
+            key=f"combined_{timeframe}",
+        )
+        if "Sentiment" in layers and sentiment_frame.empty:
+            st.info("No genuine news-sentiment observations exist in this timeframe.")
+
+    notes = [f"{len(price_frame)} trading-session price observations"]
+    if "Sentiment" in layers:
+        notes.append(f"{len(sentiment_frame)} observed news-sentiment dates")
+    if "Events" in layers:
+        notes.append(f"{len(events)} meaningful stored event markers")
     st.caption(
-        f"Coverage: {coverage} calendar date(s) with scored articles in the requested 30-day backfill. "
-        "Missing dates are absent, not neutral. Price uses trading sessions; sentiment uses calendar dates."
+        " · ".join(notes)
+        + ". Missing sentiment dates remain absent; they are never filled as zero or neutral."
     )
+
+
+def render_todays_intelligence(payload: dict[str, Any]) -> None:
+    """Render only compatible, previously stored high-confidence event analyses."""
+
+    st.subheader("Today's Intelligence")
+    events = compatible_intelligence_events(payload.get("intelligence_events", []))
+    cards = prepare_todays_intelligence(events)
+    if not cards:
+        st.info("No high-confidence analysed events available yet.")
+        return
+    st.caption(
+        "Ordered by event magnitude, extraction confidence, evidence strength, source class, "
+        "and publication time. These are event assessments, not price predictions."
+    )
+    for card in cards:
+        item = card.event
+        with st.container(border=True):
+            st.markdown(f"#### {card.impact_label} · {card.impact_score}/100")
+            st.caption(
+                f"{card.evidence_label} · {card.source_quality_label} · "
+                f"{item.source_reference.publisher} · {item.source_reference.published_at:%d %b %Y}"
+            )
+            st.write(item.event.summary)
+            st.caption(
+                f"Direction: {item.event.direction.value.title()} · "
+                f"Time horizon: {item.event.time_horizon.value.replace('_', ' ').title()}"
+            )
+            channel_columns = st.columns(2)
+            with channel_columns[0]:
+                st.markdown("**Possible positive channels**")
+                render_evidence_list(item.event.positive_channels)
+            with channel_columns[1]:
+                st.markdown("**Possible negative channels**")
+                render_evidence_list(item.event.negative_channels)
+            if item.related_companies:
+                st.markdown("**Related companies**")
+                for related in item.related_companies:
+                    st.write(
+                        f"{related.company.name} ({related.ticker}) — "
+                        f"{related.relationship_context}"
+                    )
+            with st.expander("View analysis"):
+                render_event_analysis_details(item)
+            st.markdown(f"[Original article]({item.source_reference.url})")
 
 
 def render_ingestion_funnel(payload: dict[str, Any]) -> None:
@@ -198,7 +312,7 @@ def render_ingestion_funnel(payload: dict[str, Any]) -> None:
         st.dataframe(
             pd.DataFrame(diagnostics.items(), columns=["Stage", "Count"]),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -300,9 +414,9 @@ def render_articles(payload: dict[str, Any]) -> None:
             if st.button("Analyse this article", key=f"analyse_{article['fingerprint']}"):
                 with st.spinner("Generating a bounded, structured event analysis…"):
                     try:
-                        st.session_state[event_key] = request_article_analysis(
-                            article["fingerprint"]
-                        )
+                        response = request_article_analysis(article["fingerprint"])
+                        st.session_state[event_key] = response
+                        add_event_marker_to_current_analysis(response)
                     except requests.RequestException as exc:
                         st.session_state[event_key] = {
                             "status": "failed",
@@ -325,105 +439,109 @@ def render_evidence_list(values: list[str]) -> None:
 
 
 def render_article_event_analysis(response: dict[str, Any]) -> None:
-    status = response["status"]
-    if status in {"failed", "unavailable", "not_found"}:
-        st.warning(response.get("message") or "Article analysis is unavailable.")
+    typed_response = compatible_article_analysis_response(response)
+    if typed_response is None:
+        st.warning(
+            "This stored analysis uses an incompatible legacy schema. Run the article analysis again "
+            "after restarting the API to create a compatible result."
+        )
         return
-    analysis = response.get("analysis")
-    if analysis is None:
+    status = typed_response.status
+    if status in {"failed", "unavailable", "not_found"}:
+        st.warning(typed_response.message or "Article analysis is unavailable.")
+        return
+    if typed_response.analysis is None:
         st.warning("The analysis response did not contain usable structured data.")
         return
-    st.caption("Result source: " + ("SQLite cache" if status == "cached" else "freshly generated"))
-    event = analysis["event"]
+    render_event_analysis_details(typed_response.analysis.to_company_intelligence_event())
+
+
+def render_event_analysis_details(analysis: CompanyIntelligenceEvent) -> None:
+    """Render typed event detail shared by fresh and stored dashboard views."""
+
+    event = analysis.event
     columns = st.columns(6)
-    columns[0].metric("Event", event["event_type"].replace("_", " ").title())
-    columns[1].metric("Direction", event["direction"].title())
+    columns[0].metric("Event", event.event_type.value.replace("_", " ").title())
+    columns[1].metric("Direction", event.direction.value.title())
     columns[2].metric(
         "Possible magnitude",
-        percent(event["magnitude"]),
+        percent(event.magnitude),
         help=(
             "Estimated qualitative significance of the event to the selected company; "
             "not an expected stock-price move."
         ),
     )
-    columns[3].metric("Time horizon", event["time_horizon"].replace("_", " ").title())
+    columns[3].metric("Time horizon", event.time_horizon.value.replace("_", " ").title())
     columns[4].metric(
         "Extraction confidence",
-        percent(event["model_confidence"]),
+        percent(event.model_confidence),
         help="Confidence that Stage A correctly identified the event described by the supplied text.",
     )
     columns[5].metric(
         "Evidence strength",
-        percent(analysis["evidence_strength"]),
+        percent(analysis.evidence_strength),
         help=(
             "Deterministic indicator of supplied-evidence quality and corroboration; "
             "not a probability that the article is true."
         ),
     )
     st.markdown("**What happened**")
-    st.write(event["summary"])
+    st.write(event.summary)
     st.caption(
         "Primarily affected supported company: "
-        f"{analysis['subject_company']['name']} ({analysis['subject_company']['symbol']}) "
-        f"· Source type: {analysis['source_class'].replace('_', ' ')}"
+        f"{analysis.subject_company.name} ({analysis.subject_company.symbol}) "
+        f"· Source type: {analysis.source_class.value.replace('_', ' ')}"
     )
-    if analysis["claims"]:
+    if analysis.claims:
         st.markdown("**Claims and supplied-evidence assessment**")
-        evidence_titles = {
-            item["article_id"]: item["title"] for item in analysis["evidence_sources"]
-        }
+        evidence_titles = {item.article_id: item.title for item in analysis.evidence_sources}
         claim_rows = [
             {
-                "Claim ID": item["claim_id"],
-                "Claim": event["important_claims"][
-                    int(item["claim_id"].removeprefix("claim_")) - 1
-                ],
-                "Evidence status": item["status"],
-                "Reasoning": item["reasoning"],
+                "Claim ID": item.claim_id,
+                "Claim": _claim_text(item.claim_id, event.important_claims),
+                "Evidence status": item.status.value,
+                "Reasoning": item.reasoning,
                 "Supporting sources": ", ".join(
-                    evidence_titles.get(item_id, item_id)
-                    for item_id in item["evidence_article_ids"]
+                    evidence_titles.get(item_id, item_id) for item_id in item.evidence_article_ids
                 )
                 or "None",
-                "Confidence": percent(item["confidence"]),
+                "Confidence": percent(item.confidence),
             }
-            for item in analysis["claims"]
+            for item in analysis.claims
         ]
-        st.dataframe(pd.DataFrame(claim_rows), hide_index=True, use_container_width=True)
-    if event["uncertainties"]:
+        st.dataframe(pd.DataFrame(claim_rows), hide_index=True, width="stretch")
+    if event.uncertainties:
         st.markdown("**Uncertainties**")
-        for item in event["uncertainties"]:
+        for item in event.uncertainties:
             st.caption(f"• {item}")
     channel_columns = st.columns(2)
     with channel_columns[0]:
         st.markdown("**Possible positive channels**")
-        render_evidence_list(event["positive_channels"])
+        render_evidence_list(event.positive_channels)
     with channel_columns[1]:
         st.markdown("**Possible negative channels**")
-        render_evidence_list(event["negative_channels"])
-    if analysis["related_companies"]:
+        render_evidence_list(event.negative_channels)
+    if analysis.related_companies:
         st.markdown("**Related companies**")
-        for item in analysis["related_companies"]:
-            st.markdown(
-                f"**{item['company']['name']} ({item['ticker']}) — {item['relationship_context']}**"
-            )
-            st.write(f"Possible mechanism: {item['reasoning']}")
+        for item in analysis.related_companies:
+            st.markdown(f"**{item.company.name} ({item.ticker}) — {item.relationship_context}**")
+            st.write(f"Possible mechanism: {item.reasoning}")
             st.caption(
-                f"Possible direction: {item['possible_effect_direction'].title()} · "
-                f"Confidence: {percent(item['confidence'])}"
+                f"Possible direction: {item.possible_effect_direction.value.title()} · "
+                f"Confidence: {percent(item.confidence)}"
             )
     else:
         st.caption(EMPTY_RELATED_COMPANIES_MESSAGE)
-    st.caption(
-        "Model: {model} · Evidence records: {evidence} · Schema: {schema} · Created: {created}".format(
-            model=analysis["model_version"],
-            evidence=analysis["evidence_count"],
-            schema=analysis["schema_version"],
-            created=analysis["analysis_created_at"],
-        )
-    )
-    with st.expander("Structured-data debug view"):
-        st.json(analysis)
+
+
+def _claim_text(claim_id: str, claims: list[str]) -> str:
+    """Show only a claim that exists in the typed event contract."""
+
+    try:
+        claim_index = int(claim_id.removeprefix("claim_")) - 1
+    except ValueError:
+        return claim_id
+    return claims[claim_index] if 0 <= claim_index < len(claims) else claim_id
 
 
 def render_health(payload: dict[str, Any]) -> None:
@@ -440,11 +558,7 @@ def render_health(payload: dict[str, Any]) -> None:
 
 st.title("MarketSentinel")
 st.markdown(
-    "**Recent financial-news sentiment, stored over time, with an experimental direction baseline.**"
-)
-st.warning(
-    "Educational research only. Sentiment and forecast probabilities are not financial advice and "
-    "do not predict exact prices."
+    "**Company intelligence from market prices, financial-news sentiment, and analysed events.**"
 )
 
 with st.sidebar:
@@ -473,10 +587,13 @@ with st.sidebar:
     analyze_clicked = st.button(
         "Run analysis",
         type="primary",
-        use_container_width=True,
+        width="stretch",
         disabled=selection is None,
     )
     st.caption(f"API: {API_BASE_URL}")
+    st.caption(
+        "Educational research only. Sentiment and forecast probabilities are not financial advice."
+    )
 
 if analyze_clicked and selection is not None:
     with st.spinner(
@@ -491,14 +608,14 @@ if "analysis" not in st.session_state:
     st.info("Search for an index constituent and run an analysis to begin.")
 else:
     analysis = st.session_state.analysis
-    company = analysis["constituent"]
-    st.header(f"{company['name']} · {company['symbol']}")
-    render_health(analysis)
-    price_column, sentiment_column = st.columns(2)
-    with price_column:
-        render_price_chart(analysis)
-    with sentiment_column:
-        render_sentiment_chart(analysis)
-    render_ingestion_funnel(analysis)
-    render_forecast(analysis)
-    render_articles(analysis)
+    render_company_header(analysis)
+    render_company_chart(analysis)
+    render_todays_intelligence(analysis)
+    st.divider()
+    evidence_tab, research_tab = st.tabs(["Supporting news & evidence", "Research context"])
+    with evidence_tab:
+        render_articles(analysis)
+    with research_tab:
+        render_ingestion_funnel(analysis)
+        render_forecast(analysis)
+        render_health(analysis)

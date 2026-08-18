@@ -1,10 +1,13 @@
 """SQLite repository for articles, model scores, and daily aggregates."""
 
+import logging
 import sqlite3
 from collections.abc import Iterable
 from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from marketsentinel.domain import Article, ArticleAnalysis, DailySentiment, ScoredArticle
 from marketsentinel.normalization import normalize_text, normalize_url
@@ -90,6 +93,8 @@ _ARTICLE_MIGRATIONS = {
     "provider_article_id": "TEXT",
     "snippet": "TEXT",
 }
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SQLiteRepository:
@@ -248,9 +253,16 @@ class SQLiteRepository:
                 """,
                 (article_id, model_version, cache_version, schema_version),
             ).fetchone()
-        return (
-            ArticleAnalysis.model_validate_json(row["analysis_json"]) if row is not None else None
-        )
+        if row is None:
+            return None
+        try:
+            return ArticleAnalysis.model_validate_json(row["analysis_json"])
+        except ValidationError:
+            LOGGER.warning(
+                "Ignoring incompatible cached article analysis for article_id=%s",
+                article_id,
+            )
+            return None
 
     def store_article_analysis(self, analysis: ArticleAnalysis, cache_version: str) -> None:
         """Append a versioned successful result; never overwrite a prior version's payload."""
@@ -274,6 +286,52 @@ class SQLiteRepository:
                     analysis.analysis_created_at.isoformat(),
                 ),
             )
+
+    def list_article_analyses(
+        self,
+        ticker: str,
+        since: datetime | None = None,
+        limit: int = 100,
+    ) -> list[ArticleAnalysis]:
+        """Return the newest stored analysis version for each genuine company article."""
+
+        filters = ["a.ticker = ?", "a.is_demo = 0"]
+        parameters: list[object] = [ticker]
+        if since is not None:
+            filters.append("a.published_at >= ?")
+            parameters.append(since.isoformat())
+        where_clause = " AND ".join(filters)
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                f"""
+                SELECT analyses.article_fingerprint, analyses.analysis_json
+                FROM article_intelligence_analyses AS analyses
+                JOIN articles AS a
+                  ON a.fingerprint = analyses.article_fingerprint
+                WHERE {where_clause}
+                ORDER BY a.published_at DESC, analyses.created_at DESC, analyses.rowid DESC
+                """,
+                parameters,
+            ).fetchall()
+        results: list[ArticleAnalysis] = []
+        seen_articles: set[str] = set()
+        for row in rows:
+            article_id = str(row["article_fingerprint"])
+            if article_id in seen_articles:
+                continue
+            try:
+                analysis = ArticleAnalysis.model_validate_json(row["analysis_json"])
+            except ValidationError:
+                LOGGER.warning(
+                    "Skipping incompatible stored article analysis for article_id=%s",
+                    article_id,
+                )
+                continue
+            results.append(analysis)
+            seen_articles.add(article_id)
+            if len(results) >= limit:
+                break
+        return results
 
     def upsert_sentiments(self, articles: Iterable[ScoredArticle]) -> None:
         rows = [

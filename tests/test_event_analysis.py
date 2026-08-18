@@ -1,4 +1,6 @@
+import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -361,7 +363,7 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     provider = FakeProvider(
         event(magnitude=0.65, confidence=0.8), ClaimAssessments(), RelatedCompanyProposals()
     )
-    service, _, primary, _ = prepared_service(writable_tmp_path, provider)
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
 
     generated = service.analyze_article(primary.fingerprint)
     cached = service.analyze_article(primary.fingerprint)
@@ -372,6 +374,33 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     assert (
         generated.analysis.event.model_confidence == cached.analysis.event.model_confidence == 0.8
     )
+    with sqlite3.connect(repository.path) as connection:
+        cache_version = connection.execute(
+            "SELECT cache_version FROM article_intelligence_analyses WHERE article_fingerprint = ?",
+            (primary.fingerprint,),
+        ).fetchone()[0]
+    assert "c=related-company-v4" in cache_version
+    legacy_payload = generated.analysis.model_dump(mode="json")
+    legacy_payload.pop("evidence_strength")
+    with sqlite3.connect(repository.path) as connection:
+        connection.execute(
+            """
+            INSERT INTO article_intelligence_analyses (
+                article_fingerprint, model_version, cache_version, schema_version,
+                analysis_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                primary.fingerprint,
+                "legacy-model",
+                "legacy-cache",
+                "legacy-schema",
+                json.dumps(legacy_payload),
+                "9999-01-01T00:00:00+00:00",
+            ),
+        )
+    stored = repository.list_article_analyses("ACME")
+    assert [item.article_id for item in stored] == [primary.fingerprint]
     assert (provider.stage_a_calls, provider.stage_b_calls, provider.stage_c_calls) == (1, 1, 1)
 
 
@@ -458,6 +487,46 @@ def test_vague_forecast_preserves_zero_magnitude_and_uncertainty(writable_tmp_pa
     assert response.status == "generated"
     assert response.analysis.event.magnitude == 0.0
     assert response.analysis.event.uncertainties
+    assert response.analysis.related_companies == []
+    assert provider.stage_c_calls == 0
+
+
+def test_commentary_without_a_concrete_event_never_reaches_stage_c(writable_tmp_path) -> None:
+    provider = FakeProvider(
+        event(magnitude=0.0, confidence=0.0, event_type=EventType.UNCERTAIN),
+        ClaimAssessments(),
+        RelatedCompanyProposals(related_companies=[proposal("MSFT"), proposal("GOOGL")]),
+    )
+    service, repository, primary, _ = prepared_service(writable_tmp_path, provider)
+    commentary = primary.model_copy(
+        update={
+            "title": "Prediction: Apple faces an uncertain market outlook",
+            "source": "The Motley Fool",
+            "snippet": "Commentary offers no concrete company event.",
+        }
+    )
+    repository.upsert_articles([commentary])
+
+    response = service.analyze_article(commentary.fingerprint)
+
+    assert response.status == "generated"
+    assert response.analysis.related_companies == []
+    assert provider.stage_c_calls == 0
+
+
+def test_concrete_material_event_still_allows_related_company_analysis(writable_tmp_path) -> None:
+    provider = FakeProvider(
+        event(magnitude=0.65, confidence=0.9, event_type=EventType.PARTNERSHIP),
+        ClaimAssessments(),
+        RelatedCompanyProposals(related_companies=[proposal("AMD")]),
+    )
+    service, _, primary, _ = prepared_service(writable_tmp_path, provider, nvda=True)
+
+    response = service.analyze_article(primary.fingerprint)
+
+    assert response.status == "generated"
+    assert [item.ticker for item in response.analysis.related_companies] == ["AMD"]
+    assert provider.stage_c_calls == 1
 
 
 def test_major_investment_can_remain_meaningful_with_high_extraction_confidence(
@@ -625,6 +694,11 @@ def test_api_returns_generated_then_cached(writable_tmp_path) -> None:
 
     assert generated.json()["status"] == "generated"
     assert cached.json()["status"] == "cached"
+    assert 0 <= generated.json()["analysis"]["evidence_strength"] <= 1
+    assert (
+        generated.json()["analysis"]["evidence_strength"]
+        == cached.json()["analysis"]["evidence_strength"]
+    )
     assert generated.json()["analysis"]["event"]["magnitude"] == 0.5
     assert generated.json()["analysis"]["event"]["model_confidence"] == 0.7
 
