@@ -89,6 +89,22 @@ def build_services(settings: Settings) -> Services:
         batch_size=settings.finbert_batch_size,
         hf_token=settings.hf_token,
     )
+    provider = (
+        OpenAIArticleIntelligenceProvider(
+            api_key=settings.llm_api_key,
+            model_version=settings.llm_model,
+            base_url=settings.llm_base_url,
+            timeout_seconds=settings.llm_timeout_seconds,
+        )
+        if settings.llm_api_key
+        else UnavailableArticleAnalysisProvider()
+    )
+    article_events = ArticleEventAnalysisService(
+        repository=repository,
+        provider=provider,
+        constituents=constituents,
+        evidence_limit=settings.article_analysis_evidence_limit,
+    )
     analysis = MarketAnalysisService(
         constituents=constituents,
         news=news,
@@ -109,22 +125,9 @@ def build_services(settings: Settings) -> Services:
             stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
             schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
         ),
-    )
-    provider = (
-        OpenAIArticleIntelligenceProvider(
-            api_key=settings.llm_api_key,
-            model_version=settings.llm_model,
-            base_url=settings.llm_base_url,
-            timeout_seconds=settings.llm_timeout_seconds,
-        )
-        if settings.llm_api_key
-        else UnavailableArticleAnalysisProvider()
-    )
-    article_events = ArticleEventAnalysisService(
-        repository=repository,
-        provider=provider,
-        constituents=constituents,
-        evidence_limit=settings.article_analysis_evidence_limit,
+        article_analysis_runner=article_events if settings.llm_api_key else None,
+        analysis_auto_candidates=settings.analysis_auto_candidates,
+        analysis_auto_max_new_per_run=settings.analysis_auto_max_new_per_run,
     )
     return Services(
         repository=repository,

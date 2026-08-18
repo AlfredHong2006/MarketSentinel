@@ -8,12 +8,12 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
-from urllib.parse import urlparse
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
+from marketsentinel.article_sources import classify_article_source
 from marketsentinel.domain import (
     Article,
     ArticleAnalysis,
@@ -39,6 +39,7 @@ from marketsentinel.errors import (
     ArticleAnalysisValidationError,
 )
 from marketsentinel.event_policy import is_meaningful_event
+from marketsentinel.ownership_patterns import text_describes_external_institutional_holding
 from marketsentinel.storage.sqlite import SQLiteRepository
 from marketsentinel.timeutils import utc_now
 
@@ -596,16 +597,7 @@ def _is_external_institutional_holding_change(article: Article, subject: Company
 def _text_describes_external_institutional_holding(text: str, subject: CompanyReference) -> bool:
     """Recognize explicit ownership reporting without treating generic finance terms as signals."""
 
-    text = text.casefold()
-    subject_pattern = _company_reference_pattern(subject)
-    external_actor = r"\b(?:fund|hedge fund|asset manager|investment manager|investment management|capital management|capital partners|institution(?:al investor)?|investors?|berkshire|blackrock|vanguard|llc|lp|llp)\b"
-    owned_security = (
-        rf"(?:shares?\s+(?:of|in)\s+{subject_pattern}|(?:of\s+)?{subject_pattern}\s+shares?)"
-    )
-    owned_position = rf"(?:\b(?:position|stake|holding)s?\s+(?:in|of)\s+{subject_pattern}|{subject_pattern}\s+(?:position|stake|holding)s?)"
-    quantity = r"(?:[$£€]?\d[\d,.]*(?:\s?(?:k|m|bn|b|thousand|million|billion))?\s+)?"
-    ownership_change = rf"(?:{external_actor}).{{0,100}}?(?:\b(?:buy|buys|bought|sell|sells|sold|acquire|acquires|acquired|purchase|purchases|purchased)\b\s+{quantity}{owned_security}|\b(?:raise|raises|raised|reduce|reduces|reduced|increase|increases|increased|decrease|decreases|decreased|trim|trims|trimmed|take|takes|took)\b\s+(?:its\s+)?{owned_position}|\b(?:report|reports|reported|disclose|discloses|disclosed)\b.{{0,80}}?{quantity}{owned_position})"
-    return re.search(ownership_change, text) is not None
+    return text_describes_external_institutional_holding(text, subject)
 
 
 def _normalise_external_institutional_holding(
@@ -687,56 +679,7 @@ def _evidence_strength(context: _AnalysisContext, claims: Sequence[ClaimAssessme
 
 
 def _source_class(source: str, url: str | None = None, title: str | None = None) -> SourceClass:
-    value = source.casefold()
-    hostname = urlparse(url).hostname.casefold() if url and urlparse(url).hostname else ""
-    title_value = (title or "").casefold()
-    if any(
-        item in value
-        for item in (
-            "nvidia newsroom",
-            "nvidia blog",
-            "nvidia investor",
-            "apple newsroom",
-            "apple investor",
-            "investor relations",
-        )
-    ) or hostname.endswith(("nvidia.com", "apple.com")):
-        return SourceClass.OFFICIAL_COMPANY
-    if any(
-        item in value or item in hostname
-        for item in ("sec", "sec.gov", "edgar", "fca", "fca.org", "companies house")
-    ):
-        return SourceClass.REGULATORY_OR_FILING
-    if any(
-        item in value or item in hostname
-        for item in (
-            "reuters",
-            "bloomberg",
-            "financial times",
-            "ft.com",
-            "wall street journal",
-            "wsj.com",
-            "cnbc",
-        )
-    ):
-        return SourceClass.MAJOR_FINANCIAL_NEWS
-    if any(item in value for item in ("the register", "tom's hardware", "semianalysis")):
-        return SourceClass.INDUSTRY_SPECIALIST
-    if any(
-        item in value or item in title_value
-        for item in (
-            "opinion",
-            "motley fool",
-            "seeking alpha",
-            "investorplace",
-            "prediction:",
-            "price prediction",
-        )
-    ):
-        return SourceClass.COMMENTARY_OR_OPINION
-    if value and value != "unknown source":
-        return SourceClass.GENERAL_NEWS
-    return SourceClass.UNKNOWN
+    return classify_article_source(source, url, title)
 
 
 def _rank_evidence(primary: Article, candidates: Sequence[Article], limit: int) -> list[Article]:

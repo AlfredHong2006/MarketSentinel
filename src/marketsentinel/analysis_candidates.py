@@ -1,0 +1,281 @@
+"""Pure, deterministic candidate selection for automatic article analysis."""
+
+import re
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
+
+from marketsentinel.article_sources import classify_article_source
+from marketsentinel.domain import Article, AutomaticAnalysisDiagnostics, SourceClass
+from marketsentinel.normalization import normalize_text
+from marketsentinel.ownership_patterns import (
+    CompanyIdentity,
+    text_describes_external_institutional_holding,
+)
+
+MIN_USEFUL_RELEVANCE = 0.5
+DEFAULT_PUBLISHER_CAP = 3
+NEAR_TITLE_WINDOW_HOURS = 48
+NEAR_TITLE_OVERLAP = 0.75
+
+SOURCE_PRIORITY = {
+    SourceClass.OFFICIAL_COMPANY: 5,
+    SourceClass.REGULATORY_OR_FILING: 5,
+    SourceClass.MAJOR_FINANCIAL_NEWS: 4,
+    SourceClass.INDUSTRY_SPECIALIST: 3,
+    SourceClass.GENERAL_NEWS: 2,
+    SourceClass.UNKNOWN: 1,
+    SourceClass.COMMENTARY_OR_OPINION: 0,
+}
+
+_PREDICTION_PATTERNS = (
+    re.compile(r"\bprice prediction\b", re.I),
+    re.compile(r"^prediction\s*:", re.I),
+    re.compile(r"\bwill\b.{0,45}\b(?:stock|shares?)\b.{0,20}\b(?:rise|fall|go up|drop)\b", re.I),
+    re.compile(r"\bwhere will\b.{0,45}\b(?:stock|shares?)\b", re.I),
+    re.compile(r"\b(?:stock|shares?)\b.{0,25}\b(?:overvalued|undervalued)\b", re.I),
+)
+_SUBJECT_ACTIONS = (
+    "acquire",
+    "acquires",
+    "acquired",
+    "buy",
+    "buys",
+    "bought",
+    "invest",
+    "invests",
+    "invested",
+    "partner",
+    "partners",
+    "partnered",
+    "raises capital",
+    "raised capital",
+    "raises funding",
+    "launches",
+    "launched",
+    "announces",
+    "announced",
+    "report",
+    "reports",
+    "reported",
+    "post",
+    "posts",
+    "posted",
+    "beat",
+    "beats",
+    "miss",
+    "misses",
+    "missed",
+    "unveil",
+    "unveils",
+    "unveiled",
+    "win",
+    "wins",
+    "won",
+    "secure",
+    "secures",
+    "secured",
+    "settle",
+    "settles",
+    "settled",
+    "file",
+    "files",
+    "filed",
+    "expand",
+    "expands",
+    "expanded",
+)
+_TITLE_IGNORED = {
+    "about",
+    "after",
+    "amid",
+    "and",
+    "for",
+    "from",
+    "into",
+    "says",
+    "that",
+    "the",
+    "this",
+    "with",
+}
+
+
+@dataclass(frozen=True)
+class CandidateSelection:
+    candidates: tuple[Article, ...]
+    diagnostics: AutomaticAnalysisDiagnostics
+
+
+def select_analysis_candidates(
+    articles: Sequence[Article],
+    now: datetime,
+    limit: int,
+    *,
+    subject_company: CompanyIdentity,
+    relevance_floor: float = MIN_USEFUL_RELEVANCE,
+    publisher_cap: int = DEFAULT_PUBLISHER_CAP,
+) -> list[Article]:
+    """Return an ordered candidate list with no I/O or implicit clock access."""
+
+    return list(
+        select_analysis_candidates_with_diagnostics(
+            articles,
+            now,
+            limit,
+            subject_company=subject_company,
+            relevance_floor=relevance_floor,
+            publisher_cap=publisher_cap,
+        ).candidates
+    )
+
+
+def select_analysis_candidates_with_diagnostics(
+    articles: Sequence[Article],
+    now: datetime,
+    limit: int,
+    *,
+    subject_company: CompanyIdentity,
+    relevance_floor: float = MIN_USEFUL_RELEVANCE,
+    publisher_cap: int = DEFAULT_PUBLISHER_CAP,
+) -> CandidateSelection:
+    """Filter, rank, and diversify candidates deterministically."""
+
+    if not 0 <= limit <= 40:
+        raise ValueError("candidate limit must be between 0 and 40")
+    if publisher_cap < 1:
+        raise ValueError("publisher cap must be at least 1")
+
+    eligible: list[Article] = []
+    demo_rejected = low_relevance_rejected = obvious_holdings_rejected = 0
+    excluded_prediction = commentary_deprioritized = 0
+    for article in articles:
+        if article.is_demo:
+            demo_rejected += 1
+            continue
+        if article.relevance_score < relevance_floor:
+            low_relevance_rejected += 1
+            continue
+        if _is_obvious_holding_title(article.title, subject_company):
+            obvious_holdings_rejected += 1
+            continue
+        if _is_obvious_prediction(article.title):
+            excluded_prediction += 1
+            continue
+        if (
+            classify_article_source(article.source, article.url, article.title)
+            is SourceClass.COMMENTARY_OR_OPINION
+        ):
+            commentary_deprioritized += 1
+        eligible.append(article)
+
+    ranked = sorted(eligible, key=lambda article: _ranking_key(article, now))
+    accepted: list[Article] = []
+    publisher_counts: Counter[str] = Counter()
+    publisher_cap_rejected = near_title_rejected = 0
+    for article in ranked:
+        if len(accepted) >= limit:
+            break
+        if any(_near_title(article, previous) for previous in accepted):
+            near_title_rejected += 1
+            continue
+        publisher = normalize_text(article.source) or "unknown source"
+        if publisher_counts[publisher] >= publisher_cap:
+            publisher_cap_rejected += 1
+            continue
+        accepted.append(article)
+        publisher_counts[publisher] += 1
+
+    diagnostics = AutomaticAnalysisDiagnostics(
+        considered=len(articles),
+        selected=len(accepted),
+        demo_rejected=demo_rejected,
+        low_relevance_rejected=low_relevance_rejected,
+        obvious_holdings_rejected=obvious_holdings_rejected,
+        excluded_prediction=excluded_prediction,
+        commentary_deprioritized=commentary_deprioritized,
+        publisher_cap_rejected=publisher_cap_rejected,
+        near_title_rejected=near_title_rejected,
+    )
+    return CandidateSelection(tuple(accepted), diagnostics)
+
+
+def _ranking_key(article: Article, now: datetime) -> tuple[float, float, float, str]:
+    source_class = classify_article_source(article.source, article.url, article.title)
+    age_seconds = max(0.0, (now - article.published_at).total_seconds())
+    return (
+        -float(SOURCE_PRIORITY[source_class]),
+        -article.relevance_score,
+        age_seconds,
+        article.fingerprint,
+    )
+
+
+def _is_obvious_prediction(title: str) -> bool:
+    return any(pattern.search(title) is not None for pattern in _PREDICTION_PATTERNS)
+
+
+def _is_obvious_holding_title(title: str, subject: CompanyIdentity) -> bool:
+    if not text_describes_external_institutional_holding(title, subject):
+        return False
+    return not _title_contains_subject_company_action(title, subject)
+
+
+def _title_contains_subject_company_action(title: str, subject: CompanyIdentity) -> bool:
+    normalized = normalize_text(title)
+    names = {normalize_text(subject.name), normalize_text(subject.symbol)}
+    legal_suffixes = (" inc", " incorporated", " corporation", " corp", " plc", " limited", " ltd")
+    names.update(
+        name[: -len(suffix)]
+        for name in tuple(names)
+        for suffix in legal_suffixes
+        if name.endswith(suffix)
+    )
+    for name in sorted((name for name in names if name), key=len, reverse=True):
+        start = 0
+        while (position := normalized.find(name, start)) >= 0:
+            following = normalized[position + len(name) : position + len(name) + 45]
+            if any(
+                re.search(rf"\b{re.escape(action)}\b", following) for action in _SUBJECT_ACTIONS
+            ):
+                return True
+            start = position + len(name)
+    return False
+
+
+def _near_title(first: Article, second: Article) -> bool:
+    if abs((first.published_at - second.published_at).total_seconds()) > (
+        NEAR_TITLE_WINDOW_HOURS * 60 * 60
+    ):
+        return False
+    first_terms = _title_terms(first.title)
+    second_terms = _title_terms(second.title)
+    if not first_terms or not second_terms:
+        return False
+    shared_terms = first_terms & second_terms
+    overlap = len(shared_terms) / min(len(first_terms), len(second_terms))
+    if overlap < NEAR_TITLE_OVERLAP:
+        return False
+    # High template overlap is not enough when each headline replaces a substantive detail,
+    # such as a counterparty, place, acquisition target, or opposite earnings outcome.
+    return not (first_terms - shared_terms and second_terms - shared_terms)
+
+
+def _title_terms(title: str) -> set[str]:
+    return {
+        _stem_title_term(term)
+        for term in re.findall(r"[a-z0-9]{3,}", title.casefold())
+        if term not in _TITLE_IGNORED
+    }
+
+
+def _stem_title_term(term: str) -> str:
+    if term.endswith("sses") and len(term) > 5:
+        return term[:-2]
+    if term.endswith("s") and not term.endswith("ss") and len(term) > 4:
+        return term[:-1]
+    for suffix in ("ing", "ed"):
+        if term.endswith(suffix) and len(term) - len(suffix) >= 4:
+            return term[: -len(suffix)]
+    return term

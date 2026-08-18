@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     article_analysis_evidence_limit: int = Field(default=5, ge=0, le=8)
+    analysis_auto_candidates: int = Field(default=15, ge=0, le=40)
+    analysis_auto_max_new_per_run: int = Field(default=6, ge=0, le=15)
 
     news_lookback_days: int = Field(default=7, ge=1, le=30)
     news_max_articles: int = Field(default=50, ge=1, le=200)

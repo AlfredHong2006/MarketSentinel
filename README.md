@@ -194,8 +194,10 @@ starter configuration.
 | `HISTORICAL_GDELT_WINDOW_DAYS` | `30` | One bounded GDELT query span (shorten only if needed) |
 | `HISTORICAL_GDELT_REQUEST_INTERVAL_SECONDS` | `5.25` | Public GDELT request pacing |
 | `ALLOW_DEMO_FALLBACK` | `true` | Permit visibly labelled synthetic fallback headlines |
-| `LLM_API_KEY` | unset | Enables the optional typed OpenAI article-intelligence stages |
+| `LLM_API_KEY` | unset | Enables manual and bounded automatic typed OpenAI article-intelligence stages |
 | `LLM_MODEL` | `gpt-4o-mini` | OpenAI model used by all three intelligence stages |
+| `ANALYSIS_AUTO_CANDIDATES` | `15` | Maximum deterministically selected articles considered per explicit company analysis |
+| `ANALYSIS_AUTO_MAX_NEW_PER_RUN` | `6` | Maximum uncached article-analysis attempts per run; set to `0` to disable automatic inference |
 
 The `.env`, SQLite databases, model caches, virtual environments, and provider caches are ignored by
 Git. API credentials can be added to the settings/provider boundary later; they must never be

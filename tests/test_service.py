@@ -12,22 +12,27 @@ from marketsentinel.dashboard_intelligence import (
 )
 from marketsentinel.domain import (
     ArticleAnalysis,
+    ArticleAnalysisResponse,
     ArticleEvidenceReference,
+    ClaimAssessments,
     CompanyReference,
     EventDirection,
     EventExtraction,
     EventType,
     IngestionFunnel,
     NewsFetchResult,
+    RelatedCompanyProposals,
     SourceClass,
     SourceHealth,
     TimeHorizon,
+    UniverseResult,
 )
 from marketsentinel.event_analysis import (
     ARTICLE_ANALYSIS_SCHEMA_VERSION,
     STAGE_A_PROMPT_VERSION,
     STAGE_B_PROMPT_VERSION,
     STAGE_C_PROMPT_VERSION,
+    ArticleEventAnalysisService,
 )
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.sentiment.finbert import StaticSentimentAnalyzer
@@ -39,6 +44,14 @@ class FakeConstituents:
     def resolve(self, symbol: str):
         assert symbol == "ACME"
         return make_constituent()
+
+    def load(self) -> UniverseResult:
+        return UniverseResult(
+            constituents=[make_constituent()],
+            source="test",
+            is_fallback=False,
+            fetched_at=datetime.now(UTC),
+        )
 
 
 class FakeNews:
@@ -84,6 +97,92 @@ class FakePrices:
     def fetch(self, constituent):
         del constituent
         return make_price_history()
+
+
+class StoringArticleAnalysisRunner:
+    def __init__(self, repository: SQLiteRepository, model_version: str) -> None:
+        self.repository = repository
+        self.model_version = model_version
+        self.calls: list[str] = []
+
+    def analyze_article(self, article_id: str) -> ArticleAnalysisResponse:
+        self.calls.append(article_id)
+        article = self.repository.get_article(article_id)
+        assert article is not None
+        analysis = ArticleAnalysis(
+            article_id=article.fingerprint,
+            source_reference=ArticleEvidenceReference(
+                article_id=article.fingerprint,
+                title=article.title,
+                publisher=article.source,
+                published_at=article.published_at,
+                url=article.url,
+            ),
+            source_class=SourceClass.MAJOR_FINANCIAL_NEWS,
+            subject_company=CompanyReference(symbol="ACME", name="Acme Corporation"),
+            event=EventExtraction(
+                event_type=EventType.PARTNERSHIP,
+                summary=f"Acme announced a material partnership: {article.title}",
+                direction=EventDirection.POSITIVE,
+                magnitude=0.55,
+                time_horizon=TimeHorizon.IMMEDIATE,
+                model_confidence=0.85,
+                important_claims=["Acme announced a material partnership."],
+                positive_channels=["Possible commercial expansion"],
+            ),
+            evidence_count=0,
+            evidence_strength=0.7,
+            evidence_fingerprint=f"evidence-{article.fingerprint[:16]}",
+            model_version=self.model_version,
+            stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+            stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+            stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+            schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+            analysis_created_at=datetime.now(UTC),
+        )
+        self.repository.store_article_analysis(analysis, f"fake-{article.fingerprint}")
+        return ArticleAnalysisResponse(
+            article_id=article_id,
+            status="generated",
+            analysis=analysis,
+        )
+
+
+class CountingArticleIntelligenceProvider:
+    model_version = "counting-event-model"
+
+    def __init__(self) -> None:
+        self.stage_a_calls = 0
+        self.stage_b_calls = 0
+        self.stage_c_calls = 0
+
+    @property
+    def total_calls(self) -> int:
+        return self.stage_a_calls + self.stage_b_calls + self.stage_c_calls
+
+    def extract_event(self, request) -> EventExtraction:
+        del request
+        self.stage_a_calls += 1
+        return EventExtraction(
+            event_type=EventType.PARTNERSHIP,
+            summary="Acme announced a material commercial partnership.",
+            direction=EventDirection.POSITIVE,
+            magnitude=0.55,
+            time_horizon=TimeHorizon.IMMEDIATE,
+            model_confidence=0.85,
+            important_claims=["Acme announced a material commercial partnership."],
+            positive_channels=["Possible commercial expansion"],
+        )
+
+    def assess_claims(self, request) -> ClaimAssessments:
+        del request
+        self.stage_b_calls += 1
+        return ClaimAssessments()
+
+    def select_related_companies(self, request) -> RelatedCompanyProposals:
+        del request
+        self.stage_c_calls += 1
+        return RelatedCompanyProposals()
 
 
 def test_service_runs_complete_vertical_slice_without_network_or_real_model(
@@ -216,3 +315,107 @@ def test_stored_compatible_meaningful_analysis_reaches_todays_intelligence(
     compatible = compatible_intelligence_events(payload["intelligence_events"])
     cards = prepare_todays_intelligence(compatible)
     assert analysis.article_id in {card.event.article_id for card in cards}
+
+
+def test_automatic_candidate_analysis_reaches_same_company_response(
+    writable_tmp_path,
+) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    model_version = "test-event-model"
+    compatibility = ArticleAnalysisCompatibility(
+        model_version=model_version,
+        stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+        stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+        stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+        schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+    )
+    runner = StoringArticleAnalysisRunner(repository, model_version)
+    service = MarketAnalysisService(
+        constituents=FakeConstituents(),
+        news=FakeNews(),
+        historical_news=FakeHistoricalNews(),
+        sentiment=StaticSentimentAnalyzer(),
+        prices=FakePrices(),
+        repository=repository,
+        forecaster=BaselineForecaster(),
+        article_analysis_compatibility=compatibility,
+        article_analysis_runner=runner,
+        analysis_auto_candidates=15,
+        analysis_auto_max_new_per_run=6,
+    )
+    app = create_app(
+        services=Services(
+            repository=repository,
+            constituents=FakeConstituents(),
+            analysis=service,
+            article_events=SimpleNamespace(),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/analyze", json={"symbol": "ACME"})
+
+    response.raise_for_status()
+    payload = response.json()
+    assert runner.calls
+    assert payload["automatic_analysis"]["newly_generated"] == len(runner.calls)
+    assert set(runner.calls).issubset(
+        {item["article_id"] for item in payload["intelligence_events"]}
+    )
+    assert set(runner.calls).issubset({item["article_id"] for item in payload["analyzed_events"]})
+    cards = prepare_todays_intelligence(
+        compatible_intelligence_events(payload["intelligence_events"])
+    )
+    assert set(runner.calls).intersection(card.event.article_id for card in cards)
+
+
+def test_repeat_company_analysis_uses_real_exact_article_analysis_cache(
+    writable_tmp_path,
+) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    constituents = FakeConstituents()
+    provider = CountingArticleIntelligenceProvider()
+    article_events = ArticleEventAnalysisService(
+        repository=repository,
+        provider=provider,
+        constituents=constituents,
+        evidence_limit=5,
+    )
+    service = MarketAnalysisService(
+        constituents=constituents,
+        news=FakeNews(),
+        historical_news=FakeHistoricalNews(),
+        sentiment=StaticSentimentAnalyzer(),
+        prices=FakePrices(),
+        repository=repository,
+        forecaster=BaselineForecaster(),
+        article_analysis_compatibility=article_events.compatibility,
+        article_analysis_runner=article_events,
+        analysis_auto_candidates=15,
+        analysis_auto_max_new_per_run=6,
+    )
+    app = create_app(
+        services=Services(
+            repository=repository,
+            constituents=constituents,
+            analysis=service,
+            article_events=article_events,
+        )
+    )
+
+    with TestClient(app) as client:
+        first = client.post("/api/v1/analyze", json={"symbol": "ACME"})
+        provider_calls_after_first = provider.total_calls
+        second = client.post("/api/v1/analyze", json={"symbol": "ACME"})
+
+    first.raise_for_status()
+    second.raise_for_status()
+    first_diagnostics = first.json()["automatic_analysis"]
+    second_diagnostics = second.json()["automatic_analysis"]
+    assert first_diagnostics["newly_generated"] > 0
+    assert provider_calls_after_first > 0
+    assert second_diagnostics["cached"] == first_diagnostics["newly_generated"]
+    assert second_diagnostics["newly_generated"] == 0
+    assert provider.total_calls == provider_calls_after_first
