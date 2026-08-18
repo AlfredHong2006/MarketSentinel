@@ -7,12 +7,12 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from marketsentinel.event_policy import is_meaningful_event_values
+
 TIMEFRAME_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12}
 DEFAULT_TIMEFRAME = "6M"
 CHART_LAYERS = ("Price", "Sentiment", "Events")
 MAX_EVENT_MARKERS = 8
-MIN_EVENT_MAGNITUDE = 0.35
-MIN_EXTRACTION_CONFIDENCE = 0.5
 
 _PRICE_COLOR = "#4C78FF"
 _SENTIMENT_COLOR = "#22C55E"
@@ -78,9 +78,9 @@ def select_meaningful_events(
         extraction_confidence = float(event["extraction_confidence"])
         if not start <= event_date <= end:
             continue
-        if str(event["event_type"]) == "uncertain":
-            continue
-        if magnitude < MIN_EVENT_MAGNITUDE or extraction_confidence < MIN_EXTRACTION_CONFIDENCE:
+        if not is_meaningful_event_values(
+            str(event["event_type"]), magnitude, extraction_confidence
+        ):
             continue
         candidate = dict(event)
         candidate["event_date"] = event_date

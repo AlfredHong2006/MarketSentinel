@@ -7,11 +7,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from marketsentinel.domain import CompanyIntelligenceEvent, EventType, SourceClass
+from marketsentinel.domain import CompanyIntelligenceEvent, SourceClass
+from marketsentinel.event_policy import is_meaningful_event
 
 MAX_TODAYS_INTELLIGENCE = 4
-MIN_INTELLIGENCE_MAGNITUDE = 0.30
-MIN_INTELLIGENCE_CONFIDENCE = 0.65
 
 _SOURCE_QUALITY = {
     SourceClass.REGULATORY_OR_FILING: 6,
@@ -52,12 +51,7 @@ def compatible_intelligence_events(
 def is_intelligence_eligible(event: CompanyIntelligenceEvent) -> bool:
     """Keep the main dashboard focused on concrete, well-supported events."""
 
-    return (
-        event.event.event_type is not EventType.UNCERTAIN
-        and event.event.magnitude >= MIN_INTELLIGENCE_MAGNITUDE
-        and event.event.model_confidence >= MIN_INTELLIGENCE_CONFIDENCE
-        and bool(event.event.important_claims)
-    )
+    return is_meaningful_event(event.event)
 
 
 def prepare_todays_intelligence(

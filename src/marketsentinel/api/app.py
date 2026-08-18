@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import AnalysisResult, ArticleAnalysisResponse, UniverseResult
@@ -18,6 +19,10 @@ from marketsentinel.errors import (
     SentimentModelError,
 )
 from marketsentinel.event_analysis import (
+    ARTICLE_ANALYSIS_SCHEMA_VERSION,
+    STAGE_A_PROMPT_VERSION,
+    STAGE_B_PROMPT_VERSION,
+    STAGE_C_PROMPT_VERSION,
     ArticleEventAnalysisService,
     OpenAIArticleIntelligenceProvider,
     UnavailableArticleAnalysisProvider,
@@ -97,6 +102,13 @@ def build_services(settings: Settings) -> Services:
         historical_news_days=settings.historical_news_days,
         historical_news_max_articles=settings.historical_news_max_articles,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
+        article_analysis_compatibility=ArticleAnalysisCompatibility(
+            model_version=settings.llm_model,
+            stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+            stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+            stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+            schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+        ),
     )
     provider = (
         OpenAIArticleIntelligenceProvider(

@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from marketsentinel.aggregation.sentiment import aggregate_daily_sentiment
+from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import (
     AnalysisResult,
@@ -10,7 +11,6 @@ from marketsentinel.domain import (
     PriceHistory,
     SourceHealth,
 )
-from marketsentinel.event_analysis import STAGE_C_PROMPT_VERSION
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.normalization import (
     deduplicate_with_diagnostics,
@@ -44,6 +44,7 @@ class MarketAnalysisService:
         historical_news_days: int = 30,
         historical_news_max_articles: int = 180,
         sentiment_half_life_hours: float = 24.0,
+        article_analysis_compatibility: ArticleAnalysisCompatibility | None = None,
     ) -> None:
         self.constituents = constituents
         self.news = news
@@ -57,6 +58,7 @@ class MarketAnalysisService:
         self.historical_news_days = historical_news_days
         self.historical_news_max_articles = historical_news_max_articles
         self.sentiment_half_life_hours = sentiment_half_life_hours
+        self.article_analysis_compatibility = article_analysis_compatibility
 
     def analyze(self, symbol: str) -> AnalysisResult:
         constituent = self.constituents.resolve(symbol)
@@ -167,12 +169,8 @@ class MarketAnalysisService:
         stored_analyses = self.repository.list_article_analyses(
             constituent.symbol,
             since=now - timedelta(days=366),
+            compatibility=self.article_analysis_compatibility,
         )
-        stored_analyses = [
-            item
-            for item in stored_analyses
-            if item.stage_c_prompt_version == STAGE_C_PROMPT_VERSION
-        ]
         analyzed_events = [item.to_analyzed_event() for item in stored_analyses]
         intelligence_events = [item.to_company_intelligence_event() for item in stored_analyses]
         return AnalysisResult(

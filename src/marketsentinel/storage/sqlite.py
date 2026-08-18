@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.domain import Article, ArticleAnalysis, DailySentiment, ScoredArticle
 from marketsentinel.normalization import normalize_text, normalize_url
 
@@ -292,6 +293,7 @@ class SQLiteRepository:
         ticker: str,
         since: datetime | None = None,
         limit: int = 100,
+        compatibility: ArticleAnalysisCompatibility | None = None,
     ) -> list[ArticleAnalysis]:
         """Return the newest stored analysis version for each genuine company article."""
 
@@ -326,6 +328,9 @@ class SQLiteRepository:
                     "Skipping incompatible stored article analysis for article_id=%s",
                     article_id,
                 )
+                continue
+            if compatibility is not None and not compatibility.accepts_for_display(analysis):
+                LOGGER.info("Skipping stale stored article analysis for article_id=%s", article_id)
                 continue
             results.append(analysis)
             seen_articles.add(article_id)
