@@ -121,6 +121,157 @@ def test_mixed_corporate_event_and_holdings_headline_survives_prefilter(
     assert select_analysis_candidates([article(title)], NOW, 1, subject_company=subject)
 
 
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Apple Inc. $AAPL Shares Sold by Winning Points Advisors LLC",
+        "Kozak & Associates Inc. Sells 6,908 Shares of Apple Inc.",
+        "Apple Inc. $AAPL Shares Acquired by BSN CAPITAL PARTNERS Ltd",
+        "Trust Co of the South Has $27.19 Million Stake in Apple Inc. $AAPL",
+        "VectorGlobal IAG Inc. Acquires New Stake in Apple Inc. $AAPL",
+        "Apple Inc. $AAPL is General Partner Inc.'s 2nd Largest Position",
+        "Rathbones Group PLC Has $832.46 Million Holdings in Apple Inc. $AAPL",
+        "Financial Solutions Advisory Group Inc. Invests $3.33 Million in Apple Inc. $AAPL",
+        "Apple Inc. $AAPL Stock Position Lifted by Liontrust Investment Partners LLP",
+        "Apple Inc. $AAPL Stock Holdings Decreased by Raab & Moskowitz Asset Management LLC",
+        "Apple Inc. $AAPL Stake Decreased by Groupama Asset Managment",
+        "Kentucky Retirement Systems Sells 840,815 Shares of Apple Inc. $AAPL",
+        "Orographic Financial Advisors LLC Purchases Shares of 32,226 Apple Inc. $AAPL",
+        "TrueWealth Financial Partners Purchases Shares of 15,158 Apple Inc. $AAPL",
+        "Norris Financial Group LLC Acquires Shares of 31,633 Apple Inc. $AAPL",
+        "Edgestream Partners L.P. Reduces Holdings in Apple Inc. $AAPL",
+        "Apple Inc. $AAPL Shares Sold by Financial Avengers Inc.",
+        "Bank of America Corp DE Sells 2,883,820 Shares of Apple Inc. $AAPL",
+    ],
+)
+def test_reverse_external_institutional_holding_titles_are_rejected(title: str) -> None:
+    result = select_analysis_candidates_with_diagnostics(
+        [article(title)], NOW, 1, subject_company=APPLE
+    )
+
+    assert result.candidates == ()
+    assert result.diagnostics.obvious_holdings_rejected == 1
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Apple sells another company",
+        "Apple acquires another company",
+        "Apple raises capital for a new factory",
+        "Apple invests in another company",
+        "Apple shares fall after a product event",
+    ],
+)
+def test_subject_company_actions_are_not_reverse_holding_false_positives(title: str) -> None:
+    assert select_analysis_candidates([article(title)], NOW, 1, subject_company=APPLE)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Stocks making the biggest moves midday: NetApp, Intel, Apple and more",
+        "Apple Inc Price Today | Live AAPL Price, Chart & Market Data",
+        "Microsoft shares are surging. Here's how to still make money",
+    ],
+)
+def test_narrow_market_reaction_only_titles_are_rejected(title: str) -> None:
+    result = select_analysis_candidates_with_diagnostics(
+        [article(title)], NOW, 1, subject_company=APPLE
+    )
+
+    assert result.candidates == ()
+    assert result.diagnostics.market_reaction_rejected == 1
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Apple Slides After Supply Shortages Hurt Sales Forecast",
+        "Microsoft shares pop on revenue beat",
+        # A record/biggest + market-capitalisation rule used to reject these genuine results and
+        # buyback announcements. Accepting a pure market-value milestone is the accepted trade.
+        "NVIDIA posts record data-centre revenue as market cap nears $5tn",
+        "NVIDIA reports record quarterly revenue, market value tops $4 trillion",
+        "Apple announces biggest buyback in company history as market cap holds $3tn",
+    ],
+)
+def test_market_reaction_with_identifiable_company_event_survives(title: str) -> None:
+    assert select_analysis_candidates([article(title)], NOW, 1, subject_company=APPLE)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Apple Inc. announces $500m US investment as Berkshire Hathaway Inc raises stake in Apple",
+        "Apple reports record quarterly revenue as Vanguard Group Inc increases position in Apple",
+        "Apple acquires an AI startup while Kentucky Retirement Systems sells 840,815 Apple shares",
+        "SoftBank Group invests $2bn in Apple to expand an AI partnership",
+        "Apple announces $500m investment in US manufacturing",
+    ],
+)
+def test_subject_action_survives_alongside_an_external_ownership_clause(title: str) -> None:
+    """Every ownership path shares one escape hatch, including the reverse-structure rules."""
+
+    result = select_analysis_candidates_with_diagnostics(
+        [article(title)], NOW, 1, subject_company=APPLE
+    )
+
+    assert [item.title for item in result.candidates] == [title]
+    assert result.diagnostics.obvious_holdings_rejected == 0
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Example Asset Management LLC invests $5m in Apple shares",
+        "Financial Solutions Advisory Group Inc. Invests $3.33 Million in Apple Inc. $AAPL",
+        "FinArc Investments Inc. Invests $2.32 Million in Apple Inc. $AAPL",
+    ],
+)
+def test_portfolio_owner_cash_investments_are_still_rejected(title: str) -> None:
+    result = select_analysis_candidates_with_diagnostics(
+        [article(title)], NOW, 1, subject_company=APPLE
+    )
+
+    assert result.candidates == ()
+    assert result.diagnostics.obvious_holdings_rejected == 1
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Apple GC Jennifer Newstead sells 1,439 shares under 10b5-1 plan",
+        "Executive sold Apple shares pursuant to Rule 10b5-1 trading plan",
+        "Apple SVP disposes of 4,000 shares under a 10b5 1 plan",
+    ],
+)
+def test_routine_scheduled_insider_sales_are_rejected(title: str) -> None:
+    result = select_analysis_candidates_with_diagnostics(
+        [article(title)], NOW, 1, subject_company=APPLE
+    )
+
+    assert result.candidates == ()
+    assert result.diagnostics.scheduled_insider_sale_rejected == 1
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Apple CEO cancels 10b5-1 plan following acquisition announcement",
+        "Apple adopts a new 10b5-1 trading plan for its chief financial officer",
+        "Apple insider sells 2,000 shares in an unscheduled disposal",
+    ],
+)
+def test_non_routine_trading_plan_titles_survive(title: str) -> None:
+    result = select_analysis_candidates_with_diagnostics(
+        [article(title)], NOW, 1, subject_company=APPLE
+    )
+
+    assert [item.title for item in result.candidates] == [title]
+    assert result.diagnostics.scheduled_insider_sale_rejected == 0
+
+
 def test_commentary_is_deprioritized_but_not_blindly_excluded() -> None:
     commentary = article(
         "Apple may expand its payments partnership",
@@ -162,6 +313,89 @@ def test_publisher_cap_is_respected() -> None:
 
     assert len(result.candidates) == 2
     assert result.diagnostics.publisher_cap_rejected == 3
+
+
+def test_official_company_sources_share_one_family_cap() -> None:
+    articles = [
+        article(
+            f"NVIDIA official development uniqueitem{index}",
+            hours_old=index,
+            source="NVIDIA Blog" if index % 2 == 0 else "NVIDIA Newsroom",
+        )
+        for index in range(6)
+    ]
+
+    result = select_analysis_candidates_with_diagnostics(articles, NOW, 10, subject_company=APPLE)
+
+    assert len(result.candidates) == 3
+    assert result.diagnostics.official_family_cap_rejected == 3
+
+
+def test_official_family_cap_leaves_room_for_major_financial_sources() -> None:
+    officials = [
+        article(
+            f"NVIDIA official event uniqueitem{index}",
+            hours_old=index,
+            source="NVIDIA Blog" if index % 2 == 0 else "NVIDIA Newsroom",
+        )
+        for index in range(6)
+    ]
+    independent = [
+        article(
+            f"NVIDIA independent event uniqueitem{index}",
+            hours_old=index + 6,
+            source=("Reuters", "Bloomberg", "Financial Times")[index],
+        )
+        for index in range(3)
+    ]
+
+    result = select_analysis_candidates([*officials, *independent], NOW, 6, subject_company=APPLE)
+
+    assert len(result) == 6
+    assert sum(item.source.startswith("NVIDIA") for item in result) == 3
+    assert {item.source for item in result[3:]} == {"Reuters", "Bloomberg", "Financial Times"}
+
+
+def test_recency_precedes_exact_relevance_within_same_high_band_and_source_tier() -> None:
+    old_exact_high = article(
+        "Apple older high relevance event",
+        hours_old=100,
+        source="Reuters",
+        relevance=0.95,
+    )
+    recent_band_high = article(
+        "Apple recent high relevance event",
+        hours_old=1,
+        source="Reuters",
+        relevance=0.85,
+    )
+
+    result = select_analysis_candidates(
+        [old_exact_high, recent_band_high], NOW, 2, subject_company=APPLE
+    )
+
+    assert result == [recent_band_high, old_exact_high]
+
+
+def test_higher_relevance_band_precedes_recency_within_same_source_tier() -> None:
+    old_high_band = article(
+        "Apple older high band event",
+        hours_old=100,
+        source="Reuters",
+        relevance=0.85,
+    )
+    recent_medium_band = article(
+        "Apple recent medium band event",
+        hours_old=1,
+        source="Reuters",
+        relevance=0.84,
+    )
+
+    result = select_analysis_candidates(
+        [old_high_band, recent_medium_band], NOW, 2, subject_company=APPLE
+    )
+
+    assert result == [old_high_band, recent_medium_band]
 
 
 def test_near_identical_headline_diversity_works_across_publishers() -> None:

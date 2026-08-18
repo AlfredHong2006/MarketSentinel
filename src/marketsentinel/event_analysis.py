@@ -723,7 +723,7 @@ def _event_supports_related_company_analysis(
 
 
 def _evidence_strength(context: _AnalysisContext, claims: Sequence[ClaimAssessment]) -> float:
-    """Return a deterministic evidence-quality indicator, not a probability of truth."""
+    """Measure supplied evidence-context strength/breadth, not claim corroboration probability."""
 
     primary_quality = {
         SourceClass.OFFICIAL_COMPANY: 0.45,
