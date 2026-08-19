@@ -25,6 +25,11 @@ experimental five-trading-day direction baseline behind a FastAPI API and Stream
 - Stores articles, FinBERT results, and daily aggregates in SQLite.
 - Optionally extracts cached structured event facts, concrete positive and negative transmission
   channels, and a broad economic-consequence persistence horizon from genuine stored articles.
+- Ranks company downside themes deterministically from those stored analyses into a 0-100 Concern
+  Index, combining event severity, evidence support, and persistence-aware recency decay, with
+  duplicate reporting bounded so repeated coverage of one event cannot inflate a theme. The Concern
+  Index is an evidence-weighted salience ranking; it is not a probability, an expected loss, a price
+  prediction, or a figure comparable across companies.
 - Shows only genuine, scored historical sentiment dates, a three-observation weighted trend, and
   article coverage. It never fills a missing day with neutral sentiment.
 - Produces an experimental probability that the adjusted close will be higher in five trading

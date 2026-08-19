@@ -32,6 +32,12 @@ from marketsentinel.dashboard_intelligence import (
     compatible_intelligence_events,
     prepare_todays_intelligence,
 )
+from marketsentinel.dashboard_risks import (
+    CONCERN_INDEX_CAPTION,
+    EMPTY_TOP_RISKS_MESSAGE,
+    compatible_top_risks,
+    prepare_top_risk_rows,
+)
 
 API_BASE_URL = os.getenv("MARKETSENTINEL_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 REQUEST_TIMEOUT = 180
@@ -282,6 +288,30 @@ def render_todays_intelligence(payload: dict[str, Any]) -> None:
             with st.expander("View analysis"):
                 render_event_analysis_details(item)
             st.markdown(f"[Original article]({item.source_reference.url})")
+
+
+def render_top_risks(payload: dict[str, Any]) -> None:
+    """Render ranked downside themes derived only from compatible stored analyses."""
+
+    st.subheader("Top Risks")
+    risks = compatible_top_risks(payload.get("top_risks", []))
+    rows = prepare_top_risk_rows(risks)
+    if not rows:
+        st.info(EMPTY_TOP_RISKS_MESSAGE)
+        return
+    st.caption(CONCERN_INDEX_CAPTION)
+    for row in rows:
+        rank_column, label_column, score_column, band_column = st.columns([1, 8, 2, 3])
+        rank_column.markdown(f"**{row.rank}**")
+        label_column.markdown(f"**{row.label}**")
+        score_column.markdown(f"**{row.concern_index}**")
+        band_column.markdown(row.band)
+        st.caption(
+            f"{row.summary} · {row.risk.supporting_signal_count} supporting signal(s) "
+            f"across {len(row.risk.supporting_publishers)} publisher(s) · latest "
+            f"{row.risk.latest_published_at:%d %b %Y} · "
+            f"[{row.risk.primary_publisher}]({row.risk.primary_article_url})"
+        )
 
 
 def render_ingestion_funnel(payload: dict[str, Any]) -> None:
@@ -637,6 +667,7 @@ else:
     render_company_header(analysis)
     render_company_chart(analysis)
     render_todays_intelligence(analysis)
+    render_top_risks(analysis)
     st.divider()
     evidence_tab, research_tab = st.tabs(["Supporting news & evidence", "Research context"])
     with evidence_tab:

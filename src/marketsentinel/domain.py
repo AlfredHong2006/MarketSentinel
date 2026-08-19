@@ -210,6 +210,8 @@ class AnalysisResult(BaseModel):
     automatic_analysis: AutomaticAnalysisDiagnostics = Field(
         default_factory=AutomaticAnalysisDiagnostics
     )
+    top_risks: list["RankedRisk"] = Field(default_factory=list)
+    risk_diagnostics: "RiskDiagnostics" = Field(default_factory=lambda: RiskDiagnostics())
     generated_at: datetime
     disclaimer: str
 
@@ -267,6 +269,60 @@ class SourceClass(StrEnum):
     GENERAL_NEWS = "general_news"
     COMMENTARY_OR_OPINION = "commentary_or_opinion"
     UNKNOWN = "unknown"
+
+
+class RiskTheme(StrEnum):
+    """Fixed downside themes. ``UNMAPPED`` is diagnostic only and is never ranked."""
+
+    EXPORT_TRADE = "export_trade"
+    REGULATORY_ANTITRUST = "regulatory_antitrust"
+    LEGAL_LITIGATION = "legal_litigation"
+    CYBERSECURITY = "cybersecurity"
+    SUPPLY_CONSTRAINT = "supply_constraint"
+    DEMAND_SLOWDOWN = "demand_slowdown"
+    CUSTOMER_CONCENTRATION = "customer_concentration"
+    COMPETITIVE_PRESSURE = "competitive_pressure"
+    EXECUTION_OPERATIONAL = "execution_operational"
+    CAPITAL_ALLOCATION = "capital_allocation"
+    GUIDANCE_VALUATION = "guidance_valuation"
+    MACRO_GEOGRAPHIC = "macro_geographic"
+    KEY_PERSON_MANAGEMENT = "key_person_management"
+    UNMAPPED = "unmapped"
+
+
+class RankedRisk(BaseModel):
+    """One ranked downside theme for one company, derived only from stored analyses.
+
+    ``concern_index`` is an evidence-weighted salience score on a 0-100 scale. It is not a
+    probability, an expected loss, a price prediction, or a cross-company calibrated risk.
+    """
+
+    theme: RiskTheme
+    concern_index: int = Field(ge=0, le=100)
+    band: Literal["Severe", "Elevated", "Moderate", "Watch"]
+    summary: str
+    primary_article_id: str
+    primary_article_url: str
+    primary_publisher: str
+    latest_published_at: datetime
+    supporting_article_ids: list[str] = Field(default_factory=list)
+    supporting_publishers: list[str] = Field(default_factory=list)
+    supporting_signal_count: int = Field(default=0, ge=0)
+    supporting_event_group_count: int = Field(default=0, ge=0)
+
+
+class RiskDiagnostics(BaseModel):
+    """Non-sensitive deterministic counters for one Top Risks computation."""
+
+    considered_analyses: int = Field(default=0, ge=0)
+    eligible_analyses: int = Field(default=0, ge=0)
+    signals_extracted: int = Field(default=0, ge=0)
+    realized_signals: int = Field(default=0, ge=0)
+    prospective_signals: int = Field(default=0, ge=0)
+    unmapped_signals: int = Field(default=0, ge=0)
+    themes_ranked: int = Field(default=0, ge=0)
+    event_groups: int = Field(default=0, ge=0)
+    severe_band_capped: int = Field(default=0, ge=0)
 
 
 class CompanyReference(BaseModel):

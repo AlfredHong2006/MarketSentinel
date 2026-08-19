@@ -10,6 +10,7 @@ from marketsentinel.dashboard_intelligence import (
     compatible_intelligence_events,
     prepare_todays_intelligence,
 )
+from marketsentinel.dashboard_risks import compatible_top_risks, prepare_top_risk_rows
 from marketsentinel.domain import (
     ArticleAnalysis,
     ArticleAnalysisResponse,
@@ -22,6 +23,7 @@ from marketsentinel.domain import (
     IngestionFunnel,
     NewsFetchResult,
     RelatedCompanyProposals,
+    RiskTheme,
     SourceClass,
     SourceHealth,
     TimeHorizon,
@@ -100,9 +102,18 @@ class FakePrices:
 
 
 class StoringArticleAnalysisRunner:
-    def __init__(self, repository: SQLiteRepository, model_version: str) -> None:
+    def __init__(
+        self,
+        repository: SQLiteRepository,
+        model_version: str,
+        *,
+        negative_channels: tuple[str, ...] = (),
+        time_horizon: TimeHorizon = TimeHorizon.IMMEDIATE,
+    ) -> None:
         self.repository = repository
         self.model_version = model_version
+        self.negative_channels = negative_channels
+        self.time_horizon = time_horizon
         self.calls: list[str] = []
 
     def analyze_article(self, article_id: str) -> ArticleAnalysisResponse:
@@ -125,10 +136,11 @@ class StoringArticleAnalysisRunner:
                 summary=f"Acme announced a material partnership: {article.title}",
                 direction=EventDirection.POSITIVE,
                 magnitude=0.55,
-                time_horizon=TimeHorizon.IMMEDIATE,
+                time_horizon=self.time_horizon,
                 model_confidence=0.85,
                 important_claims=["Acme announced a material partnership."],
                 positive_channels=["Possible commercial expansion"],
+                negative_channels=list(self.negative_channels),
             ),
             evidence_count=0,
             evidence_strength=0.7,
@@ -422,3 +434,74 @@ def test_repeat_company_analysis_uses_real_exact_article_analysis_cache(
     assert second_diagnostics["cached"] == first_diagnostics["newly_generated"]
     assert second_diagnostics["newly_generated"] == 0
     assert provider.total_calls == provider_calls_after_first
+
+
+def test_newly_stored_analysis_populates_top_risks_in_the_same_response(
+    writable_tmp_path,
+) -> None:
+    """A downside channel analysed during this request must reach top_risks in this response."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    model_version = "test-event-model"
+    compatibility = ArticleAnalysisCompatibility(
+        model_version=model_version,
+        stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+        stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+        stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+        schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+    )
+    runner = StoringArticleAnalysisRunner(
+        repository,
+        model_version,
+        negative_channels=("increases capital committed before utilisation is proven",),
+        time_horizon=TimeHorizon.MONTHS,
+    )
+    service = MarketAnalysisService(
+        constituents=FakeConstituents(),
+        news=FakeNews(),
+        historical_news=FakeHistoricalNews(),
+        sentiment=StaticSentimentAnalyzer(),
+        prices=FakePrices(),
+        repository=repository,
+        forecaster=BaselineForecaster(),
+        article_analysis_compatibility=compatibility,
+        article_analysis_runner=runner,
+        analysis_auto_candidates=15,
+        analysis_auto_max_new_per_run=6,
+    )
+    app = create_app(
+        services=Services(
+            repository=repository,
+            constituents=FakeConstituents(),
+            analysis=service,
+            article_events=SimpleNamespace(),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/analyze", json={"symbol": "ACME"})
+
+    response.raise_for_status()
+    payload = response.json()
+    assert runner.calls
+    assert payload["automatic_analysis"]["newly_generated"] == len(runner.calls)
+
+    # The JSON boundary must survive: RankedRisk is a flat non-strict payload.
+    risks = compatible_top_risks(payload["top_risks"])
+    assert risks, "a stored downside channel should produce at least one ranked risk"
+    rows = prepare_top_risk_rows(risks)
+    assert [row.rank for row in rows] == list(range(1, len(rows) + 1))
+    assert len(rows) <= 4
+
+    capital = next(risk for risk in risks if risk.theme is RiskTheme.CAPITAL_ALLOCATION)
+    assert capital.concern_index >= 1
+    assert capital.band in {"Severe", "Elevated", "Moderate", "Watch"}
+    assert capital.primary_article_id in runner.calls
+    assert capital.supporting_article_ids
+    assert capital.summary == "increases capital committed before utilisation is proven"
+
+    diagnostics = payload["risk_diagnostics"]
+    assert diagnostics["eligible_analyses"] >= 1
+    assert diagnostics["prospective_signals"] >= 1
+    assert diagnostics["themes_ranked"] == len(risks)
