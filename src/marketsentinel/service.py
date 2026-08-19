@@ -23,6 +23,7 @@ from marketsentinel.normalization import (
     deduplicate_with_diagnostics,
     deduplication_reason,
 )
+from marketsentinel.risk_scoring import rank_company_risks
 from marketsentinel.sentiment.finbert import SentimentAnalyzer
 from marketsentinel.sources.historical import HistoricalNewsProvider, HistoricalNewsService
 from marketsentinel.sources.news import NewsService
@@ -196,6 +197,9 @@ class MarketAnalysisService:
         )
         analyzed_events = [item.to_analyzed_event() for item in stored_analyses]
         intelligence_events = [item.to_company_intelligence_event() for item in stored_analyses]
+        # Deterministic and recomputed per request, so a policy change needs no migration and
+        # an analysis generated above can influence Top Risks in this same response.
+        risks = rank_company_risks(stored_analyses, now=now)
         return AnalysisResult(
             constituent=constituent,
             price_history=display_history,
@@ -220,6 +224,8 @@ class MarketAnalysisService:
                 }
             ),
             automatic_analysis=automatic_analysis,
+            top_risks=list(risks.top_risks),
+            risk_diagnostics=risks.diagnostics,
             generated_at=now,
             disclaimer=DISCLAIMER,
         )
