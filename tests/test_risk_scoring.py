@@ -498,3 +498,40 @@ def test_qualifying_signals_from_several_publishers_are_all_advertised() -> None
     assert set(risk.supporting_publishers) == {"Reuters", "Bloomberg"}
     assert risk.supporting_signal_count == 2
     assert risk.latest_published_at == NOW
+
+
+def test_extra_signal_in_an_existing_theme_changes_provenance_but_not_the_score() -> None:
+    """A recovered channel weaker than the theme maximum must not move the Concern Index.
+
+    This is the property that makes a taxonomy recall addition safe: mapping a previously
+    UNMAPPED mechanism into a theme that a stronger signal already owns adds evidence to the
+    payload without inflating the score, because aggregation takes the maximum and the extra
+    signal shares one publisher and one event group with it.
+    """
+
+    without_channel = analysis(
+        "supply",
+        event_type=EventType.SUPPLY_DISRUPTION,
+        title="Acme warns of component shortage into the fourth quarter",
+    )
+    with_channel = without_channel.model_copy(
+        update={
+            "event": without_channel.event.model_copy(
+                update={"negative_channels": ["Reduced product availability may cut shipments."]}
+            )
+        }
+    )
+
+    before = rank_company_risks([without_channel], now=NOW).top_risks[0]
+    after = rank_company_risks([with_channel], now=NOW).top_risks[0]
+
+    assert after.theme is RiskTheme.SUPPLY_CONSTRAINT
+    assert after.concern_index == before.concern_index
+    assert after.band == before.band
+    assert after.primary_article_id == before.primary_article_id
+    # Only the advertised evidence grows, and it stays one article and one event group.
+    assert before.supporting_signal_count == 1
+    assert after.supporting_signal_count == 2
+    assert after.supporting_article_ids == ["supply"]
+    assert after.supporting_event_group_count == 1
+    assert rank_company_risks([with_channel], now=NOW).diagnostics.unmapped_signals == 0
