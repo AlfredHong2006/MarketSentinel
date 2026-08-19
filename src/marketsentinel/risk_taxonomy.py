@@ -95,6 +95,9 @@ _THEME_TRIGGERS: tuple[tuple[RiskTheme, tuple[str, ...]], ...] = (
             r"depend(?:ence|ency|ent)\s+on\s+(?:a\s+)?(?:constrained|single|sole)",
             r"lead\s+times?",
             r"foundry\s+capacity",
+            # "product" is required, not optional: bare "lower availability" also describes
+            # credit, financing, or labour, none of which is a product supply constraint.
+            r"(?:reduced|lower|constrained)\s+product\s+availability",
         ),
     ),
     (
@@ -117,6 +120,12 @@ _THEME_TRIGGERS: tuple[tuple[RiskTheme, tuple[str, ...]], ...] = (
             r"contract\s+loss",
             r"restrict(?:s|ed|ing)?\s+(?:the\s+)?addressable\s+market",
             r"\bchurn\b",
+            # Falling revenue alone is not a demand mechanism: it can be supply-, pricing-, FX-,
+            # regulatory-, or execution-driven. The contraction must be attributed to a customer,
+            # contract, or order relationship before this theme is the right home.
+            r"(?:decreas\w*|declin\w*|reduction|drop|fall)\s+in\s+(?:revenue|sales|orders?)"
+            r"\s+from\s+(?:\w+\s+){0,2}"
+            r"(?:customer|client|contract|order|account|reseller|distributor)s?\b",
         ),
     ),
     (
@@ -128,6 +137,10 @@ _THEME_TRIGGERS: tuple[tuple[RiskTheme, tuple[str, ...]], ...] = (
             r"price\s+(?:competition|war|pressure\s+from\s+rivals)",
             r"\brivals?\b",
             r"commodit(?:isation|ization)",
+            # An intensifier is required, and the noun must be "competition" rather than
+            # "competitive"/"competitiveness", which read positively about the company itself.
+            # Bare "competition" would also steal "competition authority" from REGULATORY_ANTITRUST.
+            r"(?:increas\w*|intensif\w*|greater|heightened|growing|stronger|more)\s+competition\b",
         ),
     ),
     (

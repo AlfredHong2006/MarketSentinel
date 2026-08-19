@@ -168,6 +168,94 @@ def test_regulatory_theme_label_covers_government_action_not_only_antitrust() ->
     assert RiskTheme.REGULATORY_ANTITRUST.value == "regulatory_antitrust"
 
 
+# ------------------------------------------------- data-gated recall additions (fresh v5 text)
+
+# Verbatim negative-channel text observed in the fresh Stage A v5 AAPL/MSFT analyses. Each of
+# these mapped to UNMAPPED and was therefore silently dropped from Top Risks.
+_OBSERVED_V5_CHANNELS: tuple[tuple[str, RiskTheme], ...] = (
+    (
+        "Reduced product availability may lead to lower revenue.",
+        RiskTheme.SUPPLY_CONSTRAINT,
+    ),
+    (
+        "Potential decrease in revenue from government contracts in China.",
+        RiskTheme.DEMAND_SLOWDOWN,
+    ),
+    (
+        "Increased competition from local software providers as a result of the ban.",
+        RiskTheme.COMPETITIVE_PRESSURE,
+    ),
+)
+
+
+@pytest.mark.parametrize(("mechanism", "theme"), _OBSERVED_V5_CHANNELS)
+def test_observed_v5_channels_reach_their_theme(mechanism: str, theme: RiskTheme) -> None:
+    assert theme_for_mechanism(mechanism) is theme
+
+
+@pytest.mark.parametrize(
+    "mechanism",
+    [
+        # "product" is mandatory: availability of credit, financing, or labour is not a product
+        # supply constraint, and treating it as one would invent an exposure the text never states.
+        "Lower availability of credit may increase financing costs.",
+        "Reduced availability of financing could constrain investment.",
+        "Constrained availability of skilled labour may increase hiring costs.",
+        # Scarcity used as a pricing positive, and ordinary improvements.
+        "Limited availability of the anniversary edition supports premium pricing.",
+        "Improved product availability after the second plant opened.",
+        "Greater availability of developer tooling accelerates adoption.",
+    ],
+)
+def test_availability_without_product_context_is_not_a_supply_constraint(mechanism: str) -> None:
+    assert theme_for_mechanism(mechanism) is not RiskTheme.SUPPLY_CONSTRAINT
+
+
+@pytest.mark.parametrize(
+    "mechanism",
+    [
+        # A fall in revenue does not prove a demand mechanism. These are supply-, FX-, execution-
+        # and pricing-driven, so none of them may be reported as a demand slowdown.
+        "Decline in revenue due to supply shortages.",
+        "Decrease in revenue due to foreign-exchange headwinds.",
+        "Drop in sales following a product recall.",
+        "Fall in revenue due to lower average selling prices.",
+        # A reduction in a cost line is a margin improvement, not a downside mechanism.
+        "A reduction in cost of sales improves gross margin.",
+        # Growth phrasing must never reach a downside theme.
+        "An increase in revenue from services.",
+        "Potential for higher revenue from next-generation products.",
+    ],
+)
+def test_revenue_contraction_without_customer_context_is_not_a_demand_slowdown(
+    mechanism: str,
+) -> None:
+    assert theme_for_mechanism(mechanism) is not RiskTheme.DEMAND_SLOWDOWN
+
+
+@pytest.mark.parametrize(
+    "mechanism",
+    [
+        # "competitive"/"competitiveness" describe the company's own strength, not rival pressure.
+        "Positive financial results could enhance Microsoft's competitive position in the market.",
+        "Enhanced design capabilities could improve product performance and competitiveness.",
+        # Competition falling away is not competitive pressure.
+        "Reduced competition following the merger.",
+    ],
+)
+def test_competition_wording_without_an_intensifier_is_not_competitive_pressure(
+    mechanism: str,
+) -> None:
+    assert theme_for_mechanism(mechanism) is not RiskTheme.COMPETITIVE_PRESSURE
+
+
+def test_competition_authority_still_outranks_the_new_competition_trigger() -> None:
+    """Theme order must keep a regulator ahead of the intensified-competition addition."""
+
+    mechanism = "A greater competition authority probe into bundling."
+    assert theme_for_mechanism(mechanism) is RiskTheme.REGULATORY_ANTITRUST
+
+
 # --------------------------------------------------------------------------- cyber precision
 
 
