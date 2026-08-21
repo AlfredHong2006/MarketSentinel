@@ -43,7 +43,7 @@ from marketsentinel.ownership_patterns import text_describes_external_institutio
 from marketsentinel.storage.sqlite import SQLiteRepository
 from marketsentinel.timeutils import utc_now
 
-STAGE_A_PROMPT_VERSION = "event-extraction-v5"
+STAGE_A_PROMPT_VERSION = "event-extraction-v7"
 STAGE_B_PROMPT_VERSION = "claim-evidence-v1"
 STAGE_C_PROMPT_VERSION = "related-company-v5"
 ARTICLE_ANALYSIS_SCHEMA_VERSION = "article-intelligence-v4"
@@ -67,6 +67,22 @@ the market reaction as the main event or a transmission channel, and do not infe
 operating, or financial details. If the record supplies only market reaction without a sufficiently
 described underlying company event, prefer an other/non-material extraction consistent with the
 existing magnitude policy rather than manufacturing a high-impact event.
+
+The regulation event type represents an external governmental or regulatory action, decision,
+investigation, restriction, easing, rule, or formal policy by a government, regulator, legislature,
+competition authority, or other state authority affecting the subject company; direction may be
+positive or negative, for example a government export restriction, a government easing of an
+existing restriction, a regulator's investigation or enforcement action, an antitrust authority
+action, a legislature or state authority imposing a rule, a government market-access restriction, or
+a genuine government cybersecurity regulation. Do not choose regulation merely because an event
+involves the subject company's own rules or policies, commercial licensing, commercial bundling,
+vendor terms, product or platform policy, software bugs, vulnerabilities, patches, exploits, hacking
+or security incidents, internal compliance practices, or executive commentary or warnings about
+possible regulation or security, unless a genuine external government or regulator action is central
+to the supplied record; prefer other for these. When the central event is a lawsuit, court
+proceeding, judicial ruling, settlement, or legal dispute, prefer litigation rather than regulation;
+a regulator's own investigation or enforcement action is still regulation, but a private party's
+court case is not.
 
 Event magnitude is not headline drama, sentiment strength, a stock-return probability, or
 confidence: it is the estimated qualitative economic or strategic significance of this event to the
@@ -447,6 +463,7 @@ class ArticleEventAnalysisService:
             event = _normalise_external_institutional_holding(
                 self.provider.extract_event(context.event_request), context
             )
+            event = _validated_regulation_event(event, context)
             claims = self._assess_claims(event, context)
             related = self._select_related(event, context)
             analysis = ArticleAnalysis(
@@ -701,6 +718,87 @@ def _primary_event_is_external_institutional_holding(
         _text_describes_external_institutional_holding(text, context.subject_company)
         for text in (event.summary, *event.important_claims)
     )
+
+
+# One-way REGULATION validity gate. A named regulatory institution is sufficient evidence on
+# its own; "regulatory" the bare adjective is deliberately excluded because phrases such as
+# "regulatory challenges" or "regulatory scrutiny" describe friction, not an established
+# external action.
+_REGULATORY_INSTITUTION = re.compile(
+    r"\bgovernments?\b|\bregulators?\b|\bregulations?\b|\bantitrust\b|"
+    r"competition\s+authorit(?:y|ies)|\bministry\b|\blegislatures?\b|\bwatchdog\b|"
+    r"state[-\s](?:owned|run|users?|sector|authorit(?:y|ies))",
+    re.I,
+)
+# Written as acronyms in real headlines; matched case-sensitively so lowercase "sec"/"doj" in
+# unrelated prose cannot count as evidence.
+_NAMED_REGULATOR = re.compile(r"\bSEC\b|\bFTC\b|\bDOJ\b|\bCFIUS\b")
+# A bare sovereign/bloc reference is never sufficient alone (see _STATE_ACTION_VERB below): both
+# "Microsoft retreats in China" and "Microsoft investigates a bug affecting users in China" name
+# a country without describing any government action. Short abbreviations are matched
+# case-sensitively so the common English words "us"/"eu"/"uk" cannot be mistaken for them.
+_SOVEREIGN_ACTOR_SAFE = re.compile(
+    r"\bchina\b|\bchinese\b|\bunited\s+states\b|\beuropean\s+union\b|\bunited\s+kingdom\b",
+    re.I,
+)
+_SOVEREIGN_ACTOR_ABBREVIATION = re.compile(r"\bU\.S\.|\bEU\b|\bUK\b")
+_STATE_ACTION_VERB = re.compile(
+    r"\bbans?\b|\bbanned\b|\bbanning\b|\brestrict\w*\b|\beas(?:e|es|ed|ing)\b|"
+    r"\bimpos\w*\b|\bsanction\w*\b|\bembargo\w*\b|"
+    r"export\s+(?:control|controls|restriction|restrictions)|"
+    r"\brevok\w*\s+(?:a\s+)?licen[cs]e",
+    re.I,
+)
+
+
+def _mentions_sovereign_actor(text: str) -> bool:
+    return (
+        _SOVEREIGN_ACTOR_SAFE.search(text) is not None
+        or _SOVEREIGN_ACTOR_ABBREVIATION.search(text) is not None
+    )
+
+
+def _supplied_record_establishes_regulatory_action(context: _AnalysisContext) -> bool:
+    """Evaluate only the untrusted supplied article record, never Stage A's own output.
+
+    A hallucinated government/regulatory phrase in the model's generated summary or claims
+    must never be able to validate the model's own classification, so this deliberately reads
+    ``context.event_request`` -- the title/snippet actually supplied to Stage A -- and nothing
+    from the returned ``EventExtraction``.
+    """
+
+    request = context.event_request
+    text = f"{request.article.title} {request.snippet or ''}"
+    if _REGULATORY_INSTITUTION.search(text) is not None:
+        return True
+    if _NAMED_REGULATOR.search(text) is not None:
+        return True
+    return _mentions_sovereign_actor(text) and _STATE_ACTION_VERB.search(text) is not None
+
+
+def _validated_regulation_event(
+    event: EventExtraction, context: _AnalysisContext
+) -> EventExtraction:
+    """Downgrade REGULATION to OTHER unless the supplied record establishes an external
+    governmental/regulatory action.
+
+    A one-way validity gate, not a general classifier: it only ever inspects events already
+    typed REGULATION, and can only leave that typing untouched or replace it with OTHER. It
+    never promotes another type into REGULATION and never selects a different specific type.
+    Every field other than ``event_type`` is preserved exactly.
+    """
+
+    if event.event_type is not EventType.REGULATION:
+        return event
+    if _supplied_record_establishes_regulatory_action(context):
+        return event
+    normalised = event.model_copy(update={"event_type": EventType.OTHER})
+    LOGGER.info(
+        "Article intelligence normalisation: stage=stage_a "
+        "action=regulation_validity_gate event_type_before=regulation event_type_after=%s",
+        normalised.event_type,
+    )
+    return normalised
 
 
 def _event_supports_related_company_analysis(
