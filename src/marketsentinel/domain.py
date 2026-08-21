@@ -304,6 +304,7 @@ class RankedRisk(BaseModel):
     primary_article_id: str
     primary_article_url: str
     primary_publisher: str
+    first_evidenced_at: datetime
     latest_published_at: datetime
     supporting_article_ids: list[str] = Field(default_factory=list)
     supporting_publishers: list[str] = Field(default_factory=list)

@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from marketsentinel.dashboard_intelligence import (
     compatible_intelligence_events,
+    corroboration_label,
     evidence_label,
     prepare_todays_intelligence,
 )
@@ -26,6 +27,7 @@ def intelligence_event(
     source_class: SourceClass = SourceClass.MAJOR_FINANCIAL_NEWS,
     published_at: datetime | None = None,
     event_type: EventType = EventType.CONTRACT_AWARD,
+    evidence_sources: list[ArticleEvidenceReference] | None = None,
 ) -> CompanyIntelligenceEvent:
     publication = published_at or datetime(2026, 8, 15, tzinfo=UTC)
     return CompanyIntelligenceEvent(
@@ -50,6 +52,17 @@ def intelligence_event(
             positive_channels=["Possible demand expansion"],
         ),
         evidence_strength=evidence_strength,
+        evidence_sources=evidence_sources or [],
+    )
+
+
+def evidence_reference(article_id: str) -> ArticleEvidenceReference:
+    return ArticleEvidenceReference(
+        article_id=article_id,
+        title=f"Corroborating source {article_id}",
+        publisher="Second Wire",
+        published_at=datetime(2026, 8, 14, tzinfo=UTC),
+        url=f"https://example.com/{article_id}",
     )
 
 
@@ -121,3 +134,26 @@ def test_source_class_breaks_otherwise_equal_intelligence_ties() -> None:
     cards = prepare_todays_intelligence([general, official])
 
     assert [card.event.article_id for card in cards] == ["official", "general"]
+
+
+def test_corroboration_count_matches_supplied_evidence_sources_exactly() -> None:
+    no_sources = intelligence_event("no-sources", evidence_sources=[])
+    one_source = intelligence_event("one-source", evidence_sources=[evidence_reference("s1")])
+    two_sources = intelligence_event(
+        "two-sources", evidence_sources=[evidence_reference("s1"), evidence_reference("s2")]
+    )
+
+    cards = prepare_todays_intelligence([no_sources, one_source, two_sources])
+    by_id = {card.event.article_id: card for card in cards}
+
+    assert by_id["no-sources"].corroboration_count == 0
+    assert by_id["one-source"].corroboration_count == 1
+    assert by_id["two-sources"].corroboration_count == 2
+
+
+def test_corroboration_label_never_implies_a_claim_is_false() -> None:
+    assert corroboration_label(0) == "No additional supplied sources"
+    assert "false" not in corroboration_label(0).lower()
+    assert "unsupported" not in corroboration_label(0).lower()
+    assert corroboration_label(1) == "1 supporting source"
+    assert corroboration_label(3) == "3 supporting sources"

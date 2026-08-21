@@ -8,6 +8,7 @@ from marketsentinel.dashboard_charts import (
     observed_sentiment_frame,
     price_frame_for_timeframe,
     select_meaningful_events,
+    sentiment_coverage_note,
 )
 
 
@@ -129,3 +130,68 @@ def test_combined_chart_keeps_price_sentiment_and_events_distinct() -> None:
     ]
     sentiment_trace = next(trace for trace in figure.data if trace.name == "News sentiment")
     assert len(sentiment_trace.x) == 1
+
+
+def _sentiment_value(day: object, *, score: float = 0.1) -> dict[str, object]:
+    return {
+        "date": day,
+        "score": score,
+        "trend_3": score,
+        "article_count": 1,
+        "positive_share": 0.5,
+        "negative_share": 0.2,
+        "weighted_disagreement": 0.1,
+    }
+
+
+def test_sentiment_coverage_note_is_none_when_sentiment_is_empty() -> None:
+    prices = price_frame_for_timeframe(price_points(), "1M")
+    empty_sentiment = observed_sentiment_frame([], prices["date"].min(), prices["date"].max())
+
+    assert sentiment_coverage_note(empty_sentiment, prices, "1M") is None
+
+
+def test_sentiment_coverage_note_reports_gaps_without_overstating_coverage() -> None:
+    prices = price_frame_for_timeframe(price_points(), "1M")
+    window_start, window_end = prices["date"].min(), prices["date"].max()
+    values = [_sentiment_value(window_start.date()), _sentiment_value(window_end.date())]
+    sentiment = observed_sentiment_frame(values, window_start, window_end)
+
+    note = sentiment_coverage_note(sentiment, prices, "1M")
+
+    assert note is not None
+    assert "with gaps" in note
+    assert "interpolated" in note
+    assert "23 days of coverage" not in note
+
+
+def test_sentiment_coverage_note_flags_missing_earlier_history_in_long_timeframes() -> None:
+    prices = price_frame_for_timeframe(price_points(), "6M")
+    window_start, window_end = prices["date"].min(), prices["date"].max()
+    recent_start = window_end - pd.Timedelta(days=20)
+    values = [
+        _sentiment_value((recent_start + pd.Timedelta(days=offset)).date()) for offset in range(21)
+    ]
+    sentiment = observed_sentiment_frame(values, window_start, window_end)
+
+    note = sentiment_coverage_note(sentiment, prices, "6M")
+
+    assert note is not None
+    assert "6M view" in note
+    assert "no sentiment data" in note
+    assert "with gaps" not in note
+
+
+def test_sentiment_coverage_note_omits_missing_history_clause_when_coverage_is_complete() -> None:
+    prices = price_frame_for_timeframe(price_points(), "1M")
+    window_start, window_end = prices["date"].min(), prices["date"].max()
+    values = [
+        _sentiment_value(day.date()) for day in pd.date_range(window_start, window_end, freq="D")
+    ]
+    sentiment = observed_sentiment_frame(values, window_start, window_end)
+
+    note = sentiment_coverage_note(sentiment, prices, "1M")
+
+    assert note is not None
+    assert "with gaps" not in note
+    assert "no sentiment data" not in note

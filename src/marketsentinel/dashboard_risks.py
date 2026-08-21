@@ -10,12 +10,28 @@ from marketsentinel.domain import RankedRisk
 from marketsentinel.risk_taxonomy import theme_label
 
 MAX_SUMMARY_CHARACTERS = 180
-EMPTY_TOP_RISKS_MESSAGE = "No material downside risks identified from currently analysed evidence."
+EMPTY_TOP_RISKS_MESSAGE = (
+    "No material downside risks are currently evidenced in the analysed coverage."
+)
 CONCERN_INDEX_CAPTION = (
     "Concern Index ranks the downside evidence currently available for this company. "
     "It is not a probability, an expected loss, or a price prediction, and it is not "
     "comparable across companies."
 )
+
+_DEFAULT_BAND_COLOR = "#475569"
+_BAND_COLORS = {
+    "Severe": "#B91C1C",
+    "Elevated": "#C2410C",
+    "Moderate": "#A16207",
+    "Watch": _DEFAULT_BAND_COLOR,
+}
+
+
+def band_color(band: str) -> str:
+    """A restrained, accessible severity color for a band label. Text/number stay primary."""
+
+    return _BAND_COLORS.get(band, _DEFAULT_BAND_COLOR)
 
 
 @dataclass(frozen=True)
@@ -26,6 +42,7 @@ class RiskRow:
     label: str
     concern_index: int
     band: str
+    band_color: str
     summary: str
     risk: RankedRisk
 
@@ -59,6 +76,7 @@ def prepare_top_risk_rows(risks: Sequence[RankedRisk]) -> list[RiskRow]:
             label=theme_label(risk.theme),
             concern_index=risk.concern_index,
             band=risk.band,
+            band_color=band_color(risk.band),
             summary=display_summary(risk.summary),
             risk=risk,
         )

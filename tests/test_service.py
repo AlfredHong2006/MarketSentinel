@@ -247,6 +247,98 @@ def test_service_runs_complete_vertical_slice_without_network_or_real_model(
     assert len(repository.list_scored_articles("ACME")) == 3
 
 
+def test_more_than_100_compatible_analyses_all_reach_the_service_pipeline(
+    writable_tmp_path,
+) -> None:
+    """Direct M0 regression: repository.list_article_analyses' default limit=100 would silently
+    drop the oldest distinct-compatible analyses from analyzed_events/intelligence_events, and
+    from rank_company_risks' input, once a ticker has more than 100 of them. This seeds 105
+    compatible analyses spread across the 366-day reload window and proves the single OLDEST one
+    -- the one that would rank at position 105 by recency and fall outside an un-widened
+    limit=100 -- still reaches the response. Reverting service.py's explicit `limit=` argument
+    back to the repository default makes this test fail.
+    """
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    model_version = "test-event-model"
+    compatibility = ArticleAnalysisCompatibility(
+        model_version=model_version,
+        stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+        stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+        stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+        schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+    )
+    now = datetime.now(UTC)
+    total_analyses = 105
+    oldest_article_id = ""
+    for index in range(total_analyses):
+        published_at = now - timedelta(days=3 * index, hours=1)
+        article = make_article(
+            title=f"Acme steady historical development number {index}",
+            published_at=published_at,
+            url=f"https://history.example/steady-{index}",
+        )
+        repository.upsert_articles([article])
+        if index == total_analyses - 1:
+            oldest_article_id = article.fingerprint
+        analysis = ArticleAnalysis(
+            article_id=article.fingerprint,
+            source_reference=ArticleEvidenceReference(
+                article_id=article.fingerprint,
+                title=article.title,
+                publisher=article.source,
+                published_at=article.published_at,
+                url=article.url,
+            ),
+            source_class=SourceClass.MAJOR_FINANCIAL_NEWS,
+            subject_company=CompanyReference(symbol="ACME", name="Acme Corporation"),
+            event=EventExtraction(
+                event_type=EventType.PARTNERSHIP,
+                summary=f"Acme announced development {index}.",
+                direction=EventDirection.POSITIVE,
+                magnitude=0.55,
+                time_horizon=TimeHorizon.MONTHS,
+                model_confidence=0.85,
+                important_claims=[f"Acme announced development {index}."],
+                positive_channels=["Possible commercial expansion"],
+            ),
+            evidence_count=0,
+            evidence_strength=0.7,
+            evidence_fingerprint=f"evidence-{index}",
+            model_version=model_version,
+            stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+            stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+            stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+            schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+            analysis_created_at=now,
+        )
+        repository.store_article_analysis(analysis, f"steady-{index}")
+
+    service = MarketAnalysisService(
+        constituents=FakeConstituents(),
+        news=FakeNews(),
+        historical_news=FakeHistoricalNews(),
+        sentiment=StaticSentimentAnalyzer(),
+        prices=FakePrices(),
+        repository=repository,
+        forecaster=BaselineForecaster(),
+        article_analysis_compatibility=compatibility,
+    )
+
+    result = service.analyze("ACME")
+
+    analyzed_ids = {item.article_id for item in result.analyzed_events}
+    intelligence_ids = {item.article_id for item in result.intelligence_events}
+    assert len(analyzed_ids) > 100, "the fix must surface more than the old 100-row ceiling"
+    assert oldest_article_id in analyzed_ids, (
+        "the single oldest compatible analysis must not be silently dropped"
+    )
+    assert oldest_article_id in intelligence_ids, (
+        "the single oldest compatible analysis must not be silently dropped"
+    )
+
+
 def test_stored_compatible_meaningful_analysis_reaches_todays_intelligence(
     writable_tmp_path,
 ) -> None:

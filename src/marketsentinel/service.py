@@ -36,6 +36,17 @@ DISCLAIMER = (
     "are not financial advice and do not predict exact prices."
 )
 
+# repository.list_article_analyses defaults to limit=100, which would silently drop the oldest
+# distinct-compatible analyses once historical backfill (or continued live use) grows a ticker's
+# analyzed-article count past it -- from analyzed_events, intelligence_events, AND the risk-scoring
+# input, not just the display cap. This is a purely quantitative ceiling raise; every filter,
+# ordering, and compatibility rule inside list_article_analyses is unchanged.
+_STORED_ANALYSES_LIMIT = 500
+
+# repository.list_daily_sentiment defaults to limit=365; widened slightly to comfortably cover a
+# 366-day display window before client-side date filtering.
+_STORED_DAILY_SENTIMENT_LIMIT = 370
+
 
 class ArticleAnalysisRunner(Protocol):
     def analyze_article(self, article_id: str) -> ArticleAnalysisResponse: ...
@@ -172,12 +183,18 @@ class MarketAnalysisService:
         )
         self.repository.delete_daily_sentiment(constituent.symbol, historical_cutoff.date())
         self.repository.upsert_daily_sentiment(daily)
-        stored_daily = [
-            item
-            for item in self.repository.list_daily_sentiment(constituent.symbol)
-            if item.date >= historical_cutoff.date()
-        ]
+        # One read serves both windows: the forecaster keeps its existing short recompute window
+        # unchanged, while the returned AnalysisResult can additionally surface older sentiment
+        # rows already produced by a historical backfill, without ever filling or interpolating.
+        all_recent_daily = self.repository.list_daily_sentiment(
+            constituent.symbol, limit=_STORED_DAILY_SENTIMENT_LIMIT
+        )
+        stored_daily = [item for item in all_recent_daily if item.date >= historical_cutoff.date()]
         forecast = self.forecaster.forecast(price_history.points, stored_daily)
+        sentiment_display_cutoff = now - timedelta(days=366)
+        stored_daily_for_display = [
+            item for item in all_recent_daily if item.date >= sentiment_display_cutoff.date()
+        ]
 
         display_articles = real_articles or stored_articles
         latest_price_date = price_history.points[-1].date
@@ -193,6 +210,7 @@ class MarketAnalysisService:
         stored_analyses = self.repository.list_article_analyses(
             constituent.symbol,
             since=now - timedelta(days=366),
+            limit=_STORED_ANALYSES_LIMIT,
             compatibility=self.article_analysis_compatibility,
         )
         analyzed_events = [item.to_analyzed_event() for item in stored_analyses]
@@ -204,7 +222,7 @@ class MarketAnalysisService:
             constituent=constituent,
             price_history=display_history,
             articles=display_articles,
-            daily_sentiment=stored_daily,
+            daily_sentiment=stored_daily_for_display,
             analyzed_events=analyzed_events,
             intelligence_events=intelligence_events,
             forecast=forecast,

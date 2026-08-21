@@ -21,6 +21,7 @@ from marketsentinel.dashboard_charts import (
     observed_sentiment_frame,
     price_frame_for_timeframe,
     select_meaningful_events,
+    sentiment_coverage_note,
 )
 from marketsentinel.dashboard_event_state import (
     compatible_article_analysis_response,
@@ -32,6 +33,7 @@ from marketsentinel.dashboard_intelligence import (
     compatible_intelligence_events,
     prepare_todays_intelligence,
 )
+from marketsentinel.dashboard_market_view import build_market_view
 from marketsentinel.dashboard_risks import (
     CONCERN_INDEX_CAPTION,
     EMPTY_TOP_RISKS_MESSAGE,
@@ -81,6 +83,14 @@ st.markdown(
     }
     .price-positive { color: #15803d; }
     .price-negative { color: #b91c1c; }
+    .risk-band-pill {
+        display: inline-block;
+        border: 1px solid;
+        border-radius: 999px;
+        padding: 0.1rem 0.6rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -235,13 +245,40 @@ def render_company_chart(payload: dict[str, Any]) -> None:
             st.info("No genuine news-sentiment observations exist in this timeframe.")
 
     notes = [f"{len(price_frame)} trading-session price observations"]
-    if "Sentiment" in layers:
-        notes.append(f"{len(sentiment_frame)} observed news-sentiment dates")
     if "Events" in layers:
         notes.append(f"{len(events)} meaningful stored event markers")
+    caption = " · ".join(notes) + "."
+    if "Sentiment" in layers:
+        coverage_note = sentiment_coverage_note(sentiment_frame, price_frame, timeframe)
+        if coverage_note:
+            caption += f" {coverage_note}"
+    st.caption(caption)
+
+
+def render_current_market_view(payload: dict[str, Any]) -> None:
+    """Render four independent, deterministic observations — never a combined score/verdict."""
+
+    st.subheader("Current Market View")
+    intelligence_cards = prepare_todays_intelligence(
+        compatible_intelligence_events(payload.get("intelligence_events", []))
+    )
+    risk_rows = prepare_top_risk_rows(compatible_top_risks(payload.get("top_risks", [])))
+    summary = build_market_view(
+        price_points=payload["price_history"]["points"],
+        daily_sentiment=payload["daily_sentiment"],
+        risk_rows=risk_rows,
+        intelligence_cards=intelligence_cards,
+    )
+    for note in (
+        summary.price_note,
+        summary.sentiment_note,
+        summary.risk_note,
+        summary.intelligence_note,
+    ):
+        st.write(note)
     st.caption(
-        " · ".join(notes)
-        + ". Missing sentiment dates remain absent; they are never filled as zero or neutral."
+        "Each observation above is independent and descriptive only — not a combined "
+        "score, verdict, or recommendation."
     )
 
 
@@ -261,16 +298,35 @@ def render_todays_intelligence(payload: dict[str, Any]) -> None:
     for card in cards:
         item = card.event
         with st.container(border=True):
-            st.markdown(f"#### {card.impact_label} · {card.impact_score}/100")
+            st.markdown(f"**{item.source_reference.title}**")
             st.caption(
-                f"{card.evidence_label} · {card.source_quality_label} · "
                 f"{item.source_reference.publisher} · {item.source_reference.published_at:%d %b %Y}"
             )
-            st.write(item.event.summary)
-            st.caption(
-                f"Direction: {item.event.direction.value.title()} · "
-                f"Time horizon: {item.event.time_horizon.value.replace('_', ' ').title()}"
+            metric_columns = st.columns(4)
+            metric_columns[0].metric(
+                "Impact",
+                card.impact_label,
+                help=(
+                    f"Magnitude score {card.impact_score}/100 — estimated qualitative "
+                    "significance to this company; not a price-move probability."
+                ),
             )
+            metric_columns[1].metric(
+                "Evidence",
+                card.evidence_label,
+                help=(
+                    "Deterministic indicator of supplied-evidence quality and corroboration; "
+                    "not a probability that the article is true."
+                ),
+            )
+            metric_columns[2].metric("Direction", item.event.direction.value.title())
+            metric_columns[3].metric(
+                "Persistence",
+                item.event.time_horizon.value.replace("_", " ").title(),
+                help="Expected duration of the event's consequences, not time until it starts.",
+            )
+            st.write(item.event.summary)
+            st.caption(f"{card.corroboration_label} · Source type: {card.source_quality_label}")
             channel_columns = st.columns(2)
             with channel_columns[0]:
                 st.markdown("**Possible positive channels**")
@@ -305,7 +361,12 @@ def render_top_risks(payload: dict[str, Any]) -> None:
         rank_column.markdown(f"**{row.rank}**")
         label_column.markdown(f"**{row.label}**")
         score_column.markdown(f"**{row.concern_index}**")
-        band_column.markdown(row.band)
+        band_column.markdown(
+            f'<span class="risk-band-pill" '
+            f'style="background:{row.band_color}1a;color:{row.band_color};'
+            f'border-color:{row.band_color}66">{row.band}</span>',
+            unsafe_allow_html=True,
+        )
         st.caption(
             f"{row.summary} · {row.risk.supporting_signal_count} supporting signal(s) "
             f"across {len(row.risk.supporting_publishers)} publisher(s) · latest "
@@ -406,8 +467,11 @@ def render_forecast(payload: dict[str, Any]) -> None:
         )
 
 
+DEFAULT_VISIBLE_ARTICLES = 5
+
+
 def render_articles(payload: dict[str, Any]) -> None:
-    st.subheader("Scored articles")
+    st.subheader("Relevant News")
     articles = payload["articles"]
     if not articles:
         st.info("No scored articles are available for this 30-calendar-day range.")
@@ -443,7 +507,7 @@ def render_articles(payload: dict[str, Any]) -> None:
     symbol = payload["constituent"]["symbol"]
     limit_key = f"article_limit_{symbol}"
     if limit_key not in st.session_state:
-        st.session_state[limit_key] = 10
+        st.session_state[limit_key] = DEFAULT_VISIBLE_ARTICLES
     visible_articles = filtered[: st.session_state[limit_key]]
     for article in visible_articles:
         demo = " · **DEMO DATA**" if article["is_demo"] else ""
@@ -485,7 +549,7 @@ def render_articles(payload: dict[str, Any]) -> None:
     if len(visible_articles) < len(filtered) and st.button(
         f"Show more ({len(filtered) - len(visible_articles)} remaining)"
     ):
-        st.session_state[limit_key] += 10
+        st.session_state[limit_key] += DEFAULT_VISIBLE_ARTICLES
         st.rerun()
 
 
@@ -666,13 +730,12 @@ else:
     analysis = st.session_state.analysis
     render_company_header(analysis)
     render_company_chart(analysis)
+    render_current_market_view(analysis)
     render_todays_intelligence(analysis)
     render_top_risks(analysis)
     st.divider()
-    evidence_tab, research_tab = st.tabs(["Supporting news & evidence", "Research context"])
-    with evidence_tab:
-        render_articles(analysis)
-    with research_tab:
+    render_articles(analysis)
+    with st.expander("Research diagnostics", expanded=False):
         render_ingestion_funnel(analysis)
         render_forecast(analysis)
         render_health(analysis)

@@ -391,6 +391,7 @@ def test_incompatible_ranked_risk_payload_is_rejected_rather_than_repaired() -> 
         "primary_article_id": "article-1",
         "primary_article_url": "https://example.com/article-1",
         "primary_publisher": "Reuters",
+        "first_evidenced_at": "2026-08-15T09:00:00Z",
         "latest_published_at": "2026-08-19T12:00:00Z",
     }
 

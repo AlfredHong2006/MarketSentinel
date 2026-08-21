@@ -178,6 +178,7 @@ def rank_company_risks(
                 primary_article_id=strongest.article_id,
                 primary_article_url=strongest.url,
                 primary_publisher=strongest.publisher,
+                first_evidenced_at=min(signal.published_at for signal in qualifying),
                 latest_published_at=max(signal.published_at for signal in qualifying),
                 supporting_article_ids=_unique_preserving_order(
                     signal.article_id for signal in qualifying

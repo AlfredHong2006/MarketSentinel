@@ -32,6 +32,8 @@ class IntelligenceCard:
     impact_score: int
     evidence_label: str
     source_quality_label: str
+    corroboration_count: int
+    corroboration_label: str
 
 
 def compatible_intelligence_events(
@@ -65,6 +67,8 @@ def prepare_todays_intelligence(
     deterministic evidence strength, source class, then publication time.
     """
 
+    # evidence_sources is the same list the backend counts as evidence_count (event_analysis.py);
+    # CompanyIntelligenceEvent just doesn't carry evidence_count separately, so len() here is exact.
     eligible = [item for item in events if is_intelligence_eligible(item)]
     eligible.sort(
         key=lambda item: (
@@ -83,6 +87,8 @@ def prepare_todays_intelligence(
             impact_score=round(item.event.magnitude * 100),
             evidence_label=evidence_label(item.evidence_strength),
             source_quality_label=source_quality_label(item.source_class),
+            corroboration_count=len(item.evidence_sources),
+            corroboration_label=corroboration_label(len(item.evidence_sources)),
         )
         for item in eligible[:limit]
     ]
@@ -110,3 +116,13 @@ def evidence_label(strength: float | None) -> str | None:
 
 def source_quality_label(source_class: SourceClass) -> str:
     return source_class.value.replace("_", " ").title()
+
+
+def corroboration_label(count: int) -> str:
+    """Describe supplied independent source count. Absence never implies a claim is false."""
+
+    if count <= 0:
+        return "No additional supplied sources"
+    if count == 1:
+        return "1 supporting source"
+    return f"{count} supporting sources"

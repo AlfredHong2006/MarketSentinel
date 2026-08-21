@@ -186,6 +186,43 @@ def test_distinct_events_under_one_theme_add_bounded_event_corroboration() -> No
     assert base < risk.concern_index <= base + 8
 
 
+# --------------------------------------------------------------------- chronology
+
+
+def test_first_evidenced_at_is_the_earliest_qualifying_signal_not_the_primary_one() -> None:
+    older = analysis(
+        "older",
+        title="Acme hit by new export controls on advanced parts",
+        magnitude=0.60,
+        published_at=NOW - timedelta(days=30),
+    )
+    newer_strongest = analysis(
+        "newer-strongest",
+        title="Regulators expand export controls affecting Acme parts",
+        magnitude=0.65,
+        published_at=NOW - timedelta(days=1),
+    )
+
+    ranking = rank_company_risks([older, newer_strongest], now=NOW)
+    risk = ranking.top_risks[0]
+    assert (
+        risk.supporting_signal_count == 2
+    )  # both signals qualify -- the test proves nothing otherwise
+
+    assert risk.primary_article_id == "newer-strongest"
+    assert risk.first_evidenced_at == older.source_reference.published_at
+    assert risk.latest_published_at == newer_strongest.source_reference.published_at
+    assert risk.first_evidenced_at < risk.latest_published_at
+
+
+def test_first_evidenced_at_equals_latest_published_at_for_a_single_signal() -> None:
+    only = analysis("only", published_at=NOW - timedelta(days=5))
+
+    risk = rank_company_risks([only], now=NOW).top_risks[0]
+
+    assert risk.first_evidenced_at == risk.latest_published_at == only.source_reference.published_at
+
+
 def test_total_corroboration_bonus_never_exceeds_sixteen_points() -> None:
     records = [
         analysis(

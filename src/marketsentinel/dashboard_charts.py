@@ -62,6 +62,30 @@ def observed_sentiment_frame(
     return frame.loc[frame["date"].between(start, end)].reset_index(drop=True)
 
 
+def sentiment_coverage_note(
+    sentiment_frame: pd.DataFrame, price_frame: pd.DataFrame, timeframe: str
+) -> str | None:
+    """Describe the real observed sentiment date span; never implies interpolation or fabrication."""
+
+    if sentiment_frame.empty or price_frame.empty:
+        return None
+    window_start = price_frame["date"].min()
+    earliest = sentiment_frame["date"].min()
+    latest = sentiment_frame["date"].max()
+    observed_dates = len(sentiment_frame)
+    span_days = (latest - earliest).days + 1
+    has_gaps = observed_dates < span_days
+    note = (
+        f"Sentiment observations span {earliest:%d %b} to {latest:%d %b}"
+        f" ({observed_dates} observed date{'s' if observed_dates != 1 else ''}"
+        f"{', with gaps' if has_gaps else ''})."
+    )
+    if earliest > window_start:
+        note += f" Earlier dates in this {timeframe} view have no sentiment data."
+    note += " Points are observed only, never interpolated or filled."
+    return note
+
+
 def select_meaningful_events(
     events: Sequence[Mapping[str, Any]],
     start: pd.Timestamp,

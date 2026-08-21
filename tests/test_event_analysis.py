@@ -2,6 +2,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +31,8 @@ from marketsentinel.errors import (
 )
 from marketsentinel.event_analysis import (
     _STAGE_A_INSTRUCTIONS,
+    EVIDENCE_WINDOW_DAYS_AFTER,
+    EVIDENCE_WINDOW_DAYS_BEFORE,
     STAGE_A_PROMPT_VERSION,
     ArticleEventAnalysisService,
     ClaimAssessmentRequest,
@@ -39,6 +42,7 @@ from marketsentinel.event_analysis import (
     _AnalysisContext,
     _article_reference,
     _candidate_companies,
+    _evidence_candidates,
     _is_external_institutional_holding_change,
     _source_class,
     _validated_regulation_event,
@@ -479,6 +483,271 @@ def test_cache_key_includes_evidence_and_stage_versions(writable_tmp_path) -> No
     stored = repository.list_article_analyses("ACME")
     assert [item.article_id for item in stored] == [primary.fingerprint]
     assert (provider.stage_a_calls, provider.stage_b_calls, provider.stage_c_calls) == (1, 1, 1)
+
+
+def _dated_article(
+    published_at: datetime, source: str, title: str, *, ticker: str = "NVDA", is_demo: bool = False
+):
+    return make_article(
+        title=title,
+        published_at=published_at,
+        url=f"https://example.com/{title.replace(' ', '-').lower()}",
+        source=source,
+    ).model_copy(update={"ticker": ticker, "is_demo": is_demo})
+
+
+def test_evidence_candidates_exclude_far_future_articles(writable_tmp_path) -> None:
+    """A historical primary must not receive months-later unrelated coverage as evidence."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = _dated_article(datetime(2026, 1, 15, tzinfo=UTC), "Reuters", "NVIDIA primary event")
+    far_future = _dated_article(
+        datetime(2026, 1, 15, tzinfo=UTC) + timedelta(days=90), "Bloomberg", "Far future coverage"
+    )
+    repository.upsert_articles([primary, far_future])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert far_future.fingerprint not in {item.fingerprint for item in candidates}
+
+
+def test_evidence_candidates_include_near_term_follow_up(writable_tmp_path) -> None:
+    """Independent reporting shortly after an event may legitimately corroborate it."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = _dated_article(datetime(2026, 1, 15, tzinfo=UTC), "Reuters", "NVIDIA primary event")
+    follow_up = _dated_article(
+        datetime(2026, 1, 15, tzinfo=UTC) + timedelta(days=5),
+        "Financial Times",
+        "Follow-up confirmation",
+    )
+    repository.upsert_articles([primary, follow_up])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert follow_up.fingerprint in {item.fingerprint for item in candidates}
+
+
+def test_evidence_candidates_include_background_reporting_inside_the_window(
+    writable_tmp_path,
+) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = _dated_article(datetime(2026, 1, 15, tzinfo=UTC), "Reuters", "NVIDIA primary event")
+    background = _dated_article(
+        datetime(2026, 1, 15, tzinfo=UTC) - timedelta(days=20), "CNBC", "Background context"
+    )
+    repository.upsert_articles([primary, background])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert background.fingerprint in {item.fingerprint for item in candidates}
+
+
+def test_evidence_candidates_exclude_articles_outside_the_configured_window(
+    writable_tmp_path,
+) -> None:
+    """Boundary check exactly at and one day past the configured before/after edges."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary_dt = datetime(2026, 1, 15, tzinfo=UTC)
+    primary = _dated_article(primary_dt, "Reuters", "NVIDIA primary event")
+    too_early = _dated_article(
+        primary_dt - timedelta(days=EVIDENCE_WINDOW_DAYS_BEFORE + 1), "CNBC", "Too early"
+    )
+    too_late = _dated_article(
+        primary_dt + timedelta(days=EVIDENCE_WINDOW_DAYS_AFTER + 1), "CNBC", "Too late"
+    )
+    just_early_enough = _dated_article(
+        primary_dt - timedelta(days=EVIDENCE_WINDOW_DAYS_BEFORE), "Reuters", "Just early enough"
+    )
+    just_late_enough = _dated_article(
+        primary_dt + timedelta(days=EVIDENCE_WINDOW_DAYS_AFTER), "Bloomberg", "Just late enough"
+    )
+    repository.upsert_articles([primary, too_early, too_late, just_early_enough, just_late_enough])
+
+    candidate_ids = {item.fingerprint for item in _evidence_candidates(repository, primary)}
+
+    assert too_early.fingerprint not in candidate_ids
+    assert too_late.fingerprint not in candidate_ids
+    assert just_early_enough.fingerprint in candidate_ids
+    assert just_late_enough.fingerprint in candidate_ids
+
+
+def test_evidence_candidates_never_include_the_primary_itself(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = _dated_article(datetime(2026, 1, 15, tzinfo=UTC), "Reuters", "NVIDIA primary event")
+    repository.upsert_articles([primary])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert primary.fingerprint not in {item.fingerprint for item in candidates}
+
+
+def test_evidence_candidates_exclude_demo_articles(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = _dated_article(datetime(2026, 1, 15, tzinfo=UTC), "Reuters", "NVIDIA primary event")
+    demo = _dated_article(
+        datetime(2026, 1, 16, tzinfo=UTC), "Demo Wire", "Demo article", is_demo=True
+    )
+    repository.upsert_articles([primary, demo])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert demo.fingerprint not in {item.fingerprint for item in candidates}
+
+
+def test_evidence_candidates_are_deterministic_across_repeated_calls(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary_dt = datetime(2026, 1, 15, tzinfo=UTC)
+    primary = _dated_article(primary_dt, "Reuters", "NVIDIA primary event")
+    others = [
+        _dated_article(
+            primary_dt + timedelta(days=offset), f"Publisher {offset}", f"Story {offset}"
+        )
+        for offset in range(-10, 10)
+    ]
+    repository.upsert_articles([primary, *others])
+
+    first = [item.fingerprint for item in _evidence_candidates(repository, primary)]
+    second = [item.fingerprint for item in _evidence_candidates(repository, primary)]
+
+    assert first == second
+
+
+def test_evidence_candidates_recent_primary_still_gets_a_sensible_pool(writable_tmp_path) -> None:
+    """Regression safety for the live path: a recent primary's pool should behave normally."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    now = datetime.now(UTC) - timedelta(hours=1)
+    primary = _dated_article(now, "Reuters", "NVIDIA current event")
+    recent_evidence = _dated_article(
+        now - timedelta(hours=6), "Bloomberg", "Recent related coverage"
+    )
+    repository.upsert_articles([primary, recent_evidence])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert recent_evidence.fingerprint in {item.fingerprint for item in candidates}
+
+
+def test_evidence_candidates_bound_a_wide_window_deterministically(writable_tmp_path) -> None:
+    """More than _MAX_EVIDENCE_CANDIDATES in-window articles must still be bounded, keeping the
+    ones closest to the primary rather than an arbitrary database-order cut."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary_dt = datetime(2026, 1, 15, tzinfo=UTC)
+    primary = _dated_article(primary_dt, "Reuters", "NVIDIA primary event")
+    # 50 candidates spread across the window -- more than the 40-item cap.
+    others = [
+        _dated_article(
+            primary_dt + timedelta(hours=offset), f"Publisher {offset}", f"Story {offset}"
+        )
+        for offset in range(50)
+    ]
+    repository.upsert_articles([primary, *others])
+
+    candidates = _evidence_candidates(repository, primary)
+
+    assert len(candidates) == 40
+    kept_hours = sorted(int(item.title.split()[-1]) for item in candidates)
+    assert kept_hours == list(range(40))  # the 40 closest-in-time, not an arbitrary cut
+
+
+def test_evidence_selection_preserves_publisher_diversity_via_rank_evidence(
+    writable_tmp_path,
+) -> None:
+    """The windowing change must not disturb _rank_evidence's existing one-per-publisher pass."""
+
+    provider = FakeProvider(
+        event(magnitude=0.6, confidence=0.8), ClaimAssessments(), RelatedCompanyProposals()
+    )
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = make_article(
+        title="NVIDIA and AMD announce a partnership",
+        url="https://example.com/primary-diversity",
+        source="Reuters",
+    ).model_copy(update={"ticker": "NVDA"})
+    same_publisher_duplicates = [
+        make_article(
+            title=f"NVIDIA partnership follow-up {index}",
+            url=f"https://example.com/dup-{index}",
+            source="Reuters",
+            published_at=primary.published_at - timedelta(hours=index + 1),
+        ).model_copy(update={"ticker": "NVDA"})
+        for index in range(3)
+    ]
+    diverse_publishers = [
+        make_article(
+            title=f"NVIDIA partnership coverage {source}",
+            url=f"https://example.com/div-{source}",
+            source=source,
+            published_at=primary.published_at - timedelta(hours=10),
+        ).model_copy(update={"ticker": "NVDA"})
+        for source in ("Bloomberg", "Financial Times", "CNBC", "Barron's")
+    ]
+    repository.upsert_articles([primary, *same_publisher_duplicates, *diverse_publishers])
+    service = ArticleEventAnalysisService(
+        repository=repository, provider=provider, constituents=FakeConstituents(), evidence_limit=5
+    )
+
+    service.analyze_article(primary.fingerprint)
+
+    evidence_publishers = [item[0].publisher for item in provider.last_claim_request.evidence]
+    assert len(evidence_publishers) == len(set(evidence_publishers)), (
+        "each publisher should be used at most once when enough diverse candidates exist"
+    )
+
+
+def test_evidence_fingerprint_changes_when_windowed_candidates_change(writable_tmp_path) -> None:
+    provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary_dt = datetime(2026, 1, 15, tzinfo=UTC)
+    primary = _dated_article(primary_dt, "Reuters", "NVIDIA primary event")
+    repository.upsert_articles([primary])
+    service = ArticleEventAnalysisService(
+        repository=repository, provider=provider, constituents=FakeConstituents(), evidence_limit=5
+    )
+
+    first = service.analyze_article(primary.fingerprint)
+    first_fingerprint = first.analysis.evidence_fingerprint
+
+    nearby = _dated_article(primary_dt + timedelta(days=3), "Bloomberg", "Nearby follow-up")
+    repository.upsert_articles([nearby])
+    second = service.analyze_article(primary.fingerprint)
+
+    assert second.status == "generated", "a changed evidence pool must not be served from cache"
+    assert second.analysis.evidence_fingerprint != first_fingerprint
+
+
+def test_evidence_fingerprint_stable_and_cached_when_candidates_unchanged(
+    writable_tmp_path,
+) -> None:
+    provider = FakeProvider(event(), ClaimAssessments(), RelatedCompanyProposals())
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    primary = _dated_article(datetime(2026, 1, 15, tzinfo=UTC), "Reuters", "NVIDIA primary event")
+    repository.upsert_articles([primary])
+    service = ArticleEventAnalysisService(
+        repository=repository, provider=provider, constituents=FakeConstituents(), evidence_limit=5
+    )
+
+    first = service.analyze_article(primary.fingerprint)
+    second = service.analyze_article(primary.fingerprint)
+
+    assert first.status == "generated"
+    assert second.status == "cached"
+    assert second.analysis.evidence_fingerprint == first.analysis.evidence_fingerprint
 
 
 def test_v4_stage_a_exact_cache_is_not_reused_by_v5_service(
