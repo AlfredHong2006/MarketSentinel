@@ -20,6 +20,7 @@ from marketsentinel.domain import (
     EvidenceStatus,
     RelatedCompanyProposal,
     RelatedCompanyProposals,
+    SourceClass,
     TimeHorizon,
     UniverseResult,
 )
@@ -35,10 +36,12 @@ from marketsentinel.event_analysis import (
     EventExtractionRequest,
     OpenAIArticleIntelligenceProvider,
     RelatedCompanyRequest,
+    _AnalysisContext,
     _article_reference,
     _candidate_companies,
     _is_external_institutional_holding_change,
     _source_class,
+    _validated_regulation_event,
 )
 from marketsentinel.storage.sqlite import SQLiteRepository
 from marketsentinel.timeutils import utc_now
@@ -229,8 +232,8 @@ class FakeResponses:
 
 def test_stage_a_prompt_version_and_core_channel_guidance_are_current() -> None:
     normalized_instructions = " ".join(_STAGE_A_INSTRUCTIONS.split())
-    assert STAGE_A_PROMPT_VERSION == "event-extraction-v5"
-    assert STAGE_A_PROMPT_VERSION != "event-extraction-v4"
+    assert STAGE_A_PROMPT_VERSION == "event-extraction-v7"
+    assert STAGE_A_PROMPT_VERSION != "event-extraction-v6"
     assert "concrete causal mechanism" in normalized_instructions
     assert "Never invent a channel" in normalized_instructions
     assert "Return at most three concise channels per side" in normalized_instructions
@@ -247,6 +250,45 @@ def test_stage_a_prompt_version_and_core_channel_guidance_are_current() -> None:
     assert "subject company's revenue or demand" in normalized_instructions
     assert (
         "Do not choose uncertain merely because exact timing is absent" in normalized_instructions
+    )
+
+
+def test_stage_a_regulation_boundary_excludes_non_government_events() -> None:
+    """The v6 boundary must keep genuine government action as regulation while excluding the
+
+    company's own commercial/security decisions and third-party court cases, without silently
+    replacing regulatory false positives with litigation false positives.
+    """
+
+    normalized_instructions = " ".join(_STAGE_A_INSTRUCTIONS.split())
+    # MUST remain/allow regulation: external government/regulator action, either direction.
+    assert "external governmental or regulatory action" in normalized_instructions
+    assert "government export restriction" in normalized_instructions
+    assert "government easing of an existing restriction" in normalized_instructions
+    assert "regulator's investigation or enforcement action" in normalized_instructions
+    assert "antitrust authority action" in normalized_instructions
+    assert "genuine government cybersecurity regulation" in normalized_instructions
+    assert "direction may be positive or negative" in normalized_instructions
+    # MUST NOT become regulation merely because of the company's own rules, licensing,
+    # bundling, vendor terms, product policy, or a security/vulnerability incident.
+    assert (
+        "Do not choose regulation merely because an event involves the subject company's own"
+        in normalized_instructions
+    )
+    assert "commercial licensing, commercial bundling, vendor terms" in normalized_instructions
+    assert "software bugs, vulnerabilities, patches, exploits, hacking" in normalized_instructions
+    assert "executive commentary or warnings about possible regulation or security" in (
+        normalized_instructions
+    )
+    # Litigation boundary: a court case is litigation, not regulation, but a regulator's own
+    # enforcement action stays regulation.
+    assert (
+        "lawsuit, court proceeding, judicial ruling, settlement, or legal dispute, prefer "
+        "litigation rather than regulation" in normalized_instructions
+    )
+    assert (
+        "a regulator's own investigation or enforcement action is still regulation, but a "
+        "private party's court case is not" in normalized_instructions
     )
 
 
@@ -661,6 +703,135 @@ def test_institutional_holding_detector_rejects_generic_keyword_overlap(title: s
     subject = CompanyReference(symbol="AAPL", name="Apple Inc.")
 
     assert not _is_external_institutional_holding_change(article, subject)
+
+
+def _regulation_context(title: str, snippet: str | None = None) -> _AnalysisContext:
+    """Build a minimal context whose supplied record carries the given title/snippet.
+
+    Mirrors the real call site: the gate under test reads only ``event_request`` (the
+    untrusted supplied article record), never anything Stage A itself generated.
+    """
+
+    subject = CompanyReference(symbol="ACME", name="Acme Corporation")
+    article = make_article(title=title)
+    request = EventExtractionRequest(
+        subject,
+        _article_reference(article),
+        snippet,
+        SourceClass.MAJOR_FINANCIAL_NEWS,
+    )
+    return _AnalysisContext(
+        subject_company=subject,
+        source_class=SourceClass.MAJOR_FINANCIAL_NEWS,
+        evidence=(),
+        candidates=(),
+        evidence_fingerprint="test-fingerprint",
+        event_request=request,
+        is_external_institutional_holding=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "China Removes Microsoft Windows at State Users Ahead of Plan",
+        "The U.S. banned Nvidia's best chips from going to China",
+        "China eases limits on Nvidia H200 chips as AI race escalates",
+        "UK regulator launches formal investigation into Company X",
+        "EU antitrust authority opens investigation into Company X's practices",
+        "Government introduces new cybersecurity regulation affecting AI companies",
+    ],
+)
+def test_regulation_gate_keeps_genuine_external_authority_action(title: str) -> None:
+    context = _regulation_context(title)
+    original = event(event_type=EventType.REGULATION, summary="A neutral summary.")
+
+    result = _validated_regulation_event(original, context)
+
+    assert result.event_type is EventType.REGULATION
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Microsoft ends one of the last ways to buy VMware without big bundles",
+        "Microsoft probes reports of games taking exception to Windows 11's August update",
+        "OpenAI hacking incident is 'warning shot' on cyber security, Microsoft's AI chief warns",
+        "421 bugs in Microsoft's Patch Tuesday release, and the Norks have already attacked one",
+        "Microsoft retreats in China",
+        "Microsoft investigates a bug affecting users in China",
+        "Company announces new product platform policy",
+        "Company updates ordinary vendor commercial terms",
+        "Company faces regulatory challenges in overseas markets",
+    ],
+)
+def test_regulation_gate_downgrades_non_government_events(title: str) -> None:
+    """A bare country reference (the last two China cases) must not be sufficient alone, and
+    the bare adjective "regulatory" (the last case) must not be sufficient alone."""
+
+    context = _regulation_context(title)
+    original = event(event_type=EventType.REGULATION, summary="A neutral summary.")
+
+    result = _validated_regulation_event(original, context)
+
+    assert result.event_type is EventType.OTHER
+
+
+def test_regulation_gate_ignores_authority_language_in_the_generated_summary() -> None:
+    """Stage A's own summary/claims must never be able to self-validate the classification."""
+
+    context = _regulation_context("Microsoft ends one of the last ways to buy VMware")
+    original = event(
+        event_type=EventType.REGULATION,
+        summary="China has removed Microsoft Windows from state users.",
+        important_claims=["The Chinese government banned Microsoft software."],
+    )
+
+    result = _validated_regulation_event(original, context)
+
+    assert result.event_type is EventType.OTHER
+
+
+def test_regulation_gate_uses_supplied_record_even_without_authority_language_in_summary() -> None:
+    context = _regulation_context("China eases limits on Nvidia H200 chips")
+    original = event(
+        event_type=EventType.REGULATION,
+        summary="A change affecting chip availability.",
+        important_claims=["Availability has changed."],
+    )
+
+    result = _validated_regulation_event(original, context)
+
+    assert result.event_type is EventType.REGULATION
+
+
+def test_regulation_gate_passes_through_every_other_event_type_unchanged() -> None:
+    context = _regulation_context("Microsoft ends one of the last ways to buy VMware")
+    for candidate_type in EventType:
+        if candidate_type is EventType.REGULATION:
+            continue
+        original = event(event_type=candidate_type)
+
+        result = _validated_regulation_event(original, context)
+
+        assert result is original
+
+
+def test_regulation_gate_downgrade_changes_only_event_type() -> None:
+    context = _regulation_context("Microsoft ends one of the last ways to buy VMware")
+    original = event(
+        event_type=EventType.REGULATION,
+        magnitude=0.55,
+        confidence=0.8,
+        summary="Microsoft has discontinued a VMware purchasing option.",
+        important_claims=["Microsoft ended a purchasing option."],
+        uncertainties=["The long-term commercial impact is unclear."],
+    )
+
+    result = _validated_regulation_event(original, context)
+
+    assert result.event_type is EventType.OTHER
+    assert result.model_dump(exclude={"event_type"}) == original.model_dump(exclude={"event_type"})
 
 
 def test_material_corporate_event_is_not_downgraded_by_generic_finance_words(
