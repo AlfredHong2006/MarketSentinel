@@ -4,6 +4,7 @@ import re
 from urllib.parse import urlparse
 
 from marketsentinel.domain import SourceClass
+from marketsentinel.normalization import normalize_text
 
 _REGULATORY_SOURCE_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:sec|edgar|fca)(?![a-z0-9])"
@@ -51,6 +52,20 @@ _MAJOR_FINANCIAL_BRAND_PATTERN = re.compile(
 
 def _is_domain(hostname: str, *domains: str) -> bool:
     return any(hostname == domain or hostname.endswith(f".{domain}") for domain in domains)
+
+
+def source_organization(source: str, url: str | None = None, title: str | None = None) -> str:
+    """Return a coarse publishing-organisation key used to avoid double-counting one voice.
+
+    Every official-company outlet collapses to a single key, so a company's blog, newsroom, and
+    developer site are one organisation rather than three separate corroborating publishers.
+    This is deliberately coarse: it groups outlets that obviously share a voice, and makes no
+    claim about editorial or ownership independence between the organisations it separates.
+    """
+
+    if classify_article_source(source, url, title) is SourceClass.OFFICIAL_COMPANY:
+        return "official-company"
+    return normalize_text(source) or "unknown source"
 
 
 def classify_article_source(

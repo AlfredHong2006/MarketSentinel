@@ -90,7 +90,7 @@ def intelligence_note(cards: Sequence[IntelligenceCard]) -> str:
     event_type = top.event.event.event_type.value.replace("_", " ")
     return (
         f"The latest material analysed event is a {direction} {event_type} "
-        f"({top.impact_label}, evidence: {top.evidence_label})."
+        f"({top.impact_label}, {top.corroboration_label.lower()})."
     )
 
 

@@ -31,7 +31,13 @@ from marketsentinel.dashboard_event_state import (
 from marketsentinel.dashboard_intelligence import (
     CompanyIntelligenceEvent,
     compatible_intelligence_events,
+    contradiction_label,
+    corroboration_label,
+    corroboration_metric,
+    evidence_breakdown_label,
     prepare_todays_intelligence,
+    primary_source_label,
+    summarize_corroboration,
 )
 from marketsentinel.dashboard_market_view import build_market_view
 from marketsentinel.dashboard_risks import (
@@ -312,11 +318,12 @@ def render_todays_intelligence(payload: dict[str, Any]) -> None:
                 ),
             )
             metric_columns[1].metric(
-                "Evidence",
-                card.evidence_label,
+                "Corroboration",
+                card.corroboration_metric,
                 help=(
-                    "Deterministic indicator of supplied-evidence quality and corroboration; "
-                    "not a probability that the article is true."
+                    "Distinct outside publishers whose articles a corroborated claim cited. "
+                    "Absence means the supplied comparison articles did not substantiate a "
+                    "claim, never that a claim is false."
                 ),
             )
             metric_columns[2].metric("Direction", item.event.direction.value.title())
@@ -326,7 +333,9 @@ def render_todays_intelligence(payload: dict[str, Any]) -> None:
                 help="Expected duration of the event's consequences, not time until it starts.",
             )
             st.write(item.event.summary)
-            st.caption(f"{card.corroboration_label} · Source type: {card.source_quality_label}")
+            st.caption(f"Primary source: {card.primary_source_label} · {card.corroboration_label}")
+            if card.contradiction_label:
+                st.warning(card.contradiction_label)
             channel_columns = st.columns(2)
             with channel_columns[0]:
                 st.markdown("**Possible positive channels**")
@@ -597,12 +606,14 @@ def render_event_analysis_details(analysis: CompanyIntelligenceEvent) -> None:
         percent(event.model_confidence),
         help="Confidence that Stage A correctly identified the event described by the supplied text.",
     )
+    summary = summarize_corroboration(analysis)
     columns[5].metric(
-        "Evidence strength",
-        percent(analysis.evidence_strength),
+        "Corroboration",
+        corroboration_metric(summary),
         help=(
-            "Deterministic indicator of supplied-evidence quality and corroboration; "
-            "not a probability that the article is true."
+            "Distinct outside publishers whose articles a corroborated claim cited. Absence "
+            "means the supplied comparison articles did not substantiate a claim, never that a "
+            "claim is false."
         ),
     )
     st.markdown("**What happened**")
@@ -610,10 +621,14 @@ def render_event_analysis_details(analysis: CompanyIntelligenceEvent) -> None:
     st.caption(
         "Primarily affected supported company: "
         f"{analysis.subject_company.name} ({analysis.subject_company.symbol}) "
-        f"· Source type: {analysis.source_class.value.replace('_', ' ')}"
+        f"· Primary source: {primary_source_label(analysis.source_class)} "
+        f"· {corroboration_label(summary)}"
     )
+    if contradiction := contradiction_label(summary):
+        st.warning(contradiction)
     if analysis.claims:
         st.markdown("**Claims and supplied-evidence assessment**")
+        st.caption(evidence_breakdown_label(summary))
         evidence_titles = {item.article_id: item.title for item in analysis.evidence_sources}
         claim_rows = [
             {
@@ -621,11 +636,10 @@ def render_event_analysis_details(analysis: CompanyIntelligenceEvent) -> None:
                 "Claim": _claim_text(item.claim_id, event.important_claims),
                 "Evidence status": item.status.value,
                 "Reasoning": item.reasoning,
-                "Supporting sources": ", ".join(
+                "Cited evidence": ", ".join(
                     evidence_titles.get(item_id, item_id) for item_id in item.evidence_article_ids
                 )
                 or "None",
-                "Confidence": percent(item.confidence),
             }
             for item in analysis.claims
         ]
@@ -652,6 +666,13 @@ def render_event_analysis_details(analysis: CompanyIntelligenceEvent) -> None:
             )
     else:
         st.caption(EMPTY_RELATED_COMPANIES_MESSAGE)
+    with st.expander("Research diagnostics"):
+        st.caption(
+            f"Evidence context score {percent(analysis.evidence_strength)} — a deterministic "
+            "indicator of primary-source class and how much comparison material was supplied, "
+            "used for ordering and risk support. It is not a corroboration count and not a "
+            "probability that the article is true."
+        )
 
 
 def _claim_text(claim_id: str, claims: list[str]) -> str:
