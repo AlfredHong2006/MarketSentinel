@@ -6,6 +6,8 @@ from marketsentinel.historical_backfill import (
     BackfillBucket,
     BackfillBucketReport,
     BackfillRunReport,
+    SelectionGapBucketReport,
+    SelectionGapReport,
     plan_backfill_buckets,
 )
 
@@ -77,3 +79,36 @@ def test_run_report_render_never_implies_full_coverage_when_a_bucket_failed() ->
     assert "failed" in rendered
     assert "provider outage" in rendered
     assert "2026-03" in rendered
+
+
+def test_selection_gap_report_states_its_as_of_and_separates_cached_from_new() -> None:
+    as_of = datetime(2026, 8, 21, 18, 32, 5, 171073, tzinfo=UTC)
+    bucket = BackfillBucket(
+        label="2026-02",
+        start=datetime(2026, 2, 1, tzinfo=UTC),
+        end=datetime(2026, 3, 1, tzinfo=UTC),
+    )
+    report = SelectionGapReport(
+        ticker="NVDA",
+        horizon_days=360,
+        as_of=as_of,
+        buckets=(
+            SelectionGapBucketReport(
+                bucket=bucket,
+                stored_articles=85,
+                candidates_selected=5,
+                cache_hits=4,
+                newly_analyzed=1,
+            ),
+        ),
+        new_analyses_attempted=1,
+        circuit_breaker_tripped=False,
+    )
+
+    rendered = report.render()
+
+    assert as_of.isoformat() in rendered, "geometry is unreadable without the pinned as-of"
+    assert "no fetch" in rendered
+    assert "cached=4" in rendered
+    assert "new=1" in rendered
+    assert "2026-02" in rendered

@@ -4,6 +4,7 @@ import pytest
 from conftest import make_article
 
 from marketsentinel.analysis_candidates import (
+    has_financial_disclosure_signal,
     select_analysis_candidates,
     select_analysis_candidates_with_diagnostics,
 )
@@ -477,6 +478,234 @@ def test_syndicated_and_one_sided_expanded_titles_are_still_suppressed(
 
     assert len(result.candidates) == 1
     assert result.diagnostics.near_title_rejected == 1
+
+
+def _blog_flood(count: int = 4) -> list:
+    """Official-company editorial published after the quarter's results release."""
+
+    return [
+        article(
+            f"NVIDIA technical deep dive uniqueitem{index}",
+            hours_old=index + 1,
+            source="NVIDIA Blog" if index % 2 == 0 else "NVIDIA Developer",
+        )
+        for index in range(count)
+    ]
+
+
+def test_disclosure_priority_is_off_by_default_so_live_ranking_is_unchanged() -> None:
+    results_release = article(
+        "ACME Corp Announces Financial Results for Third Quarter Fiscal 2026",
+        hours_old=40,
+        source="Investor Relations",
+    )
+    articles = [results_release, *_blog_flood()]
+
+    default_result = select_analysis_candidates(articles, NOW, 3, subject_company=APPLE)
+    explicit_off = select_analysis_candidates(
+        articles, NOW, 3, subject_company=APPLE, prioritize_disclosures=False
+    )
+
+    assert default_result == explicit_off
+    assert results_release not in default_result, (
+        "the untouched default must still lose the results release to newer official editorial"
+    )
+
+
+def test_disclosure_priority_recovers_a_results_release_from_newer_official_editorial() -> None:
+    results_release = article(
+        "ACME Corp Announces Financial Results for Third Quarter Fiscal 2026",
+        hours_old=40,
+        source="Investor Relations",
+    )
+    articles = [results_release, *_blog_flood()]
+
+    result = select_analysis_candidates_with_diagnostics(
+        articles, NOW, 3, subject_company=APPLE, prioritize_disclosures=True
+    )
+
+    assert result.candidates[0] == results_release
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Globex PLC Announces Financial Results for Fourth Quarter and Fiscal 2026",
+        "Initech reports first quarter revenue ahead of expectations",
+        "Umbrella Corporation fiscal 2026 results show margin expansion",
+        "Soylent Corp files Form 10-Q with updated segment reporting",
+        "Wonka Industries raises guidance for the full year",
+        "Stark Industries earnings beat lifts the sector",
+        "US tightens export controls on advanced processors",
+    ],
+)
+def test_disclosure_signal_is_company_agnostic(title: str) -> None:
+    assert has_financial_disclosure_signal(title)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "NVIDIA Sets Conference Call for Third-Quarter Financial Results",
+        "ACME Corp Sets Conference Call for Fourth-Quarter Financial Results",
+        "How Small Language Models Are Key to Scalable Agentic AI",
+        "Apple appoints new operations executive",
+    ],
+)
+def test_scheduling_notices_and_editorial_are_not_disclosures(title: str) -> None:
+    assert not has_financial_disclosure_signal(title)
+
+
+def test_issuer_release_and_third_party_recap_can_both_be_selected() -> None:
+    results_release = article(
+        "ACME Corp Announces Financial Results for Fourth Quarter and Fiscal 2026",
+        hours_old=40,
+        source="Investor Relations",
+    )
+    recap = article(
+        "Acme reports fourth quarter earnings and guidance beat as demand accelerates",
+        hours_old=39,
+        source="CNBC",
+        relevance=0.95,
+    )
+    articles = [results_release, recap, *_blog_flood()]
+
+    result = select_analysis_candidates_with_diagnostics(
+        articles, NOW, 5, subject_company=APPLE, prioritize_disclosures=True
+    )
+
+    selected = list(result.candidates)
+    assert results_release in selected, "the issuer disclosure must not be crowded out"
+    assert recap in selected, "third-party coverage must not be starved by the issuer release"
+    assert result.diagnostics.near_title_rejected == 0
+
+
+@pytest.mark.parametrize(
+    ("flagged_title", "flagged_source"),
+    [
+        # Commentary and general news carry disclosure vocabulary as readily as a disclosure does.
+        ("Why Acme's earnings beat is priced in and what to buy instead", "The Motley Fool"),
+        ("Why Acme's earnings beat means export controls should remain", "Policy Institute"),
+        ("Acme's Form 10-K risk factors, explained", "General Daily"),
+    ],
+)
+def test_a_flagged_lower_tier_article_never_outranks_an_unflagged_higher_tier_one(
+    flagged_title: str,
+    flagged_source: str,
+) -> None:
+    flagged = article(flagged_title, hours_old=1, source=flagged_source)
+    wire_report = article(
+        "Acme signs multi-year supply agreement with a major cloud provider",
+        hours_old=3,
+        source="Reuters",
+    )
+    official = article(
+        "Acme technical deep dive on platform tooling",
+        hours_old=4,
+        source="NVIDIA Blog",
+    )
+
+    result = select_analysis_candidates(
+        [flagged, wire_report, official], NOW, 3, subject_company=APPLE, prioritize_disclosures=True
+    )
+
+    assert has_financial_disclosure_signal(flagged_title), "fixture must exercise the signal"
+    assert result.index(official) < result.index(flagged)
+    assert result.index(wire_report) < result.index(flagged), (
+        "disclosure vocabulary must not lift an article above a higher source tier"
+    )
+
+
+def test_disclosure_priority_orders_within_a_tier_not_across_tiers() -> None:
+    issuer_release = article(
+        "Acme Corporation Announces Financial Results for Third Quarter",
+        hours_old=40,
+        source="Investor Relations",
+    )
+    issuer_editorial = article(
+        "Acme technical deep dive on inference runtime",
+        hours_old=1,
+        source="NVIDIA Blog",
+    )
+    wire_report = article(
+        "Acme signs multi-year supply agreement with a major cloud provider",
+        hours_old=2,
+        source="Reuters",
+    )
+
+    result = select_analysis_candidates(
+        [issuer_editorial, wire_report, issuer_release],
+        NOW,
+        3,
+        subject_company=APPLE,
+        prioritize_disclosures=True,
+    )
+
+    # Within the official tier the disclosure wins despite being far older...
+    assert result.index(issuer_release) < result.index(issuer_editorial)
+    # ...and the whole official tier still precedes major financial news, exactly as before.
+    assert result.index(issuer_editorial) < result.index(wire_report)
+
+
+@pytest.mark.parametrize(
+    ("title", "flagged"),
+    [
+        # Known false positives: the signal fires on vocabulary, not on the act of disclosing.
+        ("Analysts expect another earnings beat from Acme", True),
+        ("Morgan Stanley cuts Acme guidance expectations for fiscal 2027", True),
+        ("Three things from Acme's SEC filing investors should know", True),
+        ("Why U.S. export controls on AI chips are failing", True),
+        # Correctly ignored: no disclosure vocabulary at all.
+        ("Acme earnings preview: what to expect on Wednesday", False),
+        ("Will Acme beat earnings estimates again?", False),
+        ("BofA raises price target ahead of Acme results", False),
+        ("What Acme's latest 10-Q reveals about China exposure", False),
+    ],
+)
+def test_known_disclosure_signal_edge_cases_are_pinned(title: str, flagged: bool) -> None:
+    """Documents today's precision, which Amendment 1 bounds to within-tier reordering."""
+
+    assert has_financial_disclosure_signal(title) is flagged
+
+
+def test_disclosure_priority_never_bypasses_the_official_company_cap() -> None:
+    official_sources = (
+        "Investor Relations",
+        "NVIDIA Newsroom",
+        "NVIDIA Blog",
+        "Apple Newsroom",
+        "Apple Investor",
+    )
+    disclosures = [
+        article(
+            f"ACME Corp Announces Financial Results for Fiscal 2026 segment uniqueitem{index}",
+            hours_old=index + 1,
+            source=source,
+        )
+        for index, source in enumerate(official_sources)
+    ]
+
+    result = select_analysis_candidates_with_diagnostics(
+        disclosures, NOW, 5, subject_company=APPLE, prioritize_disclosures=True
+    )
+
+    assert len(result.candidates) == 3, "official_company_cap still binds for disclosures"
+    assert result.diagnostics.official_family_cap_rejected == 2
+
+
+def test_disclosure_priority_leaves_a_month_without_disclosures_unchanged() -> None:
+    articles = [
+        *_blog_flood(),
+        article("Apple signs a supply agreement", source="Reuters", hours_old=5),
+        article("Apple expands a services contract", source="Bloomberg", hours_old=6),
+    ]
+
+    baseline = select_analysis_candidates(articles, NOW, 5, subject_company=APPLE)
+    prioritized = select_analysis_candidates(
+        articles, NOW, 5, subject_company=APPLE, prioritize_disclosures=True
+    )
+
+    assert baseline == prioritized
 
 
 class SequenceRunner:

@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.backfill_service import HistoricalIntelligenceBackfillService
 from marketsentinel.config import Settings, get_settings
-from marketsentinel.constituents import WikipediaConstituentService
+from marketsentinel.constituents import CacheOnlyConstituentResolver, WikipediaConstituentService
 from marketsentinel.event_analysis import (
     ARTICLE_ANALYSIS_SCHEMA_VERSION,
     STAGE_A_PROMPT_VERSION,
@@ -36,19 +36,62 @@ from marketsentinel.sources.historical import (
     HistoricalNewsService,
 )
 from marketsentinel.storage.sqlite import SQLiteRepository
+from marketsentinel.timeutils import ensure_utc
+
+HORIZON_DAYS_PER_MONTH = 30
+
+
+def horizon_days_for(months: int) -> int:
+    """Convert the CLI's month count into a horizon in days.
+
+    Shared by every mode so a repair run replans the exact buckets the run it repairs used.
+    """
+
+    return months * HORIZON_DAYS_PER_MONTH
+
+
+def parse_as_of(value: str) -> datetime:
+    """Parse a pinned ``--as-of`` timestamp, requiring an explicit UTC offset.
+
+    A naive value is rejected rather than assumed to be UTC: this argument exists to reproduce
+    one historical run's exact bucket boundaries, and silently shifting it by the operator's
+    local offset would replan different buckets while appearing to succeed.
+    """
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+        raise ValueError("--as-of must include a UTC offset, for example 2026-08-21T18:32:05+00:00")
+    return ensure_utc(parsed)
+
+
+def _parse_as_of(parser: argparse.ArgumentParser, value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return parse_as_of(value)
+    except ValueError as error:
+        parser.error(str(error))
 
 
 def build_backfill_service(
-    settings: Settings, *, bucket_candidate_cap: int, max_new_analyses: int
+    settings: Settings,
+    *,
+    bucket_candidate_cap: int,
+    max_new_analyses: int,
+    offline: bool = False,
 ) -> HistoricalIntelligenceBackfillService:
     """Wire the same dependency shapes as api/app.py::build_services, for the backfill class."""
 
     repository = SQLiteRepository(settings.database_path)
     repository.initialize()
-    constituents = WikipediaConstituentService(
+    constituent_service = WikipediaConstituentService(
         cache_path=settings.constituent_cache_path,
         timeout_seconds=settings.request_timeout_seconds,
         user_agent=settings.user_agent,
+    )
+    # An offline mode must not reach Wikipedia when the cache has aged past its refresh interval.
+    constituents = (
+        CacheOnlyConstituentResolver(constituent_service) if offline else constituent_service
     )
     historical_news = HistoricalNewsService(
         primary=GdeltHistoricalNewsProvider(
@@ -115,13 +158,25 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["backfill", "reanalyze-stale", "refresh-evidence"],
+        choices=["backfill", "reanalyze-stale", "refresh-evidence", "fill-selection-gaps"],
         default="backfill",
         help="'backfill' fetches/analyzes historical months; 'reanalyze-stale' re-runs the "
         "current Stage A/B/C version only over already-stored articles whose only analyses are "
         "version-incompatible; 'refresh-evidence' re-runs analyze_article for every currently "
         "display-compatible analysis after an evidence-selection algorithm change, relying on "
-        "its existing evidence_fingerprint cache check (unchanged evidence costs nothing).",
+        "its existing evidence_fingerprint cache check (unchanged evidence costs nothing); "
+        "'fill-selection-gaps' re-runs candidate selection over already-stored articles only -- "
+        "no fetch, no scoring, no sentiment rebuild -- and analyzes just the newly selected "
+        "articles, to repair a corpus built with an older selector.",
+    )
+    parser.add_argument(
+        "--as-of",
+        default=None,
+        help="ISO-8601 timestamp with a UTC offset, used as 'now' when planning buckets "
+        "(fill-selection-gaps only). Pin this to the original run's timestamp so the repair "
+        "replans that run's exact buckets. This freezes bucket geometry and publication-time "
+        "filtering only -- candidate membership is whatever the articles table holds at run "
+        "time, so verify the stored article count before a repair. Defaults to the current time.",
     )
     parser.add_argument(
         "--bucket-candidate-cap",
@@ -138,11 +193,16 @@ def main() -> None:
     )
     arguments = parser.parse_args()
 
+    if arguments.as_of is not None and arguments.mode != "fill-selection-gaps":
+        parser.error("--as-of only applies to --mode fill-selection-gaps")
+    as_of = _parse_as_of(parser, arguments.as_of)
+
     settings = get_settings()
     service = build_backfill_service(
         settings,
         bucket_candidate_cap=arguments.bucket_candidate_cap,
         max_new_analyses=arguments.max_new_analyses,
+        offline=arguments.mode == "fill-selection-gaps",
     )
     now = datetime.now(UTC)
 
@@ -150,8 +210,16 @@ def main() -> None:
         report = service.reanalyze_stale(arguments.ticker, now=now)
     elif arguments.mode == "refresh-evidence":
         report = service.refresh_evidence(arguments.ticker, now=now)
+    elif arguments.mode == "fill-selection-gaps":
+        report = service.fill_selection_gaps(
+            arguments.ticker,
+            now=as_of or now,
+            horizon_days=horizon_days_for(arguments.months),
+        )
     else:
-        report = service.backfill(arguments.ticker, now=now, horizon_days=arguments.months * 30)
+        report = service.backfill(
+            arguments.ticker, now=now, horizon_days=horizon_days_for(arguments.months)
+        )
 
     print(report.render())
 

@@ -26,6 +26,8 @@ from marketsentinel.historical_backfill import (
     BackfillBucketReport,
     BackfillRunReport,
     EvidenceRefreshReport,
+    SelectionGapBucketReport,
+    SelectionGapReport,
     StaleBacklogReport,
     plan_backfill_buckets,
 )
@@ -116,6 +118,104 @@ class HistoricalIntelligenceBackfillService:
             new_analyses_attempted=budget.attempts,
             circuit_breaker_tripped=budget.tripped,
             sentiment_dates_total=len(daily),
+        )
+
+    def fill_selection_gaps(
+        self, symbol: str, *, now: datetime, horizon_days: int
+    ) -> SelectionGapReport:
+        """Re-select candidates from already-stored articles and analyze only the gaps.
+
+        This repairs a corpus whose candidate selection was wrong when it was first built, and it
+        deliberately does none of ``backfill``'s other work: no historical-news fetch, no article
+        upsert, no FinBERT scoring, no daily-sentiment rebuild. That is what makes it safe to
+        re-run against a paid corpus -- leaving stored articles untouched keeps every analysis's
+        evidence pool, and therefore its ``evidence_fingerprint``, exactly as it was, so
+        already-analyzed reselections stay free cache hits instead of silently regenerating.
+
+        ``horizon_days`` is required rather than defaulted: bucket boundaries follow from
+        ``now`` and the horizon together, and a repair aimed at a specific historical run has to
+        reproduce that run's geometry rather than inherit an unrelated default. Pinning ``now``
+        freezes those boundaries and which publication dates fall inside them -- it does not
+        freeze database membership, so an article stored later while carrying an old
+        ``published_at`` still joins its bucket's pool. Verify the stored article count
+        immediately before a repair rather than assuming the pinned timestamp isolates it.
+
+        ``constituents`` must resolve offline (see ``CacheOnlyConstituentResolver``); nothing here
+        can otherwise guarantee the run stays off the network.
+        """
+
+        constituent = self.constituents.resolve(symbol)
+        buckets = plan_backfill_buckets(now, horizon_days=horizon_days)
+        budget = _AnalysisBudget(self.max_new_analyses_per_run)
+        reports = [self._fill_bucket_gaps(constituent, bucket, budget) for bucket in buckets]
+        return SelectionGapReport(
+            ticker=constituent.symbol,
+            horizon_days=horizon_days,
+            as_of=now,
+            buckets=tuple(reports),
+            new_analyses_attempted=budget.attempts,
+            circuit_breaker_tripped=budget.tripped,
+        )
+
+    def _fill_bucket_gaps(
+        self, constituent: Constituent, bucket: BackfillBucket, budget: "_AnalysisBudget"
+    ) -> SelectionGapBucketReport:
+        stored = [
+            item
+            for item in self.repository.list_scored_articles(
+                constituent.symbol, since=bucket.start, limit=_SENTIMENT_AGGREGATION_LIMIT
+            )
+            if not item.is_demo and item.published_at < bucket.end
+        ]
+        selection = select_analysis_candidates_with_diagnostics(
+            stored,
+            bucket.end,
+            self.bucket_candidate_cap,
+            subject_company=constituent,
+            prioritize_disclosures=True,
+        )
+        candidates = selection.candidates
+
+        if budget.stopped:
+            stop_reason = (
+                "run-level circuit breaker already tripped"
+                if budget.tripped
+                else "run-level analysis budget already exhausted"
+            )
+            return SelectionGapBucketReport(
+                bucket=bucket,
+                stored_articles=len(stored),
+                candidates_selected=len(candidates),
+                message=f"Analysis skipped: {stop_reason}.",
+            )
+
+        message: str | None = None
+        cache_hits = newly_analyzed = failed = 0
+        for index, candidate in enumerate(candidates):
+            if budget.stopped:
+                remaining = len(candidates) - index
+                message = (
+                    f"{remaining} candidate(s) not analyzed: run budget/circuit breaker stopped."
+                )
+                break
+            response = self.article_analysis_runner.analyze_article(candidate.fingerprint)
+            if response.status == "cached":
+                cache_hits += 1
+                budget.record(response.status)
+                continue
+            if budget.record(response.status) == "completed":
+                newly_analyzed += 1
+            else:
+                failed += 1
+
+        return SelectionGapBucketReport(
+            bucket=bucket,
+            stored_articles=len(stored),
+            candidates_selected=len(candidates),
+            cache_hits=cache_hits,
+            newly_analyzed=newly_analyzed,
+            failed=failed,
+            message=message,
         )
 
     def refresh_evidence(self, symbol: str, *, now: datetime) -> EvidenceRefreshReport:
@@ -247,6 +347,7 @@ class HistoricalIntelligenceBackfillService:
             bucket.end,
             self.bucket_candidate_cap,
             subject_company=constituent,
+            prioritize_disclosures=True,
         )
         candidates = selection.candidates
         message = fetch_outcome.message

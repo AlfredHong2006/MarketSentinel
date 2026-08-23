@@ -231,10 +231,56 @@ class WikipediaConstituentService:
 
         return universe.model_copy(update={"constituents": sorted(candidates, key=rank)[:limit]})
 
+    def load_cached(self) -> UniverseResult:
+        """Return the locally cached universe, never fetching over the network.
+
+        A stale cache is accepted deliberately: an offline maintenance run must fail loudly
+        rather than silently reach Wikipedia, and constituent identity changes far more slowly
+        than the ordinary refresh interval.
+        """
+
+        if self._memory_cache is not None:
+            return self._memory_cache
+        cached = self._read_cache(allow_stale=True)
+        if cached is None:
+            raise ConstituentNotFoundError(
+                f"No usable local constituent cache at {self.cache_path}; an offline run cannot "
+                "fetch the constituent universe over the network"
+            )
+        self._memory_cache = cached
+        return cached
+
     def resolve(self, symbol: str) -> Constituent:
+        return self._match(symbol, self.load())
+
+    def resolve_cached(self, symbol: str) -> Constituent:
+        """Resolve using only locally cached data. Never performs a network fetch."""
+
+        return self._match(symbol, self.load_cached())
+
+    def _match(self, symbol: str, universe: UniverseResult) -> Constituent:
         normalized = symbol.casefold().strip()
-        universe = self.load()
         for item in universe.constituents:
             if normalized in {item.symbol.casefold(), item.yahoo_symbol.casefold()}:
                 return item
         raise ConstituentNotFoundError(f"{symbol!r} is not in the available constituent universe")
+
+
+class CacheOnlyConstituentResolver:
+    """Constituent access restricted to already-cached data.
+
+    Offline maintenance modes wire this so a missing or unreadable cache raises instead of
+    quietly triggering a network refresh. Ordinary fetching paths keep using the service directly.
+    Both members of the universe interface are covered, because Stage C's candidate normalisation
+    calls ``load`` while candidate selection calls ``resolve``.
+    """
+
+    def __init__(self, service: WikipediaConstituentService) -> None:
+        self.service = service
+
+    def resolve(self, symbol: str) -> Constituent:
+        return self.service.resolve_cached(symbol)
+
+    def load(self, force_refresh: bool = False) -> UniverseResult:
+        del force_refresh  # an offline resolver has nothing to refresh from
+        return self.service.load_cached()

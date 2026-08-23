@@ -51,6 +51,32 @@ _MARKET_REACTION_ONLY_PATTERNS = (
         re.I,
     ),
 )
+# A company's own results release and its own developer blog share one SourceClass, so ranking on
+# source tier plus recency lets routine editorial content fill the official-company cap ahead of
+# the quarter's actual disclosure. These patterns name the disclosure itself -- an issuer results
+# release, a periodic filing, a guidance change, or a regulator/export action -- using generic
+# corporate-disclosure vocabulary only, never a company, product, or sector term. A scheduling
+# notice ("Sets Conference Call for Third-Quarter Financial Results") announces no result and is
+# deliberately not matched: "announces"/"reports" must attach to the results themselves.
+_DISCLOSURE_PATTERNS = (
+    re.compile(r"\bannounces?\b.{0,20}\bfinancial results\b", re.I),
+    re.compile(
+        r"\breports?\b.{0,20}\b(?:quarterly|q[1-4]|first|second|third|fourth)\b"
+        r".{0,20}\b(?:results|earnings|revenue)\b",
+        re.I,
+    ),
+    re.compile(r"\bfiscal\s+(?:19|20)\d{2}\b.{0,10}\bresults\b", re.I),
+    re.compile(r"\bform\s+(?:10-q|10-k|8-k|6-k|20-f)\b", re.I),
+    re.compile(r"\b(?:raises?|cuts?|lowers?|updates?|withdraws?)\b.{0,25}\bguidance\b", re.I),
+    re.compile(r"\bguidance\b.{0,20}\b(?:beat|miss|above|below|raised|cut)\b", re.I),
+    re.compile(r"\bsec\b.{0,15}\b(?:filing|charges|investigation|settlement|subpoena)\b", re.I),
+    re.compile(
+        r"\b(?:fined|penalized|sanctioned)\b.{0,30}\b(?:regulator|commission|agency|ftc|doj|sec)\b",
+        re.I,
+    ),
+    re.compile(r"\bexport\s+(?:ban|control|restriction|licen[cs]e)s?\b", re.I),
+    re.compile(r"\b(?:earnings|revenue)\s+(?:beat|miss|top|surpass)\b", re.I),
+)
 _EXTERNAL_OWNER_MARKER = (
     r"(?:advisors?|advisory|associates?|asset\s+manag(?:e)?ment|capital\s+partners|"
     r"financial\s+partners?|"
@@ -145,6 +171,16 @@ class CandidateSelection:
     diagnostics: AutomaticAnalysisDiagnostics
 
 
+def has_financial_disclosure_signal(title: str) -> bool:
+    """Whether a title names a periodic financial disclosure or a regulator/export action.
+
+    Company-agnostic by construction: only generic corporate-disclosure vocabulary is matched,
+    so the same rule works for any issuer without a per-company keyword list.
+    """
+
+    return any(pattern.search(title) is not None for pattern in _DISCLOSURE_PATTERNS)
+
+
 def select_analysis_candidates(
     articles: Sequence[Article],
     now: datetime,
@@ -154,6 +190,7 @@ def select_analysis_candidates(
     relevance_floor: float = MIN_USEFUL_RELEVANCE,
     publisher_cap: int = DEFAULT_PUBLISHER_CAP,
     official_company_cap: int = DEFAULT_OFFICIAL_COMPANY_CAP,
+    prioritize_disclosures: bool = False,
 ) -> list[Article]:
     """Return an ordered candidate list with no I/O or implicit clock access."""
 
@@ -166,6 +203,7 @@ def select_analysis_candidates(
             relevance_floor=relevance_floor,
             publisher_cap=publisher_cap,
             official_company_cap=official_company_cap,
+            prioritize_disclosures=prioritize_disclosures,
         ).candidates
     )
 
@@ -179,8 +217,19 @@ def select_analysis_candidates_with_diagnostics(
     relevance_floor: float = MIN_USEFUL_RELEVANCE,
     publisher_cap: int = DEFAULT_PUBLISHER_CAP,
     official_company_cap: int = DEFAULT_OFFICIAL_COMPANY_CAP,
+    prioritize_disclosures: bool = False,
 ) -> CandidateSelection:
-    """Filter, rank, and diversify candidates deterministically."""
+    """Filter, rank, and diversify candidates deterministically.
+
+    ``prioritize_disclosures`` orders periodic financial disclosures and regulator/export actions
+    ahead of other articles *of the same source tier*, never above a higher tier. Disclosure
+    vocabulary appears in commentary and analysis as readily as in the disclosure itself, so a
+    signal that outranked source class would let an opinion piece displace a wire report merely
+    for saying "earnings beat". It grants no extra slot and bypasses no cap: a disclosure still
+    competes under ``official_company_cap``, ``publisher_cap``, and near-title deduplication, so
+    a month with no disclosure selects exactly what it selects today. Left off, ranking is
+    unchanged.
+    """
 
     if not 0 <= limit <= 40:
         raise ValueError("candidate limit must be between 0 and 40")
@@ -219,7 +268,10 @@ def select_analysis_candidates_with_diagnostics(
             commentary_deprioritized += 1
         eligible.append(article)
 
-    ranked = sorted(eligible, key=lambda article: _ranking_key(article, now))
+    ranked = sorted(
+        eligible,
+        key=lambda article: _disclosure_ranking_key(article, now, prioritize_disclosures),
+    )
     accepted: list[Article] = []
     publisher_counts: Counter[str] = Counter()
     official_company_count = 0
@@ -261,6 +313,22 @@ def select_analysis_candidates_with_diagnostics(
         scheduled_insider_sale_rejected=scheduled_insider_sale_rejected,
     )
     return CandidateSelection(tuple(accepted), diagnostics)
+
+
+def _disclosure_ranking_key(
+    article: Article, now: datetime, prioritize_disclosures: bool
+) -> tuple[float, int, int, float, float, str]:
+    """``_ranking_key`` with the disclosure term spliced in directly below source tier.
+
+    The term is a constant when the flag is off, so ordering is then decided entirely by
+    ``_ranking_key`` exactly as before.
+    """
+
+    source_tier, *remainder = _ranking_key(article, now)
+    disclosure = (
+        0 if prioritize_disclosures and has_financial_disclosure_signal(article.title) else 1
+    )
+    return (source_tier, disclosure, *remainder)
 
 
 def _ranking_key(article: Article, now: datetime) -> tuple[float, int, float, float, str]:

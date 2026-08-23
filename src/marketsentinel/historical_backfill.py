@@ -112,6 +112,59 @@ class BackfillRunReport:
 
 
 @dataclass(frozen=True)
+class SelectionGapBucketReport:
+    """What one bucket contributed to a no-fetch selection-gap fill."""
+
+    bucket: BackfillBucket
+    stored_articles: int = 0
+    candidates_selected: int = 0
+    cache_hits: int = 0
+    newly_analyzed: int = 0
+    failed: int = 0
+    message: str | None = None
+
+
+@dataclass(frozen=True)
+class SelectionGapReport:
+    """Result of re-running candidate selection over already-stored articles only.
+
+    ``as_of`` is recorded because bucket geometry follows from it: the same stored corpus
+    replanned against a different ``as_of`` yields different buckets, so a report that omitted it
+    could not be compared with the run it was meant to repair.
+    """
+
+    ticker: str
+    horizon_days: int
+    as_of: datetime
+    buckets: tuple[SelectionGapBucketReport, ...]
+    new_analyses_attempted: int
+    circuit_breaker_tripped: bool
+
+    def render(self) -> str:
+        lines = [
+            f"Selection-gap fill report for {self.ticker} "
+            f"(as of {self.as_of.isoformat()}, horizon: {self.horizon_days} days, no fetch)"
+        ]
+        for report in self.buckets:
+            line = (
+                f"  {report.bucket.label}  stored={report.stored_articles} "
+                f"candidates={report.candidates_selected} cached={report.cache_hits} "
+                f"new={report.newly_analyzed} failed={report.failed}"
+            )
+            if report.message:
+                line += f"  ({report.message})"
+            lines.append(line)
+        lines.append(
+            f"Totals: cache hits {sum(item.cache_hits for item in self.buckets)} | "
+            f"newly analyzed {sum(item.newly_analyzed for item in self.buckets)} | "
+            f"failed {sum(item.failed for item in self.buckets)} | "
+            f"new analyses attempted: {self.new_analyses_attempted} | "
+            f"circuit breaker tripped: {self.circuit_breaker_tripped}"
+        )
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True)
 class EvidenceRefreshReport:
     """Result of passing current-compatible analyses back through analyze_article after an
     evidence-selection change. Conceptually separate from StaleBacklogReport: this operates

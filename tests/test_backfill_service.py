@@ -20,8 +20,10 @@ from marketsentinel.domain import (
     UniverseResult,
 )
 from marketsentinel.event_analysis import ArticleEventAnalysisService
+from marketsentinel.historical_backfill import plan_backfill_buckets
 from marketsentinel.sentiment.finbert import StaticSentimentAnalyzer
 from marketsentinel.storage.sqlite import SQLiteRepository
+from scripts.backfill_historical_intelligence import horizon_days_for
 
 NOW = datetime(2026, 8, 21, 12, tzinfo=UTC)
 
@@ -318,6 +320,323 @@ def test_refresh_evidence_regenerates_when_a_new_nearby_article_changes_the_pool
 
     assert report.regenerated >= 1, "a new, temporally close article must change the evidence pool"
     assert provider.total_calls > calls_after_backfill
+
+
+class ExplodingHistoricalNews:
+    """Any fetch attempt is a test failure: maintenance modes must never reach the network."""
+
+    name = "must-not-be-called"
+
+    def fetch_history(self, constituent, since, until, max_articles):
+        raise AssertionError("fill_selection_gaps must not fetch historical news")
+
+
+class ExplodingSentimentAnalyzer:
+    def score(self, articles):
+        raise AssertionError("fill_selection_gaps must not run sentiment scoring")
+
+
+class OfflineOnlyConstituents:
+    """Stands in for CacheOnlyConstituentResolver: resolution that cannot reach the network."""
+
+    def __init__(self) -> None:
+        self.network_allowed = False
+
+    def resolve(self, symbol: str):
+        assert symbol == "ACME"
+        if self.network_allowed:
+            raise AssertionError("offline resolution must not fall back to the network")
+        return make_constituent()
+
+    def load(self, force_refresh: bool = False) -> UniverseResult:
+        if force_refresh:
+            raise AssertionError("offline resolution must not force a refresh")
+        return UniverseResult(
+            constituents=[make_constituent()],
+            source="test-cache",
+            is_fallback=False,
+            fetched_at=NOW,
+        )
+
+
+def _offline_service(
+    repository: SQLiteRepository,
+    *,
+    bucket_candidate_cap: int = 5,
+    max_new_analyses: int = 60,
+    provider: CountingArticleIntelligenceProvider | None = None,
+) -> tuple[HistoricalIntelligenceBackfillService, CountingArticleIntelligenceProvider]:
+    """A service whose fetch/scoring collaborators raise if a no-fetch mode touches them."""
+
+    constituents = OfflineOnlyConstituents()
+    provider = provider or CountingArticleIntelligenceProvider()
+    article_events = ArticleEventAnalysisService(
+        repository=repository,
+        provider=provider,
+        constituents=constituents,
+        evidence_limit=5,
+    )
+    service = HistoricalIntelligenceBackfillService(
+        constituents=constituents,
+        historical_news=ExplodingHistoricalNews(),
+        sentiment=ExplodingSentimentAnalyzer(),
+        repository=repository,
+        article_analysis_runner=article_events,
+        article_analysis_compatibility=article_events.compatibility,
+        bucket_candidate_cap=bucket_candidate_cap,
+        max_new_analyses_per_run=max_new_analyses,
+    )
+    return service, provider
+
+
+def _store_scored(repository: SQLiteRepository, articles) -> None:
+    repository.upsert_articles(articles)
+    repository.upsert_sentiments(StaticSentimentAnalyzer().score(articles))
+
+
+def test_fill_selection_gaps_performs_no_fetch_scoring_or_sentiment_rebuild(
+    writable_tmp_path,
+) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title="Acme Corporation announces financial results for third quarter",
+                published_at=NOW - timedelta(days=20),
+                url="https://example.com/results",
+                source="Investor Relations",
+            ),
+            make_article(
+                title="Acme technical deep dive on platform tooling",
+                published_at=NOW - timedelta(days=19),
+                url="https://example.com/blog",
+                source="General Daily",
+            ),
+        ],
+    )
+    sentiment_before = repository.list_daily_sentiment("ACME")
+    service, provider = _offline_service(repository)
+
+    report = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    assert provider.total_calls > 0, "the gap fill must still analyze newly selected articles"
+    assert repository.list_daily_sentiment("ACME") == sentiment_before, (
+        "no daily-sentiment rebuild may occur"
+    )
+    assert sum(bucket.newly_analyzed for bucket in report.buckets) == provider.total_calls
+    assert report.circuit_breaker_tripped is False
+
+
+def test_fill_selection_gaps_recovers_a_results_release_lost_to_official_editorial(
+    writable_tmp_path,
+) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    results_release = make_article(
+        title="Acme Corporation Announces Financial Results for Third Quarter Fiscal 2026",
+        published_at=NOW - timedelta(days=20),
+        url="https://example.com/results",
+        source="Investor Relations",
+    )
+    editorial = [
+        make_article(
+            title=f"Acme technical deep dive uniqueitem{index}",
+            published_at=NOW - timedelta(days=18, hours=index),
+            url=f"https://example.com/blog-{index}",
+            source="NVIDIA Blog" if index % 2 == 0 else "NVIDIA Developer",
+        )
+        for index in range(4)
+    ]
+    _store_scored(repository, [results_release, *editorial])
+    service, _provider = _offline_service(repository, bucket_candidate_cap=3)
+
+    report = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    analyzed = repository.list_article_analyses(
+        "ACME", since=None, compatibility=service.article_analysis_compatibility
+    )
+    assert results_release.fingerprint in {item.article_id for item in analyzed}
+    assert any(bucket.candidates_selected > 0 for bucket in report.buckets)
+
+
+def test_fill_selection_gaps_second_run_is_all_cache_hits(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title=f"Acme distinct development uniqueitem{index}",
+                published_at=NOW - timedelta(days=10 + index),
+                url=f"https://example.com/item-{index}",
+                source=("Reuters", "Bloomberg", "Financial Times")[index],
+            )
+            for index in range(3)
+        ],
+    )
+    service, provider = _offline_service(repository, bucket_candidate_cap=3)
+
+    first = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+    calls_after_first = provider.total_calls
+    second = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    assert calls_after_first > 0
+    assert sum(bucket.newly_analyzed for bucket in first.buckets) == calls_after_first
+    assert sum(bucket.newly_analyzed for bucket in second.buckets) == 0
+    assert sum(bucket.cache_hits for bucket in second.buckets) == sum(
+        bucket.candidates_selected for bucket in second.buckets
+    )
+    assert provider.total_calls == calls_after_first, "a re-run must cost nothing"
+    assert second.new_analyses_attempted == 0
+
+
+def test_fill_selection_gaps_preserves_previously_stored_analyses(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    early = [
+        make_article(
+            title=f"Acme early development uniqueitem{index}",
+            published_at=NOW - timedelta(days=12 + index),
+            url=f"https://example.com/early-{index}",
+            source=("Reuters", "Bloomberg")[index],
+        )
+        for index in range(2)
+    ]
+    _store_scored(repository, early)
+    service, _provider = _offline_service(repository, bucket_candidate_cap=2)
+    service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+    before = {
+        item.article_id
+        for item in repository.list_article_analyses(
+            "ACME", since=None, compatibility=service.article_analysis_compatibility
+        )
+    }
+    assert before
+
+    # A later, higher-priority disclosure now outranks one of them for the same bucket.
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title="Acme Corporation Announces Financial Results for Fiscal 2026",
+                published_at=NOW - timedelta(days=11),
+                url="https://example.com/results-late",
+                source="Investor Relations",
+            )
+        ],
+    )
+    service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    after = {
+        item.article_id
+        for item in repository.list_article_analyses(
+            "ACME", since=None, compatibility=service.article_analysis_compatibility
+        )
+    }
+    assert before <= after, "reselection must never remove an already-stored analysis"
+
+
+def test_fill_selection_gaps_respects_the_run_level_budget(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title=f"Acme distinct development uniqueitem{index}",
+                published_at=NOW - timedelta(days=5 + index * 20),
+                url=f"https://example.com/budget-{index}",
+                source=("Reuters", "Bloomberg", "Financial Times")[index % 3],
+            )
+            for index in range(5)
+        ],
+    )
+    service, provider = _offline_service(repository, bucket_candidate_cap=3, max_new_analyses=2)
+
+    report = service.fill_selection_gaps("ACME", now=NOW, horizon_days=120)
+
+    assert provider.total_calls <= 2
+    assert report.new_analyses_attempted <= 2
+    assert any(bucket.message is not None for bucket in report.buckets)
+
+
+def test_fill_selection_gaps_never_changes_the_stored_article_set(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title=f"Acme distinct development uniqueitem{index}",
+                published_at=NOW - timedelta(days=10 + index),
+                url=f"https://example.com/stable-{index}",
+                source=("Reuters", "Bloomberg")[index],
+            )
+            for index in range(2)
+        ],
+    )
+    before = {item.fingerprint for item in repository.list_articles("ACME")}
+    service, _provider = _offline_service(repository, bucket_candidate_cap=2)
+
+    service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    assert {item.fingerprint for item in repository.list_articles("ACME")} == before, (
+        "a no-fetch repair must never upsert articles, which would move evidence fingerprints"
+    )
+
+
+def test_a_late_stored_article_with_an_old_publication_date_still_enters_its_bucket(
+    writable_tmp_path,
+) -> None:
+    """``as_of`` pins bucket geometry and publication-time filtering, never DB membership."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    service, _provider = _offline_service(repository, bucket_candidate_cap=5)
+    empty = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+    assert sum(bucket.candidates_selected for bucket in empty.buckets) == 0
+
+    # Indexed after the pinned instant, but published well inside an existing bucket.
+    late_arrival = make_article(
+        title="Acme Corporation Announces Financial Results for Third Quarter",
+        published_at=NOW - timedelta(days=20),
+        url="https://example.com/late-indexed",
+        source="Investor Relations",
+    )
+    _store_scored(repository, [late_arrival])
+
+    replanned = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    selected_ids = {
+        item.article_id
+        for item in repository.list_article_analyses(
+            "ACME", since=None, compatibility=service.article_analysis_compatibility
+        )
+    }
+    assert late_arrival.fingerprint in selected_ids
+    assert sum(bucket.candidates_selected for bucket in replanned.buckets) == 1
+
+
+def test_fill_selection_gaps_reproduces_the_twelve_month_backfill_bucket_geometry(
+    writable_tmp_path,
+) -> None:
+    """Pinned as-of plus the CLI's month->day conversion must replan the audited buckets."""
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    pinned = datetime(2026, 8, 21, 18, 32, 5, 171073, tzinfo=UTC)
+    service, _provider = _offline_service(repository)
+
+    report = service.fill_selection_gaps("ACME", now=pinned, horizon_days=horizon_days_for(12))
+
+    expected = plan_backfill_buckets(pinned, horizon_days=12 * 30)
+    assert [item.bucket for item in report.buckets] == expected
+    assert report.horizon_days == 360
+    assert report.as_of == pinned
+    assert [item.bucket.label for item in report.buckets][:2] == ["2025-08", "2025-09"]
+    assert len(report.buckets) == 13
 
 
 def test_reanalyze_stale_only_targets_articles_with_no_compatible_analysis(
