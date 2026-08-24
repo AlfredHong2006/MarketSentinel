@@ -365,6 +365,7 @@ def _offline_service(
     bucket_candidate_cap: int = 5,
     max_new_analyses: int = 60,
     provider: CountingArticleIntelligenceProvider | None = None,
+    priority_bonus_limit: int = 0,
 ) -> tuple[HistoricalIntelligenceBackfillService, CountingArticleIntelligenceProvider]:
     """A service whose fetch/scoring collaborators raise if a no-fetch mode touches them."""
 
@@ -385,6 +386,7 @@ def _offline_service(
         article_analysis_compatibility=article_events.compatibility,
         bucket_candidate_cap=bucket_candidate_cap,
         max_new_analyses_per_run=max_new_analyses,
+        priority_bonus_limit=priority_bonus_limit,
     )
     return service, provider
 
@@ -617,6 +619,61 @@ def test_a_late_stored_article_with_an_old_publication_date_still_enters_its_buc
     }
     assert late_arrival.fingerprint in selected_ids
     assert sum(bucket.candidates_selected for bucket in replanned.buckets) == 1
+
+
+def test_priority_bonus_lets_an_active_bucket_exceed_the_base_cap(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title=f"Acme to acquire uniquetarget{index} in a multi-billion deal",
+                published_at=NOW - timedelta(days=10, hours=index),
+                url=f"https://example.com/deal-{index}",
+                source=("Reuters", "Bloomberg", "Financial Times", "CNBC")[index % 4],
+            )
+            for index in range(6)
+        ],
+    )
+
+    base_only, _provider = _offline_service(repository, bucket_candidate_cap=4)
+    base_report = base_only.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+    with_bonus, _bonus_provider = _offline_service(
+        repository, bucket_candidate_cap=4, priority_bonus_limit=2
+    )
+    bonus_report = with_bonus.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    assert max(item.candidates_selected for item in base_report.buckets) == 4
+    assert max(item.candidates_selected for item in bonus_report.buckets) == 6, (
+        "a bucket full of reported corporate actions may spend the bonus"
+    )
+
+
+def test_priority_bonus_leaves_a_quiet_bucket_at_the_base_cap(writable_tmp_path) -> None:
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    _store_scored(
+        repository,
+        [
+            make_article(
+                title=f"Acme publishes an engineering note uniqueitem{index}",
+                published_at=NOW - timedelta(days=10, hours=index),
+                url=f"https://example.com/note-{index}",
+                source=("Reuters", "Bloomberg", "Financial Times")[index % 3],
+            )
+            for index in range(6)
+        ],
+    )
+    service, _provider = _offline_service(
+        repository, bucket_candidate_cap=4, priority_bonus_limit=2
+    )
+
+    report = service.fill_selection_gaps("ACME", now=NOW, horizon_days=60)
+
+    assert max(item.candidates_selected for item in report.buckets) == 4, (
+        "a quiet period never pays for the bonus"
+    )
 
 
 def test_fill_selection_gaps_reproduces_the_twelve_month_backfill_bucket_geometry(

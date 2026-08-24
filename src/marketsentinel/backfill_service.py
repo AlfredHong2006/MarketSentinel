@@ -62,11 +62,14 @@ class HistoricalIntelligenceBackfillService:
         bucket_max_articles: int = 200,
         max_new_analyses_per_run: int = 60,
         sentiment_half_life_hours: float = 24.0,
+        priority_bonus_limit: int = 0,
     ) -> None:
         if not 1 <= bucket_candidate_cap <= 40:
             raise ValueError("bucket_candidate_cap must be between 1 and 40")
         if max_new_analyses_per_run < 0:
             raise ValueError("max_new_analyses_per_run must not be negative")
+        if not 0 <= priority_bonus_limit <= 10:
+            raise ValueError("priority_bonus_limit must be between 0 and 10")
         self.constituents = constituents
         self.historical_news = historical_news
         self.sentiment = sentiment
@@ -77,6 +80,7 @@ class HistoricalIntelligenceBackfillService:
         self.bucket_max_articles = bucket_max_articles
         self.max_new_analyses_per_run = max_new_analyses_per_run
         self.sentiment_half_life_hours = sentiment_half_life_hours
+        self.priority_bonus_limit = priority_bonus_limit
 
     def backfill(self, symbol: str, *, now: datetime, horizon_days: int = 366) -> BackfillRunReport:
         """Populate historical articles/sentiment/analyses for one ticker. Idempotent to re-run.
@@ -173,6 +177,7 @@ class HistoricalIntelligenceBackfillService:
             self.bucket_candidate_cap,
             subject_company=constituent,
             prioritize_disclosures=True,
+            priority_bonus_limit=self.priority_bonus_limit,
         )
         candidates = selection.candidates
 
@@ -348,6 +353,7 @@ class HistoricalIntelligenceBackfillService:
             self.bucket_candidate_cap,
             subject_company=constituent,
             prioritize_disclosures=True,
+            priority_bonus_limit=self.priority_bonus_limit,
         )
         candidates = selection.candidates
         message = fetch_outcome.message

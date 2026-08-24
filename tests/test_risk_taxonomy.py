@@ -193,6 +193,65 @@ def test_observed_v5_channels_reach_their_theme(mechanism: str, theme: RiskTheme
     assert theme_for_mechanism(mechanism) is theme
 
 
+# Mechanisms taken verbatim from stored NVDA analyses that reached no theme because the phrasing
+# ran the other way round from the existing patterns ("loss of market share" rather than "market
+# share loss", "disruption in supply chain" rather than "supply disruption").
+_PREVIOUSLY_UNMAPPED_CHANNELS: tuple[tuple[str, RiskTheme], ...] = (
+    (
+        "Potential loss of market share in the AI chip sector in China.",
+        RiskTheme.COMPETITIVE_PRESSURE,
+    ),
+    (
+        "Potential loss of competitive advantage in the Chinese market.",
+        RiskTheme.COMPETITIVE_PRESSURE,
+    ),
+    (
+        "Potential loss of revenue from reduced sales in the Chinese market.",
+        RiskTheme.DEMAND_SLOWDOWN,
+    ),
+    (
+        "Disruption in supply chain relationships with Chinese partners.",
+        RiskTheme.SUPPLY_CONSTRAINT,
+    ),
+    (
+        "Limited supply may restrict Nvidia's ability to meet demand in the Chinese market.",
+        RiskTheme.SUPPLY_CONSTRAINT,
+    ),
+    (
+        "Potential delays in future shipments could impact revenue from the region.",
+        RiskTheme.SUPPLY_CONSTRAINT,
+    ),
+)
+
+
+@pytest.mark.parametrize(("mechanism", "theme"), _PREVIOUSLY_UNMAPPED_CHANNELS)
+def test_recovered_phrasings_reach_their_theme(mechanism: str, theme: RiskTheme) -> None:
+    assert theme_for_mechanism(mechanism) is theme
+
+
+@pytest.mark.parametrize(
+    "mechanism",
+    [
+        # Also observed unmapped, and deliberately left that way. Perception, another company's
+        # exposure, and a partnership that never existed are not this company's risk mechanisms.
+        "Loss of investor confidence could affect Supermicro's market position.",
+        "Potential legal penalties could impact Supermicro's operations and financial stability.",
+        (
+            "Loss of a significant potential partnership that could have enhanced Nvidia's "
+            "market position in AI."
+        ),
+        "Potential delays in market entry for AI products in China could affect revenue growth.",
+        # Near misses for the recovered patterns: the object must be share or advantage, the
+        # contraction must name a market, and a delay must concern shipments.
+        "Loss of a board member with semiconductor experience.",
+        "Reduced sales commissions lower operating expenses.",
+        "Delays in the annual developer conference agenda.",
+    ],
+)
+def test_recovered_patterns_do_not_overmatch(mechanism: str) -> None:
+    assert theme_for_mechanism(mechanism) is RiskTheme.UNMAPPED
+
+
 @pytest.mark.parametrize(
     "mechanism",
     [

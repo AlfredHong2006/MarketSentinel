@@ -98,6 +98,13 @@ _THEME_TRIGGERS: tuple[tuple[RiskTheme, tuple[str, ...]], ...] = (
             # "product" is required, not optional: bare "lower availability" also describes
             # credit, financing, or labour, none of which is a product supply constraint.
             r"(?:reduced|lower|constrained)\s+product\s+availability",
+            # The existing patterns need the constraint word adjacent to "supply", so a
+            # disruption stated the other way round ("disruption in supply chain relationships")
+            # reached no theme at all.
+            r"supply\s+chain\s+(?:relationship|disruption)",
+            # Scarcity and shipment delay stated plainly. "delay" is bound to a shipment so that
+            # a delayed launch or decision, which is execution rather than supply, stays out.
+            r"\blimited\s+supply\b|delays?\s+in\s+(?:\w+\s+){0,2}shipments?\b",
         ),
     ),
     (
@@ -126,6 +133,11 @@ _THEME_TRIGGERS: tuple[tuple[RiskTheme, tuple[str, ...]], ...] = (
             r"(?:decreas\w*|declin\w*|reduction|drop|fall)\s+in\s+(?:revenue|sales|orders?)"
             r"\s+from\s+(?:\w+\s+){0,2}"
             r"(?:customer|client|contract|order|account|reseller|distributor)s?\b",
+            # Contraction attributed to a named market is a demand mechanism in the same way a
+            # contraction attributed to a customer is. "market" is required, so a bare "reduced
+            # sales" caused by supply or pricing does not land here.
+            r"(?:reduced|lower|declining|falling|weaker)\s+sales\s+in\s+"
+            r"(?:the\s+)?(?:\w+\s+){0,2}market\b",
         ),
     ),
     (
@@ -141,6 +153,10 @@ _THEME_TRIGGERS: tuple[tuple[RiskTheme, tuple[str, ...]], ...] = (
             # "competitive"/"competitiveness", which read positively about the company itself.
             # Bare "competition" would also steal "competition authority" from REGULATORY_ANTITRUST.
             r"(?:increas\w*|intensif\w*|greater|heightened|growing|stronger|more)\s+competition\b",
+            # The existing share pattern needs "market share loss" in that order, so the
+            # commoner "loss of market share" phrasing reached no theme. The object is fixed to
+            # share or competitive advantage: a bare "loss of ..." is not a competitive mechanism.
+            r"loss\s+of\s+(?:\w+\s+){0,2}(?:market\s+share|competitive\s+advantage)\b",
         ),
     ),
     (

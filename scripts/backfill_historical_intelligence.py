@@ -79,6 +79,7 @@ def build_backfill_service(
     bucket_candidate_cap: int,
     max_new_analyses: int,
     offline: bool = False,
+    priority_bonus_limit: int = 0,
 ) -> HistoricalIntelligenceBackfillService:
     """Wire the same dependency shapes as api/app.py::build_services, for the backfill class."""
 
@@ -144,6 +145,7 @@ def build_backfill_service(
         bucket_candidate_cap=bucket_candidate_cap,
         max_new_analyses_per_run=max_new_analyses,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
+        priority_bonus_limit=priority_bonus_limit,
     )
 
 
@@ -186,6 +188,15 @@ def main() -> None:
         "conservative starting point for a first validation run, not 6).",
     )
     parser.add_argument(
+        "--priority-bonus",
+        type=int,
+        default=0,
+        help="Extra candidates a bucket may add beyond --bucket-candidate-cap, drawn only from "
+        "articles reporting a financial disclosure or a concrete corporate action (default: 0, "
+        "i.e. a fixed budget). Use with a lower base cap so a quiet month costs less and a month "
+        "with real activity can afford more.",
+    )
+    parser.add_argument(
         "--max-new-analyses",
         type=int,
         default=60,
@@ -203,6 +214,7 @@ def main() -> None:
         bucket_candidate_cap=arguments.bucket_candidate_cap,
         max_new_analyses=arguments.max_new_analyses,
         offline=arguments.mode == "fill-selection-gaps",
+        priority_bonus_limit=arguments.priority_bonus,
     )
     now = datetime.now(UTC)
 

@@ -77,6 +77,91 @@ _DISCLOSURE_PATTERNS = (
     re.compile(r"\bexport\s+(?:ban|control|restriction|licen[cs]e)s?\b", re.I),
     re.compile(r"\b(?:earnings|revenue)\s+(?:beat|miss|top|surpass)\b", re.I),
 )
+# Deal, financing, and enforcement reporting loses its slot to routine coverage for the same
+# reason a results release does: ranking sees source tier and recency, never what happened. These
+# name the action itself in generic corporate vocabulary -- a stake or investment, an acquisition,
+# a financing, a concrete government/regulator action, or litigation -- with no company, product,
+# or sector term. Families with no real signal of their own are deliberately absent: a contract
+# family matched nothing, and product-launch and partnership vocabulary is dominated by issuer
+# editorial that the official-company tier already reaches.
+_ACTION_PATTERNS = (
+    # Strategic investment or stake. A bare "invests" needs a size marker so routine coverage of
+    # someone else's small position does not qualify.
+    re.compile(
+        r"\b(?:takes?|acquires?|buys?|discloses?)\b.{0,25}\bstake\b"
+        r"|\bstake\s+in\b"
+        r"|\binvests?\b.{0,30}(?:\$|billion|bn\b|million)"
+        r"|\bpledges?\b.{0,20}\$"
+        r"|\bbacks?\b.{0,40}\$"
+        # "bet" is deliberately absent from the amount-context nouns: retrospectives and
+        # commentary use it figuratively ("the $7 billion bet that built..."), and the literal
+        # transactions it would catch already carry invest/stake/backing vocabulary.
+        r"|\$\s?\d[\d.,]*\s*(?:billion|bn|trillion|tn)\b"
+        r".{0,35}\b(?:investment|stake|backing|guarantee|backstop)\b",
+        re.I,
+    ),
+    # Acquisition or M&A. "buys" is bound to an acquirable object so it cannot match buying chips.
+    re.compile(
+        r"\b(?:acquires?|to\s+acquire|acquisition\s+of|acquiring|merger|takeover|buyout)\b"
+        r"|\bbuy(?:s|ing)?\b.{0,40}\b(?:startup|company|assets|maker|firm)\b",
+        re.I,
+    ),
+    # Financing.
+    re.compile(
+        r"\braises?\b.{0,25}\$|\bbond\s+sale\b|\bdebt\s+offering\b|\bjunk-?bond\b",
+        re.I,
+    ),
+    # A concrete government or regulator action, bound to a traded object so that discussion of
+    # policy in the abstract does not qualify.
+    re.compile(
+        r"\b(?:bans?|banned|blocks?|blocked|restricts?|suspends?|revokes?"
+        r"|approves?|clears?|eases?|tightens?|imposes?)\b"
+        r".{0,45}\b(?:chips?|exports?|sales?|shipments?|licen[cs]es?|imports?|loophole)\b"
+        r"|\bentity\s+list\b|\bantitrust\b"
+        r"|\bexport\s+(?:ban|control|restriction|licen[cs]e)s?\b"
+        r"|\bsmuggl\w+\b|\breroute\b",
+        re.I,
+    ),
+    # Litigation.
+    re.compile(
+        r"\bsue[sd]?\b|\bsued\b|\blawsuit\b|\bcharged\s+with\b|\bindicted\b"
+        r"|\bsettl(?:es?|ed|ement)\b.{0,30}\b(?:lawsuit|charges?|case|dispute)\b",
+        re.I,
+    ),
+)
+# Action vocabulary appears just as readily in a piece explaining an action as in the report of
+# one. These two guards remove the explanatory and the price-reaction framings, so priority is
+# never granted for merely discussing an event.
+_COMMENTARY_GUARD_PATTERNS = (
+    re.compile(
+        r"^(?:why|how|what|should|could|will|opinion|analysis|explainer|prediction)\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:should|explained|explainer|preview|what\s+to\s+expect)\b", re.I),
+)
+_MARKET_MOVE_GUARD_PATTERNS = (
+    re.compile(
+        r"\b(?:shares?|stock|market\s+(?:cap|value|capitalization))\b.{0,35}"
+        r"\b(?:surge\w*|jump\w*|climb\w*|rise[sn]?|rose|fall\w*|fell|slid\w*|sink\w*"
+        r"|gain\w*|drop\w*|record|tops?|close[sd]?|rally|swing)\b",
+        re.I,
+    ),
+)
+# An outside holder exiting a position carries the same "stake"/investment vocabulary as a
+# genuine corporate action, and it is the commoner story: routine 13F-style portfolio reporting
+# on a company's shares, not something the company did. This guard is deliberately blunt at the
+# title-only level -- every disposal-shaped title is excluded by default -- because nothing here
+# knows which company is under analysis; the one case that guard wrongly excludes, the subject
+# itself disposing of a stake it holds in someone else, is restored where the selector grants
+# priority, since only the selector knows the subject.
+_STAKE_DISPOSAL_VERB = (
+    r"(?:sells?|sold|offload(?:s|ed|ing)?|exits?|exited|dumps?|dumped"
+    r"|divests?|divested|liquidat(?:es?|ed|ing))"
+)
+_STAKE_DISPOSAL_PATTERNS = (
+    re.compile(rf"\b{_STAKE_DISPOSAL_VERB}\b.{{0,40}}\bstake\b", re.I),
+    re.compile(r"\bstake\s+sale\b", re.I),
+)
 _EXTERNAL_OWNER_MARKER = (
     r"(?:advisors?|advisory|associates?|asset\s+manag(?:e)?ment|capital\s+partners|"
     r"financial\s+partners?|"
@@ -181,6 +266,73 @@ def has_financial_disclosure_signal(title: str) -> bool:
     return any(pattern.search(title) is not None for pattern in _DISCLOSURE_PATTERNS)
 
 
+def describes_market_move(title: str) -> bool:
+    """Whether a title's subject is a price or market-capitalisation move rather than an event."""
+
+    return any(pattern.search(title) is not None for pattern in _MARKET_MOVE_GUARD_PATTERNS)
+
+
+def reads_as_commentary(title: str) -> bool:
+    """Whether a title frames itself as explanation, advocacy, or a preview of a future event."""
+
+    return any(pattern.search(title) is not None for pattern in _COMMENTARY_GUARD_PATTERNS)
+
+
+def is_stake_disposal_shaped(title: str) -> bool:
+    """Whether a title reports someone exiting a stake, without regard to who is exiting."""
+
+    return any(pattern.search(title) is not None for pattern in _STAKE_DISPOSAL_PATTERNS)
+
+
+def has_priority_signal(title: str) -> bool:
+    """Whether a title reports a disclosure or a concrete corporate action worth prioritising.
+
+    All three guards apply to the whole signal, including the disclosure vocabulary: a piece
+    arguing why an export control should stay, reporting that a stock climbed on a deal, or
+    reporting an outside holder's exit describes an action without being the report of a subject-
+    company event, and must not take a slot from the report of one.
+    """
+
+    if (
+        reads_as_commentary(title)
+        or describes_market_move(title)
+        or is_stake_disposal_shaped(title)
+    ):
+        return False
+    if has_financial_disclosure_signal(title):
+        return True
+    return any(pattern.search(title) is not None for pattern in _ACTION_PATTERNS)
+
+
+def _is_subject_initiated_stake_disposal(title: str, subject: CompanyIdentity) -> bool:
+    """Whether the subject company itself is the party disposing of a stake it holds.
+
+    ``has_priority_signal`` excludes every disposal-shaped title by default, since that
+    vocabulary usually reports an outside holder exiting a position in the subject. When the
+    subject itself is the seller -- divesting a stake it holds in someone else -- the same title
+    is a genuine corporate action; only the caller here knows which company is under analysis, so
+    only here is priority restored for that one case.
+    """
+
+    if not is_stake_disposal_shaped(title):
+        return False
+    normalized = normalize_text(title)
+    for name in sorted(_subject_names(subject), key=len, reverse=True):
+        # An optional stray "s" absorbs the possessive apostrophe normalize_text leaves behind
+        # ("Nvidia's" -> "nvidia s"); it is not itself part of the subject name.
+        if re.search(rf"\b{re.escape(name)}\b\s+(?:s\s+)?{_STAKE_DISPOSAL_VERB}\b", normalized):
+            return True
+    return False
+
+
+def _grants_priority(title: str, subject: CompanyIdentity) -> bool:
+    """The selector's actual priority decision: the base signal, with the disposal exception."""
+
+    if has_priority_signal(title):
+        return True
+    return _is_subject_initiated_stake_disposal(title, subject)
+
+
 def select_analysis_candidates(
     articles: Sequence[Article],
     now: datetime,
@@ -191,6 +343,7 @@ def select_analysis_candidates(
     publisher_cap: int = DEFAULT_PUBLISHER_CAP,
     official_company_cap: int = DEFAULT_OFFICIAL_COMPANY_CAP,
     prioritize_disclosures: bool = False,
+    priority_bonus_limit: int = 0,
 ) -> list[Article]:
     """Return an ordered candidate list with no I/O or implicit clock access."""
 
@@ -204,6 +357,7 @@ def select_analysis_candidates(
             publisher_cap=publisher_cap,
             official_company_cap=official_company_cap,
             prioritize_disclosures=prioritize_disclosures,
+            priority_bonus_limit=priority_bonus_limit,
         ).candidates
     )
 
@@ -218,21 +372,31 @@ def select_analysis_candidates_with_diagnostics(
     publisher_cap: int = DEFAULT_PUBLISHER_CAP,
     official_company_cap: int = DEFAULT_OFFICIAL_COMPANY_CAP,
     prioritize_disclosures: bool = False,
+    priority_bonus_limit: int = 0,
 ) -> CandidateSelection:
     """Filter, rank, and diversify candidates deterministically.
 
-    ``prioritize_disclosures`` orders periodic financial disclosures and regulator/export actions
-    ahead of other articles *of the same source tier*, never above a higher tier. Disclosure
-    vocabulary appears in commentary and analysis as readily as in the disclosure itself, so a
-    signal that outranked source class would let an opinion piece displace a wire report merely
-    for saying "earnings beat". It grants no extra slot and bypasses no cap: a disclosure still
-    competes under ``official_company_cap``, ``publisher_cap``, and near-title deduplication, so
-    a month with no disclosure selects exactly what it selects today. Left off, ranking is
-    unchanged.
+    ``prioritize_disclosures`` orders financial disclosures and concrete corporate actions ahead
+    of other articles *of the same source tier*, never above a higher tier. That vocabulary
+    appears in commentary and analysis as readily as in the report of the event, so a signal that
+    outranked source class would let an opinion piece displace a wire report merely for saying
+    "earnings beat". It bypasses no cap: a prioritised article still competes under
+    ``official_company_cap``, ``publisher_cap``, and near-title deduplication, so a period with no
+    such article selects exactly what it selects today. Left off, ranking is unchanged.
+
+    ``priority_bonus_limit`` then allows up to that many *additional* accepts, drawn only from
+    articles carrying a priority signal that the ordinary walk did not reach. A period's cost is
+    therefore ``limit`` when nothing material happened and at most ``limit + priority_bonus_limit``
+    when it did, which keeps a quiet month cheap without capping a dense one at a quiet month's
+    budget. The additions run through the same caps and deduplication as every other accept.
     """
 
     if not 0 <= limit <= 40:
         raise ValueError("candidate limit must be between 0 and 40")
+    if priority_bonus_limit < 0:
+        raise ValueError("priority bonus limit must not be negative")
+    if limit + priority_bonus_limit > 40:
+        raise ValueError("candidate limit plus priority bonus must not exceed 40")
     if publisher_cap < 1:
         raise ValueError("publisher cap must be at least 1")
     if official_company_cap < 1:
@@ -270,33 +434,57 @@ def select_analysis_candidates_with_diagnostics(
 
     ranked = sorted(
         eligible,
-        key=lambda article: _disclosure_ranking_key(article, now, prioritize_disclosures),
+        key=lambda article: _disclosure_ranking_key(
+            article, now, prioritize_disclosures, subject_company
+        ),
     )
     accepted: list[Article] = []
+    accepted_fingerprints: set[str] = set()
     publisher_counts: Counter[str] = Counter()
     official_company_count = 0
     publisher_cap_rejected = official_family_cap_rejected = near_title_rejected = 0
-    for article in ranked:
-        if len(accepted) >= limit:
-            break
-        if any(_near_title(article, previous) for previous in accepted):
-            near_title_rejected += 1
-            continue
-        source_class = classify_article_source(article.source, article.url, article.title)
-        if (
-            source_class is SourceClass.OFFICIAL_COMPANY
-            and official_company_count >= official_company_cap
-        ):
-            official_family_cap_rejected += 1
-            continue
-        publisher = normalize_text(article.source) or "unknown source"
-        if publisher_counts[publisher] >= publisher_cap:
-            publisher_cap_rejected += 1
-            continue
-        accepted.append(article)
-        publisher_counts[publisher] += 1
-        if source_class is SourceClass.OFFICIAL_COMPANY:
-            official_company_count += 1
+
+    def admit(candidates: Sequence[Article], target: int) -> None:
+        """Accept from ``candidates`` until ``target`` is reached, sharing all cap state."""
+
+        nonlocal official_company_count
+        nonlocal publisher_cap_rejected, official_family_cap_rejected, near_title_rejected
+        for article in candidates:
+            if len(accepted) >= target:
+                break
+            if article.fingerprint in accepted_fingerprints:
+                continue
+            if any(_near_title(article, previous) for previous in accepted):
+                near_title_rejected += 1
+                continue
+            source_class = classify_article_source(article.source, article.url, article.title)
+            if (
+                source_class is SourceClass.OFFICIAL_COMPANY
+                and official_company_count >= official_company_cap
+            ):
+                official_family_cap_rejected += 1
+                continue
+            publisher = normalize_text(article.source) or "unknown source"
+            if publisher_counts[publisher] >= publisher_cap:
+                publisher_cap_rejected += 1
+                continue
+            accepted.append(article)
+            accepted_fingerprints.add(article.fingerprint)
+            publisher_counts[publisher] += 1
+            if source_class is SourceClass.OFFICIAL_COMPANY:
+                official_company_count += 1
+
+    admit(ranked, limit)
+    if priority_bonus_limit:
+        # Ranked order is preserved, so the additions are the highest-ranked priority articles
+        # the ordinary walk had no room for -- never a separate lane with its own ordering.
+        remaining_priority = [
+            article
+            for article in ranked
+            if article.fingerprint not in accepted_fingerprints
+            and _grants_priority(article.title, subject_company)
+        ]
+        admit(remaining_priority, len(accepted) + priority_bonus_limit)
 
     diagnostics = AutomaticAnalysisDiagnostics(
         considered=len(articles),
@@ -316,18 +504,19 @@ def select_analysis_candidates_with_diagnostics(
 
 
 def _disclosure_ranking_key(
-    article: Article, now: datetime, prioritize_disclosures: bool
+    article: Article,
+    now: datetime,
+    prioritize_disclosures: bool,
+    subject: CompanyIdentity,
 ) -> tuple[float, int, int, float, float, str]:
-    """``_ranking_key`` with the disclosure term spliced in directly below source tier.
+    """``_ranking_key`` with the priority term spliced in directly below source tier.
 
     The term is a constant when the flag is off, so ordering is then decided entirely by
     ``_ranking_key`` exactly as before.
     """
 
     source_tier, *remainder = _ranking_key(article, now)
-    disclosure = (
-        0 if prioritize_disclosures and has_financial_disclosure_signal(article.title) else 1
-    )
+    disclosure = 0 if prioritize_disclosures and _grants_priority(article.title, subject) else 1
     return (source_tier, disclosure, *remainder)
 
 

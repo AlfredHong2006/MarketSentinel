@@ -1,0 +1,62 @@
+{
+  "description": "Real NVDA headlines used as a selector/substrate regression set. Titles are verbatim from the stored 1,181-article corpus. This pins which headlines the deterministic priority signal treats as reports of a disclosure or corporate action, and which it treats as commentary, preview, editorial, or price reaction. It is not a materiality judgement and is not the future M5 gold set.",
+  "positives": [
+    {"title": "NVIDIA Announces Financial Results for Second Quarter Fiscal 2026", "family": "disclosure"},
+    {"title": "NVIDIA Announces Financial Results for Third Quarter Fiscal 2026", "family": "disclosure"},
+    {"title": "NVIDIA Announces Financial Results for Fourth Quarter and Fiscal 2026", "family": "disclosure"},
+    {"title": "NVIDIA Announces Financial Results for First Quarter Fiscal 2027", "family": "disclosure"},
+    {"title": "Nvidia reports earnings and guidance beat as AI boom pushes data center revenue up 75%", "family": "disclosure"},
+    {"title": "Nvidia to invest up to $100 billion in OpenAI, linking two artificial intelligence leaders", "family": "investment"},
+    {"title": "Nvidia's $100 billion OpenAI play raises big antitrust issues", "family": "regulatory_action"},
+    {"title": "Nvidia to provide up to $105 billion guarantee for OpenAI's Ohio data center", "family": "investment"},
+    {"title": "Nvidia pledges $100bn backing for OpenAI data centre in Ohio", "family": "investment"},
+    {"title": "Nvidia to Invest $1 Billion in Nokia in AI Networking Push", "family": "investment"},
+    {"title": "Nvidia takes $1 billion stake in Nokia, sending the 5G equipment maker higher", "family": "investment"},
+    {"title": "Nvidia takes $5 billion stake in Intel under September agreement", "family": "investment"},
+    {"title": "Nvidia Invests $2 Billion More in CoreWeave, Offers New Chip", "family": "investment"},
+    {"title": "Nvidia backs AI company Vast Data at $30 billion valuation", "family": "investment"},
+    {"title": "Nvidia buying AI chip startup Groq's assets for about $20 billion in its largest deal", "family": "acquisition"},
+    {"title": "NVIDIA Acquires Open-Source Workload Management Provider SchedMD", "family": "acquisition"},
+    {"title": "Nvidia in advanced talks to acquire AI21 in $2-3 billion deal focused on enterprise AI", "family": "acquisition"},
+    {"title": "Nvidia to raise $25 billion in first corporate bond sale in five years", "family": "financing"},
+    {"title": "U.S. uncovers scheme to reroute Nvidia GPUs worth $160 million to China despite export bans", "family": "regulatory_action"},
+    {"title": "The U.S. banned Nvidia's best chips from going to China. Now it's trying to close a crucial loophole", "family": "regulatory_action"},
+    {"title": "China eases limits on Nvidia H200 chips as AI race escalates", "family": "regulatory_action"},
+    {"title": "U.S. clears H200 chip sales to 10 China firms as Nvidia CEO looks for new markets", "family": "regulatory_action"},
+    {"title": "China banned Nvidia's gaming chip during Jensen Huang's visit", "family": "regulatory_action"},
+    {"title": "Trio charged over alleged plot to smuggle Nvidia chips from US to China", "family": "litigation"},
+    {"title": "Nvidia sued by music company Jamendo over AI training", "family": "litigation"}
+  ],
+  "negatives": [
+    {"title": "Game On: How Modders Reimagine Classic Games With NVIDIA RTX Remix and Generative AI", "reason": "developer editorial"},
+    {"title": "Model Quantization: Concepts, Methods, and Why It Matters | NVIDIA Technical Blog", "reason": "developer tutorial"},
+    {"title": "Building Federated Multimodal AI Workflows with NVIDIA FLARE", "reason": "developer tutorial"},
+    {"title": "How Small Language Models Are Key to Scalable Agentic AI | NVIDIA Technical Blog", "reason": "developer tutorial"},
+    {"title": "Designing GPU-Accelerated Query Engines with NVIDIA GQE | NVIDIA Technical Blog", "reason": "developer tutorial"},
+    {"title": "Four Ways to Deploy More Secure AI Agents | NVIDIA Technical Blog", "reason": "developer tutorial"},
+    {"title": "NVIDIA Sets Conference Call for Third-Quarter Financial Results", "reason": "scheduling notice"},
+    {"title": "NVIDIA Sets Conference Call for Fourth-Quarter Financial Results", "reason": "scheduling notice"},
+    {"title": "NVIDIA Sets Conference Call for Second-Quarter Financial Results", "reason": "scheduling notice"},
+    {"title": "Nvidia Reports Earnings Wednesday. Here's How Much the Stock Is Expected to Move", "reason": "earnings preview"},
+    {"title": "Nvidia earnings preview: what to expect on Wednesday", "reason": "earnings preview"},
+    {"title": "Must read weekly preview: Prudential, Nvidia", "reason": "multi-stock preview"},
+    {"title": "Prediction: Nvidia Stock Will Go Parabolic After Aug. 26. Here Are 2.3 Trillion Reasons Why", "reason": "prediction commentary"},
+    {"title": "China's AI Chip Deficit: Why Huawei Can't Catch Nvidia and U.S. Export Controls Should Remain", "reason": "policy advocacy commentary"},
+    {"title": "Why Nvidia took a stake in Intel", "reason": "commentary explaining an action"},
+    {"title": "How a power shortage could short-circuit Nvidia's rise", "reason": "speculative commentary"},
+    {"title": "What Nvidia's latest 10-Q reveals about China exposure", "reason": "commentary quoting a filing"},
+    {"title": "CoreWeave stock jumps 6% as Nvidia invests $2 billion to expand AI data centers", "reason": "price reaction"},
+    {"title": "Nvidia stock climbs 2% as U.S. approves chip sale to the UAE under new terms", "reason": "price reaction"},
+    {"title": "Nvidia shares surge 8% after earnings beat", "reason": "price reaction"},
+    {"title": "Qualcomm shares jump as it launches new AI chip to rival Nvidia", "reason": "price reaction"},
+    {"title": "Nvidia stock closes at record, pushing market cap past $5 trillion", "reason": "price reaction"},
+    {"title": "SoftBank sells its entire stake in Nvidia for $5.83 billion", "reason": "external holder's disposal; Nvidia is the object of the sale, not the seller"},
+    {"title": "Peter Thiel's fund offloaded Nvidia stake in third quarter, filing shows", "reason": "external holder's disposal; Nvidia is the object of the sale, not the seller"}
+  ],
+  "known_false_positives": [
+    {"title": "Analysts expect another earnings beat from Nvidia", "reason": "forward-looking analyst expectation carries results vocabulary without reporting a result"}
+  ],
+  "subject_disposal_positives": [
+    {"title": "Nvidia sells entire stake in Arm, a company it once tried to buy", "reason": "the subject company itself is the seller, so the same disposal vocabulary is a genuine corporate action once the selector knows the subject"}
+  ]
+}
