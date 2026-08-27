@@ -1,8 +1,28 @@
 [project]
 name = "marketsentinel"
 version = "0.1.0"
-description = "MarketSentinel"
+description = "Evidence-grounded company intelligence from financial news, corporate events, and market data"
+readme = "README.md"
 requires-python = ">=3.11,<3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Alfred Hong", email = "100234617+AlfredHong2006@users.noreply.github.com" },
+]
+keywords = [
+    "financial-news",
+    "event-extraction",
+    "materiality",
+    "sentiment-analysis",
+    "nlp",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "beautifulsoup4>=4.13",
     "fastapi>=0.116",
@@ -22,6 +42,11 @@ dependencies = [
     "uvicorn[standard]>=0.35",
     "yfinance>=0.2.65",
 ]
+
+[project.urls]
+Homepage = "https://github.com/AlfredHong2006/MarketSentinel"
+Repository = "https://github.com/AlfredHong2006/MarketSentinel"
+Issues = "https://github.com/AlfredHong2006/MarketSentinel/issues"
 
 [build-system]
 requires = ["hatchling"]
