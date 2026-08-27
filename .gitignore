@@ -47,3 +47,4 @@ models/
 *.swp
 .DS_Store
 Thumbs.db
+data/*.bak

@@ -52,6 +52,12 @@ from marketsentinel.risk_scoring import _stem, title_terms
 
 MAX_KEY_DEVELOPMENTS = 8
 
+# Says what was examined and what survived, so an empty or short list reads as a verdict rather
+# than as missing data. Absence of material developments is a finding about the coverage.
+EMPTY_KEY_DEVELOPMENTS_MESSAGE = (
+    "No sufficiently evidenced material developments in the analysed coverage yet."
+)
+
 # Every type that names a driver. ``other`` and ``uncertain`` name none by construction, which is
 # why they are the only two the driver condition rejects outright -- and why an ``other`` row that
 # does name a periodic disclosure or a regulator action is rescued below.
@@ -446,6 +452,23 @@ def prepare_key_developments(
             rejected_by_condition=rejected,
         ),
     )
+
+
+def key_developments_caption(diagnostics: MaterialityDiagnostics) -> str:
+    """State the funnel behind the rendered list: what was examined, what passed, what merged.
+
+    Both narrowings are named because each is a different claim. Analysed to material is the
+    gate's verdict; material to developments is grouping folding several reports of one event into
+    one row. A truncated list says so explicitly, so a limit is never read as an absence.
+    """
+
+    caption = (
+        f"{diagnostics.considered} analysed → {diagnostics.material} material"
+        f" → {diagnostics.developments} developments"
+    )
+    if diagnostics.rendered < diagnostics.developments:
+        return f"{caption} · showing the strongest {diagnostics.rendered}"
+    return caption
 
 
 _GUARD_CONDITIONS = (

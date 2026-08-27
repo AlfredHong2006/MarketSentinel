@@ -46,6 +46,11 @@ from marketsentinel.dashboard_risks import (
     compatible_top_risks,
     prepare_top_risk_rows,
 )
+from marketsentinel.materiality import (
+    EMPTY_KEY_DEVELOPMENTS_MESSAGE,
+    key_developments_caption,
+    prepare_key_developments,
+)
 
 API_BASE_URL = os.getenv("MARKETSENTINEL_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 REQUEST_TIMEOUT = 180
@@ -286,6 +291,69 @@ def render_current_market_view(payload: dict[str, Any]) -> None:
         "Each observation above is independent and descriptive only — not a combined "
         "score, verdict, or recommendation."
     )
+
+
+def render_key_developments(payload: dict[str, Any]) -> None:
+    """Render one row per material development, strongest first, from stored analyses only.
+
+    Every judgement here is made in ``materiality`` and only displayed here: which rows are
+    developments, which reports are the same development, and what order they belong in. The
+    caption states the funnel so a short list reads as a verdict about the coverage.
+    """
+
+    st.subheader("Key Developments")
+    events = compatible_intelligence_events(payload.get("intelligence_events", []))
+    developments = prepare_key_developments(events)
+    caption = key_developments_caption(developments.diagnostics)
+    if not developments.rows:
+        st.info(EMPTY_KEY_DEVELOPMENTS_MESSAGE)
+        st.caption(caption)
+        return
+    st.caption(
+        f"{caption}. A development changes an identifiable driver of the business and is "
+        "evidenced; this is an assessment of what happened, not a price prediction."
+    )
+    for row in developments.rows:
+        item = row.event
+        with st.container(border=True):
+            st.markdown(f"**[{item.source_reference.title}]({item.source_reference.url})**")
+            st.caption(
+                f"{item.source_reference.publisher} · "
+                f"{item.source_reference.published_at:%d %b %Y} · {row.tier_label}"
+            )
+            metric_columns = st.columns(4)
+            metric_columns[0].metric(
+                "Impact",
+                row.impact_label,
+                help=(
+                    f"Magnitude score {round(item.event.magnitude * 100)}/100 — estimated "
+                    "qualitative significance to this company; not a price-move probability."
+                ),
+            )
+            metric_columns[1].metric("Direction", item.event.direction.value.title())
+            metric_columns[2].metric(
+                "Persistence",
+                item.event.time_horizon.value.replace("_", " ").title(),
+                help="Expected duration of the event's consequences, not time until it starts.",
+            )
+            metric_columns[3].metric(
+                "Corroboration",
+                row.corroboration_metric,
+                help=(
+                    "Distinct outside publishers whose articles a corroborated claim cited. "
+                    "Absence means the supplied comparison articles did not substantiate a "
+                    "claim, never that a claim is false."
+                ),
+            )
+            st.write(item.event.summary)
+            st.caption(f"Primary source: {row.primary_source_label} · {row.provenance_note}")
+            if row.contradiction_label:
+                st.warning(row.contradiction_label)
+            if len(row.group.members) > 1:
+                with st.expander(f"All {row.provenance_note}"):
+                    for member in row.group.members:
+                        reference = member.source_reference
+                        st.markdown(f"{reference.publisher} — [{reference.title}]({reference.url})")
 
 
 def render_todays_intelligence(payload: dict[str, Any]) -> None:
@@ -752,6 +820,7 @@ else:
     render_company_header(analysis)
     render_company_chart(analysis)
     render_current_market_view(analysis)
+    render_key_developments(analysis)
     render_todays_intelligence(analysis)
     render_top_risks(analysis)
     st.divider()
