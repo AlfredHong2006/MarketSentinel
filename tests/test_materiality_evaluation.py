@@ -70,6 +70,9 @@ REJECTION_HISTOGRAM = {
     "guard:commentary": 8,
     "guard:market_move": 0,
     "guard:price_move": 1,
+    # No NVDA row is another organisation's appointment of an NVDA executive, so this guard
+    # changes nothing on this corpus. It is pinned at zero precisely so that stays visible.
+    "guard:third_party_appointment": 0,
     "driver:not_meaningful": 24,
     "driver:event_type": 19,
     "durability": 3,

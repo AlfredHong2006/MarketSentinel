@@ -13,9 +13,10 @@ same discipline ``rank_company_risks`` follows, so a policy change needs no migr
 
 Every rule reuses a primitive the product already agreed on: the shared meaningful-event floor,
 the selector's commentary and market-move guards, its disclosure vocabulary, the corroboration
-summary, and the risk layer's title stemmer. Only one rule is new here -- the percentage
-price-move guard -- and it is deliberately local to this module rather than shared with selection,
-which must keep admitting price-reaction articles as analysis candidates.
+summary, the risk layer's title stemmer, and the shared subject-principal rule the risk layer also
+reads. Only one rule is new here -- the percentage price-move guard -- and it is deliberately
+local to this module rather than shared with selection, which must keep admitting price-reaction
+articles as analysis candidates.
 """
 
 import re
@@ -49,6 +50,7 @@ from marketsentinel.event_policy import is_meaningful_event
 # ``_stem`` is imported rather than re-implemented: anchor terms must be drawn from exactly the
 # vocabulary ``title_terms`` produces, and a second stemmer here would let the two silently drift.
 from marketsentinel.risk_scoring import _stem, title_terms
+from marketsentinel.subject_principal import reads_as_third_party_appointment
 
 MAX_KEY_DEVELOPMENTS = 8
 
@@ -142,6 +144,7 @@ MIN_ANCHOR_LENGTH = 4
 GUARD_COMMENTARY = "guard:commentary"
 GUARD_MARKET_MOVE = "guard:market_move"
 GUARD_PRICE_MOVE = "guard:price_move"
+GUARD_THIRD_PARTY_APPOINTMENT = "guard:third_party_appointment"
 DRIVER_NOT_MEANINGFUL = "driver:not_meaningful"
 DRIVER_EVENT_TYPE = "driver:event_type"
 DURABILITY = "durability"
@@ -151,6 +154,7 @@ REJECTION_CONDITIONS = (
     GUARD_COMMENTARY,
     GUARD_MARKET_MOVE,
     GUARD_PRICE_MOVE,
+    GUARD_THIRD_PARTY_APPOINTMENT,
     DRIVER_NOT_MEANINGFUL,
     DRIVER_EVENT_TYPE,
     DURABILITY,
@@ -297,7 +301,7 @@ def assess_materiality(event: CompanyIntelligenceEvent) -> MaterialityAssessment
     # signal, which also matches advocacy about an action ("senators say exports must be suspended").
     rescued = event_type is EventType.OTHER and has_financial_disclosure_signal(title)
 
-    guard = _failed_guard(title)
+    guard = _failed_guard(event)
     if guard is not None:
         condition, reason = guard
         return _rejection(condition, reason, corroboration, rescued, passes_guard=False)
@@ -490,10 +494,23 @@ _GUARD_CONDITIONS = (
 )
 
 
-def _failed_guard(title: str) -> tuple[str, str] | None:
+def _failed_guard(event: CompanyIntelligenceEvent) -> tuple[str, str] | None:
+    """Reject on framing first, then on whose event it is.
+
+    The subject check runs last and separately because it is the only guard that needs to know
+    which company is under analysis: the three above ask what kind of article this is, this one
+    asks whether the company is a party to what the article reports.
+    """
+
+    title = event.source_reference.title
     for condition, describes, reason in _GUARD_CONDITIONS:
         if describes(title):
             return condition, reason
+    if reads_as_third_party_appointment(title, event.subject_company):
+        return (
+            GUARD_THIRD_PARTY_APPOINTMENT,
+            "Reports another organisation appointing a company executive, not a company event",
+        )
     return None
 
 

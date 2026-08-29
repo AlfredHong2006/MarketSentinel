@@ -45,6 +45,7 @@ def analysis(
     title: str = "Acme faces new export controls on advanced parts",
     summary: str = "Regulators imposed new licence requirements on Acme exports.",
     published_at: datetime | None = None,
+    subject: CompanyReference | None = None,
 ) -> ArticleAnalysis:
     return ArticleAnalysis(
         article_id=article_id,
@@ -56,7 +57,7 @@ def analysis(
             url=f"https://example.com/{article_id}",
         ),
         source_class=source_class,
-        subject_company=CompanyReference(symbol="ACME", name="Acme Corporation"),
+        subject_company=subject or CompanyReference(symbol="ACME", name="Acme Corporation"),
         event=EventExtraction(
             event_type=event_type,
             summary=summary,
@@ -105,6 +106,48 @@ def test_shared_meaningful_event_thresholds_are_reused_not_reinvented() -> None:
     assert result.signals == ()
     assert result.diagnostics.eligible_analyses == 0
     assert result.diagnostics.considered_analyses == 3
+
+
+def test_another_organisations_appointment_never_becomes_a_subject_risk() -> None:
+    """Losing an executive to a rival hire is the hirer's event, not the subject's downside.
+
+    The channel is given a theme the taxonomy does map, so the assertion is about the shared
+    subject-principal rule rather than about a mechanism that happened to fall through anyway.
+    """
+
+    poached = analysis(
+        article_id="nike",
+        title="Nike Appoints Pfizer CFO as New Finance Chief",
+        summary="Nike appointed Pfizer's CFO as its new finance chief.",
+        event_type=EventType.MANAGEMENT_CHANGE,
+        direction=EventDirection.NEGATIVE,
+        negative_channels=["Loss of senior finance leadership could disrupt execution."],
+        subject=CompanyReference(symbol="PFE", name="Pfizer"),
+    )
+
+    result = extract_risk_signals([poached], now=NOW)
+
+    assert result.signals == ()
+    assert result.diagnostics.eligible_analyses == 0
+    assert result.diagnostics.considered_analyses == 1
+
+
+def test_a_third_party_headline_subject_still_produces_subject_risk_signals() -> None:
+    """A defendant is a principal, so the leak guard must not take the litigation with it."""
+
+    sued = analysis(
+        article_id="sanofi",
+        title="Sanofi sues Pfizer, Moderna over COVID shot technology",
+        summary="Sanofi has filed a patent lawsuit against Pfizer over COVID vaccine technology.",
+        event_type=EventType.LITIGATION,
+        direction=EventDirection.NEGATIVE,
+        subject=CompanyReference(symbol="PFE", name="Pfizer"),
+    )
+
+    result = extract_risk_signals([sued], now=NOW)
+
+    assert result.diagnostics.eligible_analyses == 1
+    assert [signal.theme for signal in result.signals] == [RiskTheme.LEGAL_LITIGATION]
 
 
 def test_uncertain_direction_contributes_nothing() -> None:

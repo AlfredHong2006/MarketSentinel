@@ -3,6 +3,8 @@
 import re
 from typing import Protocol
 
+from marketsentinel.normalization import normalize_text
+
 
 class CompanyIdentity(Protocol):
     symbol: str
@@ -55,3 +57,23 @@ def _company_name_variants(name: str) -> set[str]:
 def _phrase_pattern(phrase: str) -> str:
     words = [re.escape(word) for word in re.findall(r"[a-z0-9]+", phrase.casefold())]
     return rf"(?<![a-z0-9]){'[^a-z0-9]+'.join(words)}(?![a-z0-9])"
+
+
+def subject_name_variants(subject: CompanyIdentity) -> set[str]:
+    """Normalized names and ticker a title may use for the selected company.
+
+    Shared rather than re-derived per caller: every rule that asks "is this company named here"
+    has to agree on the same set of spellings, and a second copy of this list would let them
+    drift apart silently. The output is ``normalize_text`` form, so callers match it against a
+    normalized title, never a raw one.
+    """
+
+    names = {normalize_text(subject.name), normalize_text(subject.symbol)}
+    legal_suffixes = (" inc", " incorporated", " corporation", " corp", " plc", " limited", " ltd")
+    names.update(
+        name[: -len(suffix)]
+        for name in tuple(names)
+        for suffix in legal_suffixes
+        if name.endswith(suffix)
+    )
+    return {name for name in names if name}

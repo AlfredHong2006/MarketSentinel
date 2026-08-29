@@ -1,10 +1,10 @@
 """Extraction of deterministic downside risk signals from stored article analyses.
 
 Nothing here calls a model, a clock, or a database. A signal exists only because a stored
-analysis passed the shared meaningful-event policy and either described a realized negative
-event with a safe theme mapping, or stated an explicit negative transmission channel. Downside
-is never inferred from magnitude, from an event being positive, from share-price reaction, or
-from source prominence.
+analysis passed the shared meaningful-event policy, reports something the subject company is a
+party to, and either described a realized negative event with a safe theme mapping, or stated an
+explicit negative transmission channel. Downside is never inferred from magnitude, from an event
+being positive, from share-price reaction, or from source prominence.
 """
 
 from collections.abc import Sequence
@@ -26,6 +26,7 @@ from marketsentinel.risk_taxonomy import (
     theme_for_mechanism,
     theme_for_realized_negative_event,
 )
+from marketsentinel.subject_principal import reads_as_third_party_appointment
 from marketsentinel.timeutils import ensure_utc
 
 # Realization weighting. A realized negative event is the risk; a stated mechanism on a
@@ -163,6 +164,13 @@ def extract_risk_signals(
     eligible = unmapped = realized = prospective = 0
     for analysis in analyses:
         if not is_meaningful_event(analysis.event):
+            continue
+        if reads_as_third_party_appointment(
+            analysis.source_reference.title, analysis.subject_company
+        ):
+            # Not eligible rather than merely unscored: the downside described belongs to the
+            # organisation doing the appointing, so counting it as an examined subject-company
+            # analysis would overstate what the risk layer actually looked at.
             continue
         eligible += 1
         event = analysis.event

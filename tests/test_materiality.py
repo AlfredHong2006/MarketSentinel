@@ -9,6 +9,8 @@ how a real corpus is distributed.
 import itertools
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from marketsentinel.analysis_candidates import has_financial_disclosure_signal, has_priority_signal
 from marketsentinel.dashboard_intelligence import (
     contradiction_label,
@@ -36,6 +38,7 @@ from marketsentinel.materiality import (
     GUARD_COMMENTARY,
     GUARD_MARKET_MOVE,
     GUARD_PRICE_MOVE,
+    GUARD_THIRD_PARTY_APPOINTMENT,
     REJECTION_CONDITIONS,
     SYNDICATION_OVERLAP,
     TIER_CAPITAL_OR_OPERATIONS,
@@ -53,6 +56,9 @@ from marketsentinel.risk_scoring import title_terms
 
 NOW = datetime(2026, 8, 20, 12, tzinfo=UTC)
 ACME = CompanyReference(symbol="ACME", name="Acme Corporation")
+# A second subject, because the third-party-appointment guard is the one rule that reads the
+# company under analysis rather than the title alone.
+PFIZER = CompanyReference(symbol="PFE", name="Pfizer")
 NEAR_DUPLICATE_TITLE = "chipmaker wins new supply deal"
 
 
@@ -70,6 +76,7 @@ def event(
     hours_old: int = 0,
     external_publishers: tuple[str, ...] = (),
     contradicted: bool = False,
+    subject: CompanyReference = ACME,
 ) -> CompanyIntelligenceEvent:
     published_at = NOW - timedelta(hours=hours_old)
     evidence_sources: list[ArticleEvidenceReference] = []
@@ -92,7 +99,7 @@ def event(
         article_id=article_id,
         source_reference=reference(article_id, title, publisher, published_at=published_at),
         source_class=source_class,
-        subject_company=ACME,
+        subject_company=subject,
         event=EventExtraction(
             event_type=event_type,
             summary="A deterministic test extraction.",
@@ -148,6 +155,42 @@ def test_commentary_and_price_reaction_titles_are_rejected_before_any_other_cond
     assert assess_materiality(market_move).failed_condition == GUARD_MARKET_MOVE
     assert assess_materiality(price_move).failed_condition == GUARD_PRICE_MOVE
     assert not assess_materiality(commentary).passes_guard
+
+
+def test_another_organisation_hiring_a_company_executive_is_not_a_company_development() -> None:
+    """The subject is the departing executive's employer, not a party to the appointment."""
+
+    poached = event(
+        "nike",
+        title="Watch Nike Appoints Pfizer CFO as New Finance Chief Amid Industry Experience Questions",
+        event_type=EventType.MANAGEMENT_CHANGE,
+        direction=EventDirection.MIXED,
+        magnitude=0.30,
+        confidence=0.75,
+        horizon=TimeHorizon.UNCERTAIN,
+        subject=PFIZER,
+    )
+
+    assessment = assess_materiality(poached)
+
+    assert assessment.failed_condition == GUARD_THIRD_PARTY_APPOINTMENT
+    assert not assessment.passes_guard
+
+
+@pytest.mark.parametrize(
+    ("article_id", "title"),
+    (
+        ("viiv", "Shionogi Acquires $2.1 Billion ViiV Healthcare Shareholdings from Pfizer"),
+        ("sanofi", "Sanofi sues Pfizer, Moderna over COVID shot technology"),
+        ("metsera", "Novo Nordisk Seeks to Outmuscle Pfizer With $9 Billion Bid for Metsera"),
+    ),
+)
+def test_a_third_party_headline_subject_never_rejects_a_principal(
+    article_id: str, title: str
+) -> None:
+    """Seller, defendant, and rival bidder are all principals, however the headline reads."""
+
+    assert is_material(event(article_id, title=title, subject=PFIZER))
 
 
 def test_percent_guard_separates_price_moves_from_operating_percentages() -> None:
