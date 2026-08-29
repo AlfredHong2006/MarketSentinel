@@ -11,6 +11,7 @@ from marketsentinel.domain import Article, AutomaticAnalysisDiagnostics, SourceC
 from marketsentinel.normalization import normalize_text
 from marketsentinel.ownership_patterns import (
     CompanyIdentity,
+    subject_name_variants,
     text_describes_external_institutional_holding,
 )
 
@@ -317,7 +318,7 @@ def _is_subject_initiated_stake_disposal(title: str, subject: CompanyIdentity) -
     if not is_stake_disposal_shaped(title):
         return False
     normalized = normalize_text(title)
-    for name in sorted(_subject_names(subject), key=len, reverse=True):
+    for name in sorted(subject_name_variants(subject), key=len, reverse=True):
         # An optional stray "s" absorbs the possessive apostrophe normalize_text leaves behind
         # ("Nvidia's" -> "nvidia s"); it is not itself part of the subject name.
         if re.search(rf"\b{re.escape(name)}\b\s+(?:s\s+)?{_STAKE_DISPOSAL_VERB}\b", normalized):
@@ -579,7 +580,7 @@ def _is_obvious_holding_title(title: str, subject: CompanyIdentity) -> bool:
 
 def _title_has_reverse_external_holding_structure(title: str, subject: CompanyIdentity) -> bool:
     normalized = normalize_text(title)
-    subject_names = _subject_names(subject)
+    subject_names = subject_name_variants(subject)
     quantity = r"(?:\$?\d[\d ]*(?:k|m|bn|b|thousand|million|billion)?\s+)?"
     for name in sorted(subject_names, key=len, reverse=True):
         subject_pattern = re.escape(name)
@@ -634,18 +635,6 @@ def _title_has_reverse_external_holding_structure(title: str, subject: CompanyId
     return False
 
 
-def _subject_names(subject: CompanyIdentity) -> set[str]:
-    names = {normalize_text(subject.name), normalize_text(subject.symbol)}
-    legal_suffixes = (" inc", " incorporated", " corporation", " corp", " plc", " limited", " ltd")
-    names.update(
-        name[: -len(suffix)]
-        for name in tuple(names)
-        for suffix in legal_suffixes
-        if name.endswith(suffix)
-    )
-    return {name for name in names if name}
-
-
 def _title_contains_subject_company_action(title: str, subject: CompanyIdentity) -> bool:
     """Whether the subject company itself is described as acting in this title.
 
@@ -657,7 +646,7 @@ def _title_contains_subject_company_action(title: str, subject: CompanyIdentity)
     """
 
     normalized = normalize_text(title)
-    for name in sorted(_subject_names(subject), key=len, reverse=True):
+    for name in sorted(subject_name_variants(subject), key=len, reverse=True):
         start = 0
         while (position := normalized.find(name, start)) >= 0:
             following = normalized[position + len(name) : position + len(name) + 45]
