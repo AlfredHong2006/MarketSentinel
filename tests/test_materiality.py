@@ -490,6 +490,78 @@ def test_grouping_closes_transitively_across_the_window() -> None:
     assert len(groups[0].members) == 3
 
 
+def test_a_development_merges_when_its_bridging_report_arrives_last() -> None:
+    """Two reports of one deal may match only through a third, which can arrive last.
+
+    Assigning the bridge to the first group it matches and stopping there leaves the development
+    rendered as two rows, each understating the report and publisher counts of the other.
+    """
+
+    sale = event(
+        "sale",
+        title="Acme agrees to sell the Bolt memory division to Corvus for an undisclosed sum",
+    )
+    shift = event(
+        "shift",
+        title="Corvus lifts its Bolt stake as ownership of the joint unit shifts",
+        publisher="Financial Times",
+        hours_old=4,
+    )
+    bridge = event(
+        "bridge",
+        title="Bolt ownership shifts as Acme sells a stake to Corvus",
+        publisher="Bloomberg",
+        hours_old=2,
+    )
+
+    assert not describes_same_material_event(sale, shift)
+    assert describes_same_material_event(bridge, sale)
+    assert describes_same_material_event(bridge, shift)
+
+    groups = group_material_events([sale, shift, bridge])
+
+    assert len(groups) == 1
+    assert len(groups[0].members) == 3
+    assert groups[0].publisher_count == 3
+
+
+def test_grouping_does_not_depend_on_input_order() -> None:
+    """Connected components, not first-match assignment: every input order must agree."""
+
+    items = [
+        event(
+            "sale",
+            title="Acme agrees to sell the Bolt memory division to Corvus for an undisclosed sum",
+        ),
+        event(
+            "shift",
+            title="Corvus lifts its Bolt stake as ownership of the joint unit shifts",
+            publisher="Financial Times",
+            hours_old=4,
+        ),
+        event(
+            "bridge",
+            title="Bolt ownership shifts as Acme sells a stake to Corvus",
+            publisher="Bloomberg",
+            hours_old=2,
+        ),
+        event(
+            "solo",
+            title="Acme wins a $700 million supply contract from Vertex Systems",
+            event_type=EventType.CONTRACT_AWARD,
+        ),
+    ]
+
+    def shape(order: list[CompanyIntelligenceEvent]) -> list[tuple[str, ...]]:
+        return sorted(
+            tuple(sorted(item.article_id for item in group.members))
+            for group in group_material_events(order)
+        )
+
+    for order in itertools.permutations(items):
+        assert shape(list(order)) == [("bridge", "sale", "shift"), ("solo",)]
+
+
 def test_grouping_is_deterministic_for_one_input_order() -> None:
     items = [
         event("dup-a", title=NEAR_DUPLICATE_TITLE, event_type=EventType.CONTRACT_AWARD),

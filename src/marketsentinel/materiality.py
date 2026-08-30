@@ -571,18 +571,31 @@ _Assessed = tuple[CompanyIntelligenceEvent, MaterialityAssessment]
 
 
 def _group_assessed(assessed: Sequence[_Assessed]) -> list[MaterialEventGroup]:
-    """Transitive closure in input order, mirroring the risk layer's grouping idiom."""
+    """Transitive closure in input order, mirroring the risk layer's grouping idiom.
+
+    Every group the item matches is folded into the first of them, not only the first one found.
+    Two reports of one development can each match a third that arrives later while matching
+    neither the other directly, and stopping at the first match would leave that development
+    rendered as two rows whose report and publisher counts each understate its breadth.
+    """
 
     groups: list[list[_Assessed]] = []
     for item in assessed:
         if not item[1].material:
             continue
-        for group in groups:
-            if any(describes_same_material_event(item[0], member) for member, _ in group):
-                group.append(item)
-                break
-        else:
+        matched = [
+            group
+            for group in groups
+            if any(describes_same_material_event(item[0], member) for member, _ in group)
+        ]
+        if not matched:
             groups.append([item])
+            continue
+        first, *rest = matched
+        first.append(item)
+        for group in rest:
+            first.extend(group)
+            groups.remove(group)
     return [_material_group(group) for group in groups]
 
 
