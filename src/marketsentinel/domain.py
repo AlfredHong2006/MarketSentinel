@@ -484,3 +484,165 @@ class ArticleAnalysisResponse(BaseModel):
 
 
 AnalysisResult.model_rebuild()
+
+
+class CorroborationView(BaseModel):
+    """Serialised corroboration counts plus the exact wording the product displays.
+
+    The counts mirror ``dashboard_intelligence.CorroborationSummary`` field for field, and every
+    label is produced by that module's own helpers rather than re-worded here.
+    ``comparison_articles`` is how much material was examined and is never support;
+    ``external_sources`` counts distinct publishing organisations, other than the primary's own,
+    whose articles a corroborated claim cited.
+    """
+
+    total_claims: int = Field(ge=0)
+    corroborated_claims: int = Field(ge=0)
+    contradicted_claims: int = Field(ge=0)
+    unresolved_claims: int = Field(ge=0)
+    comparison_articles: int = Field(ge=0)
+    supporting_articles: int = Field(ge=0)
+    external_sources: int = Field(ge=0)
+    primary_is_official: bool
+    metric_label: str
+    summary_label: str
+    contradiction_label: str | None = None
+    breakdown_label: str
+
+
+class KeyDevelopmentView(BaseModel):
+    """One material development, already grouped and ordered by ``materiality``.
+
+    ``event`` is the group's strongest member and carries the claims, cited evidence references,
+    and related companies a detail view needs. ``members`` is every report of the same development,
+    so duplicate coverage reads as breadth rather than as extra developments.
+    """
+
+    article_id: str
+    event: "CompanyIntelligenceEvent"
+    members: list["CompanyIntelligenceEvent"] = Field(default_factory=list)
+    publisher_count: int = Field(ge=0)
+    impact_label: str
+    impact_score: int = Field(ge=0, le=100)
+    tier_label: str
+    primary_source_label: str
+    provenance_note: str
+    corroboration: CorroborationView
+
+
+class MaterialityDiagnosticsView(BaseModel):
+    """Deterministic counters for one Key Developments computation.
+
+    ``considered`` reconciles exactly: it equals ``material`` plus every recorded rejection.
+    ``rendered`` is stated separately from ``developments`` so a display limit never reads as an
+    absence.
+    """
+
+    considered: int = Field(ge=0)
+    material: int = Field(ge=0)
+    developments: int = Field(ge=0)
+    rendered: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    rejected_by_condition: dict[str, int] = Field(default_factory=dict)
+
+
+class KeyDevelopmentsView(BaseModel):
+    rows: list[KeyDevelopmentView] = Field(default_factory=list)
+    diagnostics: MaterialityDiagnosticsView
+    caption: str
+    empty_message: str
+
+
+class RiskRowView(BaseModel):
+    """One ranked downside theme, numbered for display without being re-ordered."""
+
+    rank: int = Field(ge=1)
+    label: str
+    concern_index: int = Field(ge=0, le=100)
+    band: Literal["Severe", "Elevated", "Moderate", "Watch"]
+    band_color: str
+    summary: str
+    risk: "RankedRisk"
+
+
+class TopRisksView(BaseModel):
+    rows: list[RiskRowView] = Field(default_factory=list)
+    diagnostics: "RiskDiagnostics"
+    caption: str
+    empty_message: str
+
+
+class MarketViewSummaryView(BaseModel):
+    """Four independently computed observations. Never combined into a score or verdict."""
+
+    price_note: str
+    sentiment_note: str
+    risk_note: str
+    intelligence_note: str
+
+
+class ChartTimeframeView(BaseModel):
+    """Everything one timeframe button needs, with the event floor already applied server-side.
+
+    ``markers`` is the bounded set ``dashboard_charts.select_meaningful_events`` admits for this
+    window, in its own order. A client filters no markers of its own: the shared meaningful-event
+    floor decides which stored analyses may appear on a chart.
+    """
+
+    timeframe: str
+    start_date: date | None = None
+    end_date: date | None = None
+    price_observations: int = Field(default=0, ge=0)
+    sentiment_observations: int = Field(default=0, ge=0)
+    markers: list[AnalyzedEvent] = Field(default_factory=list)
+    sentiment_coverage_note: str | None = None
+
+
+class ChartView(BaseModel):
+    """Observed price and sentiment history. Never interpolated, filled, or projected.
+
+    Price history is not persisted, so it is fetched live. A failed fetch reports ``unavailable``
+    with no points rather than substituting a made-up series.
+    """
+
+    status: Literal["available", "unavailable"]
+    message: str | None = None
+    source: str | None = None
+    fetched_at: datetime | None = None
+    points: list[PricePoint] = Field(default_factory=list)
+    daily_sentiment: list[DailySentiment] = Field(default_factory=list)
+    default_timeframe: str
+    timeframes: list[ChartTimeframeView] = Field(default_factory=list)
+
+
+class CoverageView(BaseModel):
+    """What was read, over what window. A small count is a verdict, not missing data."""
+
+    articles: int = Field(ge=0)
+    analysed_articles: int = Field(ge=0)
+    window_days: int = Field(ge=0)
+    latest_sentiment: DailySentiment | None = None
+
+
+class CompanyOverview(BaseModel):
+    """The Company Overview surface, assembled from stored analyses on every request.
+
+    Nothing here is persisted. Materiality verdicts, grouping, ranking, corroboration counts, and
+    risk scores are recomputed from stored analyses each time this is built, so a policy change
+    needs no migration and no re-analysis.
+    """
+
+    constituent: Constituent
+    data_source: Literal["stored", "refreshed"]
+    generated_at: datetime
+    coverage: CoverageView
+    market_view: MarketViewSummaryView
+    chart: ChartView
+    key_developments: KeyDevelopmentsView
+    top_risks: TopRisksView
+    disclaimer: str
+
+
+KeyDevelopmentView.model_rebuild()
+RiskRowView.model_rebuild()
+TopRisksView.model_rebuild()

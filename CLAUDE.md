@@ -43,6 +43,7 @@ src/marketsentinel/
   subject_principal.py        the shared rule for whether the subject company is a principal
 
   materiality.py              materiality gate, grouping, Key Developments ranking
+  overview.py                 typed Company Overview projection; owns no rule of its own
   risk_signals.py / risk_taxonomy.py / risk_scoring.py    persistent Top Risks
   dashboard_intelligence.py   corroboration semantics + Today's Intelligence
   dashboard_*.py              pure presentation preparation per dashboard section

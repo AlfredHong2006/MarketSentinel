@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     demo_news_path: Path = Path("data/demo/articles.json")
     api_base_url: str = "http://127.0.0.1:8000"
 
+    # Browser origins allowed to call the API. The Streamlit dashboard's port is joined by the
+    # Vite dev and preview ports so a future React client needs no code change to talk to a local
+    # API. Configurable rather than hardcoded because a deployed client is served from elsewhere.
+    # Override with a JSON list, e.g. MARKETSENTINEL_CORS_ALLOW_ORIGINS='["https://example.com"]'.
+    cors_allow_origins: tuple[str, ...] = (
+        "http://localhost:8501",
+        "http://127.0.0.1:8501",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    )
+
     finbert_model: str = "ProsusAI/finbert"
     finbert_device: Literal["auto", "cpu", "cuda"] = "auto"
     finbert_batch_size: int = Field(default=8, ge=1, le=64)

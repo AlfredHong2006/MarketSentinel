@@ -13,16 +13,19 @@ from marketsentinel.domain import (
     Article,
     ArticleAnalysisResponse,
     AutomaticAnalysisDiagnostics,
+    CompanyOverview,
     Constituent,
     NewsFetchResult,
     PriceHistory,
     SourceHealth,
 )
+from marketsentinel.errors import ProviderError
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.normalization import (
     deduplicate_with_diagnostics,
     deduplication_reason,
 )
+from marketsentinel.overview import build_company_overview
 from marketsentinel.risk_scoring import rank_company_risks
 from marketsentinel.sentiment.finbert import SentimentAnalyzer
 from marketsentinel.sources.historical import HistoricalNewsProvider, HistoricalNewsService
@@ -246,6 +249,76 @@ class MarketAnalysisService:
             risk_diagnostics=risks.diagnostics,
             generated_at=now,
             disclaimer=DISCLAIMER,
+        )
+
+    def read_stored(self, symbol: str) -> CompanyOverview:
+        """Assemble the Company Overview from what is already stored, and nothing else.
+
+        Deliberately not ``analyze``. This path fetches no news, scores no sentiment, runs no
+        article analysis, and writes no row: it reads the SQLite corpus and recomputes the
+        deterministic layers over it, so opening the product costs neither ingestion nor LLM spend
+        and repeated reads cannot grow the stored corpus. Refreshing coverage stays an explicit
+        request to ``analyze``.
+
+        Price history is the one thing that cannot be served this way, because it is not persisted.
+        It is fetched live, and a failed fetch reports an unavailable chart rather than
+        substituting a made-up series.
+
+        The constituent is resolved from the local cache only. A read must never quietly reach
+        Wikipedia, and constituent identity changes far more slowly than the refresh interval.
+        """
+
+        constituent = self.constituents.resolve_cached(symbol)
+        now = utc_now()
+        coverage_cutoff = now - timedelta(days=self.historical_news_days)
+        display_cutoff = now - timedelta(days=366)
+
+        price_history: PriceHistory | None = None
+        price_message: str | None = None
+        try:
+            fetched = self.prices.fetch(constituent)
+        except ProviderError as exc:
+            price_message = str(exc)
+        else:
+            display_price_cutoff = fetched.points[-1].date - timedelta(days=366)
+            price_history = PriceHistory(
+                symbol=fetched.symbol,
+                points=[point for point in fetched.points if point.date >= display_price_cutoff],
+                source=fetched.source,
+                fetched_at=fetched.fetched_at,
+            )
+
+        stored_articles = self.repository.list_scored_articles(
+            constituent.symbol, since=coverage_cutoff
+        )
+        real_articles = [article for article in stored_articles if not article.is_demo]
+        display_articles = real_articles or stored_articles
+        stored_daily = [
+            item
+            for item in self.repository.list_daily_sentiment(
+                constituent.symbol, limit=_STORED_DAILY_SENTIMENT_LIMIT
+            )
+            if item.date >= display_cutoff.date()
+        ]
+        stored_analyses = self.repository.list_article_analyses(
+            constituent.symbol,
+            since=display_cutoff,
+            limit=_STORED_ANALYSES_LIMIT,
+            compatibility=self.article_analysis_compatibility,
+        )
+        return build_company_overview(
+            constituent=constituent,
+            price_history=price_history,
+            price_message=price_message,
+            articles=display_articles,
+            daily_sentiment=stored_daily,
+            analyzed_events=[item.to_analyzed_event() for item in stored_analyses],
+            intelligence_events=[item.to_company_intelligence_event() for item in stored_analyses],
+            risks=rank_company_risks(stored_analyses, now=now),
+            coverage_window_days=self.historical_news_days,
+            generated_at=now,
+            disclaimer=DISCLAIMER,
+            data_source="stored",
         )
 
     def _run_automatic_analysis(

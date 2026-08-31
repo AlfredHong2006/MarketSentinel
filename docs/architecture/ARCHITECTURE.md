@@ -11,7 +11,9 @@ Two processes over one SQLite file:
 
 - **API** — FastAPI ([api/app.py](../../src/marketsentinel/api/app.py)). `build_services` wires
   every concrete provider once; `create_app` exposes `/health`, `/api/v1/constituents/search`,
-  `/api/v1/analyze`, and `/api/v1/articles/analyze`.
+  `/api/v1/analyze`, `/api/v1/companies/{symbol}/overview`, and `/api/v1/articles/analyze`.
+  Allowed browser origins come from `cors_allow_origins` in
+  [config.py](../../src/marketsentinel/config.py) rather than being hardcoded.
 - **Dashboard** — Streamlit ([dashboard.py](../../src/marketsentinel/dashboard.py)). A pure HTTP
   client. It holds no database handle and calls no provider; every section it renders is prepared
   by a `dashboard_*` module from the JSON payload.
@@ -180,7 +182,24 @@ Three modules, all deterministic and unpersisted:
 `concern_index` is an evidence-weighted salience score on 0–100. It is not a probability, an
 expected loss, or a cross-company comparable.
 
-### 7. Presentation
+### 7. The Company Overview projection
+
+[overview.py](../../src/marketsentinel/overview.py) assembles one typed `CompanyOverview` from the
+layers above. It owns no threshold, ordering, gate, or vocabulary of its own: every verdict, rank,
+count and label is produced by the module that already owns it, so the projection cannot hold a
+second opinion about what a development is. Its purpose is to move those call sites from a client
+process to the API boundary, so a non-Python client reads the product's conclusions instead of
+re-deriving them.
+
+`MarketAnalysisService.read_stored` serves it over `GET /api/v1/companies/{symbol}/overview`. That
+path fetches no news, scores no sentiment, runs no article analysis, and writes no row — it reads
+the SQLite corpus, recomputes the deterministic layers, and resolves the constituent from the local
+cache only, so opening the product costs neither ingestion nor LLM spend. Price history is the one
+exception, because it is not persisted: it is fetched live, and a failed fetch reports an
+unavailable chart rather than substituting a series. Refreshing coverage stays an explicit
+`POST /api/v1/analyze`.
+
+### 8. Presentation
 
 `dashboard_*` modules are pure and read the JSON payload only:
 

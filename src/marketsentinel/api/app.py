@@ -4,14 +4,19 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import WikipediaConstituentService
-from marketsentinel.domain import AnalysisResult, ArticleAnalysisResponse, UniverseResult
+from marketsentinel.domain import (
+    AnalysisResult,
+    ArticleAnalysisResponse,
+    CompanyOverview,
+    UniverseResult,
+)
 from marketsentinel.errors import (
     ConstituentNotFoundError,
     ForecastError,
@@ -157,7 +162,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"],
+        allow_origins=list(settings.cors_allow_origins),
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
@@ -191,6 +196,23 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         except Exception as exc:
             LOGGER.exception("Unexpected analysis failure")
             raise HTTPException(status_code=500, detail="Unexpected analysis failure") from exc
+
+    @app.get("/api/v1/companies/{symbol}/overview", response_model=CompanyOverview)
+    def company_overview(symbol: str = Path(min_length=1, max_length=20)) -> CompanyOverview:
+        """Read one company's Company Overview from stored data.
+
+        A GET because it is genuinely a read: no news is fetched, no sentiment is scored, no
+        article analysis is run, and no row is written. It is safe to call on every page load,
+        unlike ``/api/v1/analyze``, which refreshes coverage and may spend on new analyses.
+        """
+
+        try:
+            return services.analysis.read_stored(symbol.strip().upper())
+        except ConstituentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            LOGGER.exception("Unexpected overview failure")
+            raise HTTPException(status_code=500, detail="Unexpected overview failure") from exc
 
     @app.post("/api/v1/articles/analyze", response_model=ArticleAnalysisResponse)
     def analyze_article(request: ArticleAnalysisRequest) -> ArticleAnalysisResponse:
