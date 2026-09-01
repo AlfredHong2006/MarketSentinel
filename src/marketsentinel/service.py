@@ -17,7 +17,9 @@ from marketsentinel.domain import (
     Constituent,
     NewsFetchResult,
     PriceHistory,
+    RelevantNewsView,
     SourceHealth,
+    StoredArticleAnalysisView,
 )
 from marketsentinel.errors import ProviderError
 from marketsentinel.forecasting.baseline import BaselineForecaster
@@ -25,7 +27,11 @@ from marketsentinel.normalization import (
     deduplicate_with_diagnostics,
     deduplication_reason,
 )
-from marketsentinel.overview import build_company_overview
+from marketsentinel.overview import (
+    build_company_overview,
+    build_relevant_news,
+    build_stored_article_analysis,
+)
 from marketsentinel.risk_scoring import rank_company_risks
 from marketsentinel.sentiment.finbert import SentimentAnalyzer
 from marketsentinel.sources.historical import HistoricalNewsProvider, HistoricalNewsService
@@ -39,6 +45,13 @@ DISCLAIMER = (
     "are not financial advice and do not predict exact prices."
 )
 
+# Shown as the unavailable-chart reason when a stored-data read skips the live price fetch
+# because the company has nothing stored at all. The chart is reported absent, never replaced
+# with a flat or fabricated series; a company gains a chart the moment it gains stored coverage.
+NO_STORED_COVERAGE_PRICE_MESSAGE = (
+    "Price history is not fetched for a company with no stored coverage."
+)
+
 # repository.list_article_analyses defaults to limit=100, which would silently drop the oldest
 # distinct-compatible analyses once historical backfill (or continued live use) grows a ticker's
 # analyzed-article count past it -- from analyzed_events, intelligence_events, AND the risk-scoring
@@ -49,6 +62,25 @@ _STORED_ANALYSES_LIMIT = 500
 # repository.list_daily_sentiment defaults to limit=365; widened slightly to comfortably cover a
 # 366-day display window before client-side date filtering.
 _STORED_DAILY_SENTIMENT_LIMIT = 370
+
+# The Relevant News browser is a separate, wider-window read surface from CoverageView's 30-day
+# badge (historical_news_days, capped at 30 in config): it exists precisely so a company with real
+# historical backfill depth stays browsable, so it mirrors the 366-day display window already used
+# for stored analyses/sentiment rather than the narrower ingestion-recency setting.
+#
+# The window is the only bound. There is deliberately no row cap: the product requirement is that
+# every stored article inside the window can be browsed, and a cap on top of a bounded window
+# drops real rows while presenting the truncated page as the whole corpus.
+_RELEVANT_NEWS_WINDOW_DAYS = 366
+
+# The chart's MAX timeframe is the whole served price series, so the read path deliberately serves
+# more price history than the 366-day window used for sentiment and stored analyses. Trimmed to a
+# year, MAX would be identical to 1Y and the control would be dead. The provider already fetches
+# three years; this only decides how much of it reaches the client, and price is the cheapest
+# series on the page. Sentiment and analyses keep their own 366-day windows, so a MAX view shows
+# price extending honestly past the coverage behind it -- which the chart's own
+# `sentiment_coverage_note` already states. The refresh path (`analyze`) is unchanged.
+_PRICE_DISPLAY_WINDOW_DAYS = 1100
 
 
 class ArticleAnalysisRunner(Protocol):
@@ -262,7 +294,11 @@ class MarketAnalysisService:
 
         Price history is the one thing that cannot be served this way, because it is not persisted.
         It is fetched live, and a failed fetch reports an unavailable chart rather than
-        substituting a made-up series.
+        substituting a made-up series. For a company with nothing stored at all it is not fetched
+        in the first place: the page renders an intentional empty state that shows no chart, so
+        the fetch would be this read's only external call, made purely to be discarded -- and in
+        a broadly searchable public deployment, one third-party request per visitor per empty
+        company page.
 
         The constituent is resolved from the local cache only. A read must never quietly reach
         Wikipedia, and constituent identity changes far more slowly than the refresh interval.
@@ -272,21 +308,6 @@ class MarketAnalysisService:
         now = utc_now()
         coverage_cutoff = now - timedelta(days=self.historical_news_days)
         display_cutoff = now - timedelta(days=366)
-
-        price_history: PriceHistory | None = None
-        price_message: str | None = None
-        try:
-            fetched = self.prices.fetch(constituent)
-        except ProviderError as exc:
-            price_message = str(exc)
-        else:
-            display_price_cutoff = fetched.points[-1].date - timedelta(days=366)
-            price_history = PriceHistory(
-                symbol=fetched.symbol,
-                points=[point for point in fetched.points if point.date >= display_price_cutoff],
-                source=fetched.source,
-                fetched_at=fetched.fetched_at,
-            )
 
         stored_articles = self.repository.list_scored_articles(
             constituent.symbol, since=coverage_cutoff
@@ -306,6 +327,28 @@ class MarketAnalysisService:
             limit=_STORED_ANALYSES_LIMIT,
             compatibility=self.article_analysis_compatibility,
         )
+
+        price_history: PriceHistory | None = None
+        price_message: str | None = None
+        if not (display_articles or stored_daily or stored_analyses):
+            price_message = NO_STORED_COVERAGE_PRICE_MESSAGE
+        else:
+            try:
+                fetched = self.prices.fetch(constituent)
+            except ProviderError as exc:
+                price_message = str(exc)
+            else:
+                display_price_cutoff = fetched.points[-1].date - timedelta(
+                    days=_PRICE_DISPLAY_WINDOW_DAYS
+                )
+                price_history = PriceHistory(
+                    symbol=fetched.symbol,
+                    points=[
+                        point for point in fetched.points if point.date >= display_price_cutoff
+                    ],
+                    source=fetched.source,
+                    fetched_at=fetched.fetched_at,
+                )
         return build_company_overview(
             constituent=constituent,
             price_history=price_history,
@@ -320,6 +363,60 @@ class MarketAnalysisService:
             disclaimer=DISCLAIMER,
             data_source="stored",
         )
+
+    def list_relevant_news(self, symbol: str) -> RelevantNewsView:
+        """Read every stored, sentiment-scored article for one company -- and nothing else.
+
+        A pure read, deliberately separate from ``read_stored``: no price fetch, no news fetch,
+        no sentiment scoring, no article analysis, and no write. "Analysed" reuses the exact same
+        ``ArticleAnalysisCompatibility.accepts_for_display`` test the rest of the product already
+        applies to a stored analysis -- never a re-derived notion, and never a trigger for a new
+        one. The constituent is resolved from the local cache only, as in ``read_stored``.
+        """
+
+        constituent = self.constituents.resolve_cached(symbol)
+        window_start = utc_now() - timedelta(days=_RELEVANT_NEWS_WINDOW_DAYS)
+        articles = self.repository.list_scored_articles(
+            constituent.symbol, since=window_start, limit=None
+        )
+        compatible_analyses = self.repository.list_article_analyses(
+            constituent.symbol,
+            since=window_start,
+            limit=_STORED_ANALYSES_LIMIT,
+            compatibility=self.article_analysis_compatibility,
+        )
+        return build_relevant_news(
+            articles=articles,
+            compatible_analyses=compatible_analyses,
+            window_days=_RELEVANT_NEWS_WINDOW_DAYS,
+        )
+
+    def read_article_analysis(
+        self, symbol: str, article_id: str
+    ) -> StoredArticleAnalysisView | None:
+        """Read one already-stored article analysis, or report that there is none.
+
+        A pure read: no price fetch, no ingestion, no scoring, and above all no *generation* --
+        this never produces an analysis that does not already exist, so it can be reached from a
+        public page without spending anything. ``None`` means no compatible stored analysis, which
+        the boundary reports as a 404 rather than as an offer to create one.
+
+        The compatibility filter is the same exact-equality rule applied everywhere else, so an
+        article the browser marks "Analysed" is exactly an article this can open.
+        """
+
+        constituent = self.constituents.resolve_cached(symbol)
+        window_start = utc_now() - timedelta(days=_RELEVANT_NEWS_WINDOW_DAYS)
+        analyses = self.repository.list_article_analyses(
+            constituent.symbol,
+            since=window_start,
+            limit=_STORED_ANALYSES_LIMIT,
+            compatibility=self.article_analysis_compatibility,
+        )
+        for analysis in analyses:
+            if analysis.article_id == article_id:
+                return build_stored_article_analysis(analysis.to_company_intelligence_event())
+        return None
 
     def _run_automatic_analysis(
         self,

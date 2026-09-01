@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
@@ -14,7 +15,10 @@ from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import (
     AnalysisResult,
     ArticleAnalysisResponse,
+    CapabilitiesView,
     CompanyOverview,
+    RelevantNewsView,
+    StoredArticleAnalysisView,
     UniverseResult,
 )
 from marketsentinel.errors import (
@@ -41,10 +45,20 @@ from marketsentinel.sources.historical import (
     HistoricalNewsService,
 )
 from marketsentinel.sources.news import DemoNewsProvider, GoogleNewsRssProvider, NewsService
-from marketsentinel.sources.prices import YFinancePriceProvider
+from marketsentinel.sources.prices import CachingPriceProvider, YFinancePriceProvider
 from marketsentinel.storage.sqlite import SQLiteRepository
 
 LOGGER = logging.getLogger(__name__)
+
+# Below roughly a kilobyte, compression costs more than it saves and can grow a tiny body, so the
+# small responses (/health, /capabilities) are left alone.
+_GZIP_MINIMUM_BYTES = 1000
+
+# Starlette defaults to 9; 6 is zlib's own default. Measured on this API's largest payload (the
+# 872KB NVDA article list): level 6 gives 389.5KB in 17.9ms against level 9's 386.8KB in 20.2ms --
+# 0.7% larger for ~11% less CPU, spent per request on the server. Either is defensible; 6 is
+# chosen because the bytes saved by 9 do not repay the CPU under concurrent public traffic.
+_GZIP_COMPRESS_LEVEL = 6
 
 
 class AnalysisRequest(BaseModel):
@@ -115,7 +129,12 @@ def build_services(settings: Settings) -> Services:
         news=news,
         historical_news=historical_news,
         sentiment=sentiment,
-        prices=YFinancePriceProvider(),
+        # Price history is the only unpersisted part of the read path, so without this wrapper
+        # every visitor page load would reach yfinance. In-process and in-memory only.
+        prices=CachingPriceProvider(
+            YFinancePriceProvider(),
+            ttl_seconds=settings.price_cache_ttl_seconds,
+        ),
         repository=repository,
         forecaster=BaselineForecaster(),
         news_lookback_days=settings.news_lookback_days,
@@ -160,6 +179,20 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         ),
         lifespan=lifespan,
     )
+    # Transport only -- no route, contract, or payload changes, and a client that does not send
+    # Accept-Encoding still receives identical bytes. It matters because the Relevant News window
+    # is deliberately uncapped: one company's article list is ~870KB of highly repetitive JSON,
+    # which compresses to roughly 390KB.
+    #
+    # Added before CORS, so CORS is the outer layer (Starlette runs the most recently added
+    # first). Both orders were verified to behave identically for these requests, since CORS
+    # attaches its headers either way; CORS is kept outermost as the conventional arrangement,
+    # where it can still label a response produced by a failure further in.
+    app.add_middleware(
+        GZipMiddleware,
+        minimum_size=_GZIP_MINIMUM_BYTES,
+        compresslevel=_GZIP_COMPRESS_LEVEL,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_allow_origins),
@@ -167,9 +200,46 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         allow_headers=["*"],
     )
 
+    # Public mode's only enforcement is refuse_when_public below, applied at the boundary and
+    # never in a client -- the API is reachable independently of any frontend, so a hidden button
+    # is not a restriction. Search and every read endpoint serve the full constituent universe in
+    # both modes; the prepared set is a label for the deliberately backfilled deep
+    # demonstrations, not a gate.
+    prepared_symbols = sorted(item.strip().upper() for item in settings.public_prepared_companies)
+
+    def refuse_when_public() -> None:
+        """Close the two endpoints that spend money or mutate stored data.
+
+        A public deployment is a read-only window onto an already-prepared corpus. These return
+        404 so the surface simply does not exist rather than advertising a disabled capability.
+        """
+
+        if settings.public_mode:
+            raise HTTPException(status_code=404, detail="Not Found")
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "MarketSentinel"}
+
+    @app.get("/api/v1/capabilities", response_model=CapabilitiesView)
+    def capabilities() -> CapabilitiesView:
+        """Describe this deployment's scope so a client renders it instead of guessing.
+
+        Advisory only: the POST restrictions reported here are independently enforced above, so a
+        client that ignores this response gains nothing. ``prepared_companies`` and ``coverage``
+        are labels a client may attach to search results -- which companies were deliberately
+        backfilled, and how many articles each ticker actually has stored. Neither restricts what
+        may be read.
+        """
+
+        return CapabilitiesView(
+            mode="public" if settings.public_mode else "private",
+            default_symbol=settings.public_default_symbol.strip().upper(),
+            prepared_companies=prepared_symbols,
+            coverage=services.repository.stored_article_counts(),
+            supports_refresh=not settings.public_mode,
+            supports_article_analysis=not settings.public_mode,
+        )
 
     @app.get("/api/v1/constituents/search", response_model=UniverseResult)
     def search_constituents(
@@ -179,10 +249,14 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     ) -> UniverseResult:
         if market not in (None, "All", "S&P 500", "FTSE 100"):
             raise HTTPException(status_code=422, detail="Unsupported market")
+        # Identical in both modes: a public deployment is genuinely searchable across the full
+        # constituent universe. Coverage labelling belongs to the capabilities endpoint, never to
+        # filtering here.
         return services.constituents.search(q, market, limit)
 
     @app.post("/api/v1/analyze", response_model=AnalysisResult)
     def analyze(request: AnalysisRequest) -> AnalysisResult:
+        refuse_when_public()
         try:
             return services.analysis.analyze(request.symbol.strip().upper())
         except ConstituentNotFoundError as exc:
@@ -214,10 +288,58 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
             LOGGER.exception("Unexpected overview failure")
             raise HTTPException(status_code=500, detail="Unexpected overview failure") from exc
 
+    @app.get("/api/v1/companies/{symbol}/articles", response_model=RelevantNewsView)
+    def company_relevant_news(symbol: str = Path(min_length=1, max_length=20)) -> RelevantNewsView:
+        """Read every stored, sentiment-scored article for one company.
+
+        A GET, like the overview endpoint: no news is fetched, no sentiment is scored, no article
+        analysis is run, and no row is written. This is the read-only Relevant News browser --
+        deliberately with no path to the paid per-article analysis action.
+        """
+
+        try:
+            return services.analysis.list_relevant_news(symbol.strip().upper())
+        except ConstituentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            LOGGER.exception("Unexpected relevant news failure")
+            raise HTTPException(status_code=500, detail="Unexpected relevant news failure") from exc
+
+    @app.get(
+        "/api/v1/companies/{symbol}/articles/{article_id}/analysis",
+        response_model=StoredArticleAnalysisView,
+    )
+    def company_article_analysis(
+        symbol: str = Path(min_length=1, max_length=20),
+        article_id: str = Path(min_length=1, max_length=128),
+    ) -> StoredArticleAnalysisView:
+        """Read one already-stored article analysis.
+
+        A GET, and strictly a read of what exists: it never generates an analysis, so unlike
+        ``POST /api/v1/articles/analyze`` it costs nothing and is safe on a public deployment.
+        An article with no compatible stored analysis is a 404, not an offer to create one.
+        """
+
+        try:
+            found = services.analysis.read_article_analysis(symbol.strip().upper(), article_id)
+        except ConstituentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            LOGGER.exception("Unexpected article analysis read failure")
+            raise HTTPException(
+                status_code=500, detail="Unexpected article analysis read failure"
+            ) from exc
+        if found is None:
+            raise HTTPException(
+                status_code=404, detail="No compatible stored analysis for this article"
+            )
+        return found
+
     @app.post("/api/v1/articles/analyze", response_model=ArticleAnalysisResponse)
     def analyze_article(request: ArticleAnalysisRequest) -> ArticleAnalysisResponse:
         """Generate one deliberate, cached event analysis for a genuine stored article."""
 
+        refuse_when_public()
         return services.article_events.analyze_article(request.article_id)
 
     return app

@@ -553,6 +553,28 @@ class KeyDevelopmentsView(BaseModel):
     empty_message: str
 
 
+class TodaysIntelligenceCardView(BaseModel):
+    """One high-confidence stored analysis, ranked by ``dashboard_intelligence``.
+
+    Unlike ``KeyDevelopmentView``, this is one compatible stored analysis standing on its own --
+    no grouping, no members, no publisher count -- because Today's Intelligence ranks individual
+    analyses rather than deduplicated developments.
+    """
+
+    article_id: str
+    event: "CompanyIntelligenceEvent"
+    impact_label: str
+    impact_score: int = Field(ge=0, le=100)
+    primary_source_label: str
+    corroboration: CorroborationView
+
+
+class TodaysIntelligenceView(BaseModel):
+    cards: list[TodaysIntelligenceCardView] = Field(default_factory=list)
+    caption: str
+    empty_message: str
+
+
 class RiskRowView(BaseModel):
     """One ranked downside theme, numbered for display without being re-ordered."""
 
@@ -624,6 +646,83 @@ class CoverageView(BaseModel):
     latest_sentiment: DailySentiment | None = None
 
 
+class ArticleRowView(BaseModel):
+    """One stored, sentiment-scored article for the read-only Relevant News browser.
+
+    ``has_compatible_analysis`` reuses the exact same ``ArticleAnalysisCompatibility`` test the
+    rest of the product already applies -- it is informational only and triggers nothing. This
+    view carries no path to the paid per-article analysis action.
+    """
+
+    article_id: str
+    title: str
+    url: str
+    source: str
+    published_at: datetime
+    label: Literal["positive", "negative", "neutral"]
+    sentiment_score: float = Field(ge=-1, le=1)
+    positive: float = Field(ge=0, le=1)
+    negative: float = Field(ge=0, le=1)
+    neutral: float = Field(ge=0, le=1)
+    is_demo: bool
+    has_compatible_analysis: bool
+
+
+class StoredArticleAnalysisView(BaseModel):
+    """One compatible stored analysis, read directly by article rather than by ranking.
+
+    Structurally the same as ``TodaysIntelligenceCardView`` because it is the same underlying
+    record described by the same labels -- but it is a distinct concept: an arbitrary stored
+    analysis opened from the article browser, not a card that earned a place in a ranking.
+    """
+
+    article_id: str
+    event: "CompanyIntelligenceEvent"
+    impact_label: str
+    impact_score: int = Field(ge=0, le=100)
+    primary_source_label: str
+    corroboration: CorroborationView
+
+
+class CapabilitiesView(BaseModel):
+    """What this deployment exposes, so a client renders scope instead of guessing it.
+
+    Advisory only. The write/spend restrictions it reports are independently enforced at the API
+    boundary -- a client that ignores this response gains no additional access.
+
+    ``prepared_companies`` is the explicit editorial label for the deliberately backfilled deep
+    demonstrations, and ``coverage`` is the raw stored-article count per ticker: a fact about the
+    database, never a quality score. Neither restricts which companies may be searched or read --
+    the full constituent universe stays searchable and readable in both modes.
+    """
+
+    mode: Literal["public", "private"]
+    default_symbol: str
+    prepared_companies: list[str] = Field(default_factory=list)
+    coverage: dict[str, int] = Field(default_factory=dict)
+    supports_refresh: bool
+    supports_article_analysis: bool
+
+
+class RelevantNewsView(BaseModel):
+    """Every stored article for one company, served by its own GET endpoint.
+
+    Deliberately separate from ``CompanyOverview``: it is a wider, unfiltered read window over
+    raw stored articles rather than a derived intelligence surface, so it is not bundled into the
+    same payload or the same 30-day coverage window.
+
+    ``articles`` is complete for ``window_days``: every stored scored article inside the window is
+    present, with no row cap. ``len(articles)`` is therefore the true total, which is why no
+    separate total field exists -- a second count that must always equal the list length would add
+    a way for the two to disagree rather than any information.
+    """
+
+    articles: list[ArticleRowView] = Field(default_factory=list)
+    window_days: int = Field(ge=0)
+    caption: str
+    empty_message: str
+
+
 class CompanyOverview(BaseModel):
     """The Company Overview surface, assembled from stored analyses on every request.
 
@@ -639,10 +738,13 @@ class CompanyOverview(BaseModel):
     market_view: MarketViewSummaryView
     chart: ChartView
     key_developments: KeyDevelopmentsView
+    todays_intelligence: TodaysIntelligenceView
     top_risks: TopRisksView
     disclaimer: str
 
 
 KeyDevelopmentView.model_rebuild()
+TodaysIntelligenceCardView.model_rebuild()
+StoredArticleAnalysisView.model_rebuild()
 RiskRowView.model_rebuild()
 TopRisksView.model_rebuild()

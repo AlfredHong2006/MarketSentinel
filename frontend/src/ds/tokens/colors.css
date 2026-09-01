@@ -1,0 +1,118 @@
+:root{
+/* --- warm neutral paper ramp: the substrate. Neutrals do almost all the work. --- */
+--paper-0:#faf8f4;   /* application background */
+--paper-1:#fffdfa;   /* raised pane */
+--paper-2:#f2efe8;   /* sunken: table head, toolbars */
+--paper-3:#e9e4db;   /* hover fill */
+--paper-4:#ded8cd;   /* pressed fill */
+
+/* --- warm ink ramp --- */
+--ink-0:#171614;     /* hero values, headings */
+--ink-1:#2e2c28;     /* body */
+--ink-2:#55524c;     /* supporting */
+--ink-3:#7c776f;     /* qualifier */
+--ink-4:#a8a29a;     /* disabled, axis */
+--ink-5:#cfc9bf;
+
+/* --- hairlines: the primary separation device --- */
+--line:#e3ded5;
+--line-strong:#c9c2b7;
+--line-inverse:#33302b;
+
+/* --- the single reserved accent: selection + focus only. Never decoration. --- */
+--accent:#1f4a5c;
+--accent-hover:#173a48;
+--accent-tint:#e3eaec;
+--accent-ring:rgba(31,74,92,.34);
+
+/* --- semantic families, separated by role. These never substitute for each other. --- */
+/* 1. coverage sentiment (tone of what was written) */
+--sentiment-pos:#5c7346;
+--sentiment-neg:#9c4a2f;
+--sentiment-neu:var(--ink-3);
+--sentiment-pos-tint:#eaeee4;
+--sentiment-neg-tint:#f6e8e3;
+
+/* 2. downside risk severity (ordinal ramp, warm) */
+--risk-1:#b9a98a;
+--risk-2:#a98a4e;
+--risk-3:#8a5a1f;
+--risk-4:#6d3512;
+--risk-track:#e6e1d7;
+
+/* 3. evidence strength (ink density, deliberately hueless) */
+--evidence-strong:var(--ink-1);
+--evidence-moderate:var(--ink-3);
+--evidence-weak:var(--ink-4);
+
+/* 4. uncertainty (cool grey-blue + dashed strokes) */
+--uncertain:#6f7c88;
+--uncertain-tint:#eceef0;
+
+/* 5. market state */
+--state-open:#3f6b4e;
+--state-closed:var(--ink-4);
+--state-stale:#8a7a4e;
+--state-stale-tint:#f4efdf;
+
+/* 6. price / value change (distinct from sentiment) */
+--change-up:#1e6b58;
+--change-down:#b4482e;
+--change-flat:var(--ink-3);
+
+/* --- chart palette: long-horizon, restrained, max 4 series --- */
+--series-1:#1f4a5c;
+--series-2:#9c6b2f;
+--series-3:#4f6b52;
+--series-4:#7a5b73;
+--chart-grid:#ece7de;
+--chart-axis:var(--ink-4);
+--chart-band:rgba(31,74,92,.06);
+
+/* --- semantic aliases: use these in components --- */
+--surface-app:var(--paper-0);
+--surface-pane:var(--paper-1);
+--surface-sunken:var(--paper-2);
+--surface-hover:var(--paper-3);
+--surface-selected:var(--accent-tint);
+--text-hero:var(--ink-0);
+--text-heading:var(--ink-0);
+--text-body:var(--ink-1);
+--text-supporting:var(--ink-2);
+--text-qualifier:var(--ink-3);
+--text-disabled:var(--ink-4);
+--text-on-accent:#fffdfa;
+--border-hairline:var(--line);
+--border-emphasis:var(--line-strong);
+--focus-ring:var(--accent-ring);
+}
+
+/* Dark is a secondary theme, not the identity. Same warm axis, inverted. */
+[data-theme="dark"]{
+--paper-0:#151412;
+--paper-1:#1c1b18;
+--paper-2:#121110;
+--paper-3:#26241f;
+--paper-4:#302d27;
+--ink-0:#f6f3ee;
+--ink-1:#e2ded6;
+--ink-2:#b3aea4;
+--ink-3:#8b857c;
+--ink-4:#6a655d;
+--ink-5:#4a463f;
+--line:#2b2823;
+--line-strong:#403c35;
+--accent:#7fb0c2;
+--accent-hover:#9cc4d3;
+--accent-tint:#1d2b30;
+--accent-ring:rgba(127,176,194,.4);
+--sentiment-pos:#8faa74;
+--sentiment-neg:#cd7d60;
+--sentiment-pos-tint:#222a1e;
+--sentiment-neg-tint:#2e211c;
+--risk-track:#2b2823;
+--change-up:#5aa78e;
+--change-down:#d97a5f;
+--chart-grid:#26241f;
+--text-on-accent:#0f1416;
+}

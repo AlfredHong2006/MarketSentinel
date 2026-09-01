@@ -1,0 +1,10 @@
+:root{
+/* motion exists to make selection and state legible. Nothing else. */
+--dur-instant:60ms; /* @kind other */
+--dur-fast:110ms; /* @kind other */
+--dur-state:160ms; /* @kind other */
+--ease-standard:cubic-bezier(.2,0,.4,1); /* @kind other */
+--ease-exit:cubic-bezier(.4,0,1,1); /* @kind other */
+--transition-state:background-color var(--dur-fast) var(--ease-standard),color var(--dur-fast) var(--ease-standard),border-color var(--dur-fast) var(--ease-standard);
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-instant:0ms; /* @kind other */ --dur-fast:0ms; /* @kind other */ --dur-state:0ms /* @kind other */}}

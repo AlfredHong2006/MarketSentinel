@@ -29,6 +29,8 @@ from marketsentinel.dashboard_event_state import (
     updated_intelligence_events,
 )
 from marketsentinel.dashboard_intelligence import (
+    EMPTY_TODAYS_INTELLIGENCE_MESSAGE,
+    TODAYS_INTELLIGENCE_CAPTION,
     CompanyIntelligenceEvent,
     compatible_intelligence_events,
     contradiction_label,
@@ -363,12 +365,9 @@ def render_todays_intelligence(payload: dict[str, Any]) -> None:
     events = compatible_intelligence_events(payload.get("intelligence_events", []))
     cards = prepare_todays_intelligence(events)
     if not cards:
-        st.info("No high-confidence analysed events available yet.")
+        st.info(EMPTY_TODAYS_INTELLIGENCE_MESSAGE)
         return
-    st.caption(
-        "Ordered by event magnitude, extraction confidence, evidence strength, source class, "
-        "and publication time. These are event assessments, not price predictions."
-    )
+    st.caption(TODAYS_INTELLIGENCE_CAPTION)
     for card in cards:
         item = card.event
         with st.container(border=True):

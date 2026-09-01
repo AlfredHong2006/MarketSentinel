@@ -29,6 +29,14 @@ from marketsentinel.event_policy import is_meaningful_event
 
 MAX_TODAYS_INTELLIGENCE = 4
 
+# Shared verbatim with the API's Today's Intelligence projection (overview.py) so the Streamlit
+# and React clients state the exact same ranking rule and absence message.
+TODAYS_INTELLIGENCE_CAPTION = (
+    "Ordered by event magnitude, extraction confidence, evidence strength, source class, "
+    "and publication time. These are event assessments, not price predictions."
+)
+EMPTY_TODAYS_INTELLIGENCE_MESSAGE = "No high-confidence analysed events available yet."
+
 # A syndicated rewrite of the primary is the same reporting, not a second look at the event.
 # These mirror analysis_candidates' near-title rule so both sides of the product agree on what
 # counts as one story.
@@ -146,10 +154,17 @@ def prepare_todays_intelligence(
         ),
         reverse=True,
     )
-    return [_card(item) for item in eligible[:limit]]
+    return [prepare_intelligence_card(item) for item in eligible[:limit]]
 
 
-def _card(item: CompanyIntelligenceEvent) -> IntelligenceCard:
+def prepare_intelligence_card(item: CompanyIntelligenceEvent) -> IntelligenceCard:
+    """Build the display-ready view of one stored analysis, ranked or not.
+
+    Public because the same labels and the same corroboration semantics must describe an analysis
+    opened from the article browser as describe one that reached the top of the ranking. Reading a
+    stored analysis directly must never produce a second opinion about its evidence.
+    """
+
     summary = summarize_corroboration(item)
     return IntelligenceCard(
         event=item,

@@ -1,0 +1,42 @@
+:root{
+/* compact scale — carries an evidence row and a dense table without loosening */
+--s-0:0px;
+--s-1:2px;
+--s-2:4px;
+--s-3:6px;
+--s-4:8px;
+--s-5:12px;
+--s-6:16px;
+/* hero scale — for regions that own a screen */
+--s-7:20px;
+--s-8:24px;
+--s-9:32px;
+--s-10:40px;
+--s-11:56px;
+
+/* row rhythm */
+--row-h-dense:26px;
+--row-h:30px;
+--row-h-loose:38px;
+--pad-cell-x:var(--s-5);
+--pad-cell-y:var(--s-3);
+--pane-pad:var(--s-5);
+--pane-header-h:32px;
+
+/* workspace grid — the analytical region dominates, controls dock to pane edges */
+--pane-min-h:120px;          /* below this a pane is a strip, not a pane */
+--pane-min-w:280px;          /* below this, split the column instead of shrinking */
+/* chart pane vs stacked list pane in the same column */
+--chart-region-grow:1.6; /* @kind other */
+--list-region-grow:1; /* @kind other */
+--utility-strip-h:24px;      /* bottom workspace status strip */
+--toolbar-h:26px;            /* docked control strip inside a pane header/footer */
+
+/* layout: a dense table, a chart and an evidence pane coexist on one screen */
+--rail-w:196px;
+--rail-w-collapsed:44px;
+--detail-w:392px;
+--detail-w-wide:480px;
+--grid-gutter:1px;
+--content-max:1680px;
+}

@@ -23,6 +23,26 @@ class Settings(BaseSettings):
     demo_news_path: Path = Path("data/demo/articles.json")
     api_base_url: str = "http://127.0.0.1:8000"
 
+    # Public deployment mode. Off by default, so a local/private run keeps every existing
+    # capability. When on, the API refuses the two spending endpoints (POST /analyze and
+    # POST /articles/analyze) -- enforced at the API boundary, never in the client, because the
+    # API is reachable independently of any frontend. Search and every read endpoint stay open
+    # across the full constituent universe in both modes; a company with nothing stored reads as
+    # an honest empty state rather than being hidden.
+    #
+    # public_prepared_companies labels the deliberately backfilled deep demonstrations. It is an
+    # explicit editorial list, NOT an allowlist and NOT a computed quality threshold: which
+    # companies count as prepared is a product decision, not something the application should
+    # infer from its own stored counts.
+    public_mode: bool = False
+    public_prepared_companies: tuple[str, ...] = ("NVDA", "PFE")
+    public_default_symbol: str = "NVDA"
+
+    # A public page fetches prices on every visitor page load, and price history is not persisted.
+    # This is a per-process in-memory TTL only: no database column, no migration, no external
+    # cache. It bounds third-party calls per company to roughly one per TTL per process.
+    price_cache_ttl_seconds: float = Field(default=900.0, ge=0, le=86_400)
+
     # Browser origins allowed to call the API. The Streamlit dashboard's port is joined by the
     # Vite dev and preview ports so a future React client needs no code change to talk to a local
     # API. Configurable rather than hardcoded because a deployed client is served from elsewhere.

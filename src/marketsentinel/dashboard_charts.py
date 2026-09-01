@@ -10,6 +10,11 @@ from plotly.subplots import make_subplots
 from marketsentinel.event_policy import is_meaningful_event_values
 
 TIMEFRAME_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "1Y": 12}
+
+# "MAX" is the whole served price series rather than a calendar offset. It is a window, not a new
+# kind of selection: markers inside it still come from the same shared meaningful-event floor.
+MAX_TIMEFRAME = "MAX"
+CHART_TIMEFRAMES = (*TIMEFRAME_MONTHS, MAX_TIMEFRAME)
 DEFAULT_TIMEFRAME = "6M"
 CHART_LAYERS = ("Price", "Sentiment", "Events")
 MAX_EVENT_MARKERS = 8
@@ -28,13 +33,17 @@ _EVENT_COLORS = {
 def price_frame_for_timeframe(points: Sequence[Mapping[str, Any]], timeframe: str) -> pd.DataFrame:
     """Return genuine price observations within the selected calendar window."""
 
-    if timeframe not in TIMEFRAME_MONTHS:
+    if timeframe not in CHART_TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
     frame = pd.DataFrame(points)
     if frame.empty:
         return pd.DataFrame(columns=["date", "close", "volume"])
     frame["date"] = pd.to_datetime(frame["date"])
     frame = frame.sort_values("date").drop_duplicates("date", keep="last")
+    if timeframe == MAX_TIMEFRAME:
+        # Every observation supplied, with no calendar cutoff. The series is already bounded by
+        # whatever the caller chose to serve, so MAX never reaches for data that was not passed in.
+        return frame.reset_index(drop=True)
     cutoff = frame["date"].max() - pd.DateOffset(months=TIMEFRAME_MONTHS[timeframe])
     return frame.loc[frame["date"] >= cutoff].reset_index(drop=True)
 

@@ -1,0 +1,1307 @@
+/* MarketSentinel Company Overview — component styles built on the vendored design tokens
+   (./ds/tokens/*.css, ./ds/styles.css). No token values are redefined here. */
+
+/* ---------- shell / workspace grid ---------- */
+
+.ms-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--surface-app);
+  font-family: var(--font-ui);
+  color: var(--text-body);
+  overflow: hidden;
+}
+
+.ms-app-header {
+  flex: 0 0 auto;
+  height: var(--s-10);
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  padding: 0 var(--s-5);
+  background: var(--ink-0);
+}
+
+.ms-wordmark {
+  font: var(--fw-semibold) 15px var(--font-editorial);
+  letter-spacing: var(--ls-tight);
+  color: var(--paper-0);
+  white-space: nowrap;
+}
+
+.ms-header-status {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  font: var(--fw-regular) 11px var(--font-ui);
+  color: #8b857c;
+  white-space: nowrap;
+}
+
+.ms-header-status-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  background: var(--state-closed);
+}
+
+.ms-header-status-dot-fresh {
+  background: var(--state-open);
+}
+
+.ms-body-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: var(--grid-gutter);
+  /* Structural seam between rail | main column | detail pane. Emphasis, not hairline: these are
+     the major workspace divisions, not incidental hairlines -- still exactly one 1px line filling
+     the existing gap, never a border added on top of it. */
+  background: var(--border-emphasis);
+  /* Anchors the two rail resizers, which are positioned over the seams above. */
+  position: relative;
+}
+
+/* ---------- resizable rails (desktop only) ----------
+   Each resizer is a grab strip positioned *over* an existing seam rather than a flex item, so it
+   consumes no layout width and the resting appearance is exactly as before. It only becomes
+   visible on hover. */
+
+.ms-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ms-resizer-left {
+  left: calc(var(--rail-w) - 3px);
+}
+
+.ms-resizer-right {
+  right: calc(var(--detail-w) - 3px);
+}
+
+.ms-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: var(--transition-state);
+}
+
+.ms-resizer:hover::after {
+  background: var(--accent);
+}
+
+/* While a drag is in flight, stop the pointer selecting text across the workspace. */
+.ms-shell-resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.ms-rail {
+  width: var(--rail-w);
+  flex: 0 0 auto;
+  background: var(--surface-sunken);
+  padding-top: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.ms-rail-group-label {
+  font: var(--fw-semibold) var(--fs-micro) var(--font-ui);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-qualifier);
+  padding: 0 var(--s-5) var(--s-2);
+}
+
+.ms-rail-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: 0 var(--s-5) var(--s-4);
+}
+
+.ms-rail-select,
+.ms-rail-input {
+  height: var(--row-h);
+  padding: 0 var(--s-3);
+  font: var(--fw-regular) var(--fs-supporting) var(--font-ui);
+  color: var(--text-body);
+  background: var(--surface-pane);
+  border: var(--bw) solid var(--border-hairline);
+  border-radius: var(--r-0);
+}
+
+.ms-rail-input:focus-visible,
+.ms-rail-select:focus-visible {
+  border-color: var(--accent);
+}
+
+.ms-rail-note {
+  padding: 0 var(--s-5) var(--s-3);
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+}
+
+.ms-rail-note-error {
+  color: var(--sentiment-neg);
+}
+
+.ms-rail-results {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 var(--s-4);
+  border-bottom: var(--bw) solid var(--border-hairline);
+}
+
+.ms-rail-result {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: var(--s-2) var(--s-5);
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-ui);
+}
+
+.ms-rail-result:hover {
+  background: var(--surface-hover);
+}
+
+.ms-rail-result-active {
+  background: var(--surface-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ms-rail-result-symbol {
+  font: var(--fw-medium) var(--fs-raw) var(--font-numeric);
+  color: var(--text-hero);
+}
+
+.ms-rail-result-name {
+  font-size: var(--fs-supporting);
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-rail-result-market {
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+}
+
+/* Server-reported coverage fact under each result: prepared demo, stored count, or none. */
+.ms-rail-result-coverage {
+  font-size: var(--fs-qualifier);
+  color: var(--text-supporting);
+}
+
+.ms-rail-current {
+  margin-top: var(--s-4);
+  padding-top: var(--s-2);
+}
+
+.ms-rail-current-symbol {
+  padding: 0 var(--s-5);
+  font: var(--fw-semibold) var(--fs-subtitle) var(--font-editorial);
+  color: var(--accent);
+}
+
+.ms-main-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--grid-gutter);
+  /* Same structural-seam treatment as .ms-body-row: one 1px emphasis line per gap. */
+  background: var(--border-emphasis);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ---------- identity block ---------- */
+
+.ms-identity-block {
+  flex: 0 0 auto;
+  background: var(--surface-pane);
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-4) var(--s-5) var(--s-3);
+  gap: var(--s-2);
+}
+
+.ms-identity-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+}
+
+.ms-identity-name {
+  margin: 0;
+  font: var(--fw-semibold) var(--fs-title) / var(--lh-title) var(--font-editorial);
+  color: var(--text-hero);
+  white-space: nowrap;
+}
+
+.ms-identity-symbol {
+  font: var(--fw-medium) var(--fs-raw) var(--font-numeric);
+  color: var(--ink-2);
+}
+
+.ms-identity-market {
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+}
+
+.ms-disclaimer {
+  margin: 0;
+  font: var(--fw-regular) var(--fs-qualifier) / 1.5 var(--font-ui);
+  color: var(--text-qualifier);
+  max-width: var(--measure-prose);
+}
+
+/* ---------- metric strip ---------- */
+
+.ms-metric-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-7);
+  padding: var(--s-2) 0;
+}
+
+.ms-metric-tile {
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.ms-eyebrow {
+  font: var(--fw-semibold) var(--fs-micro) var(--font-ui);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-qualifier);
+  margin-bottom: var(--s-1);
+}
+
+.ms-metric-note {
+  margin: 0;
+  font: var(--fw-medium) var(--fs-supporting) / var(--lh-dense) var(--font-ui);
+  color: var(--text-body);
+}
+
+/* ---------- generic pane ---------- */
+
+.ms-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-pane);
+  overflow: hidden;
+  min-width: var(--pane-min-w);
+  min-height: var(--pane-min-h);
+}
+
+.ms-pane-header {
+  flex: 0 0 auto;
+  height: var(--pane-header-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: 0 var(--s-5);
+  border-bottom: var(--bw) solid var(--border-hairline);
+}
+
+.ms-pane-title {
+  margin: 0;
+  font: var(--fw-semibold) var(--fs-subtitle) var(--font-editorial);
+  color: var(--text-hero);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.ms-pane-meta {
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ms-pane-controls {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.ms-pane-hint {
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+  white-space: nowrap;
+}
+
+.ms-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ms-pane-footnote {
+  padding: var(--s-4) var(--s-5) var(--s-5);
+  font: var(--fw-regular) var(--fs-qualifier) / 1.45 var(--font-ui);
+  color: var(--text-qualifier);
+  max-width: 52ch;
+}
+
+.ms-empty-note {
+  margin: 0;
+  padding: var(--s-6) var(--s-5);
+  font-size: var(--fs-supporting);
+  color: var(--text-qualifier);
+  max-width: var(--measure-narrow);
+}
+
+/* ---------- split row: developments | risks ---------- */
+
+.ms-split-row {
+  flex: var(--list-region-grow) 1 0;
+  min-height: 220px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: var(--grid-gutter);
+  /* Same structural-seam treatment as .ms-body-row: one 1px emphasis line per gap. */
+  background: var(--border-emphasis);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.ms-developments-pane {
+  flex: 1.7 1 356px;
+  height: 100%;
+}
+
+.ms-risks-pane {
+  flex: 1 1 288px;
+  height: 100%;
+}
+
+.ms-development-list,
+.ms-risk-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ms-development-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--s-6);
+  align-items: start;
+  padding: var(--s-5);
+  border-bottom: var(--bw) solid var(--border-hairline);
+  cursor: pointer;
+  outline: none;
+}
+
+.ms-development-row:hover {
+  background: var(--surface-hover);
+}
+
+.ms-row-selected {
+  background: var(--surface-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ms-development-main {
+  min-width: 0;
+}
+
+.ms-development-meta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.ms-development-title {
+  margin: 0;
+  font: var(--fw-semibold) 15.5px / 1.32 var(--font-editorial);
+  color: var(--text-hero);
+  max-width: var(--measure-prose);
+  text-wrap: pretty;
+}
+
+.ms-development-source {
+  display: block;
+  margin-top: var(--s-1);
+  font-size: var(--fs-qualifier);
+  color: var(--accent);
+  max-width: var(--measure-prose);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-development-source:hover {
+  color: var(--accent-hover);
+}
+
+.ms-development-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  margin-top: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.ms-development-marker {
+  padding-top: var(--s-1);
+  text-align: right;
+}
+
+.ms-contradiction {
+  margin-top: var(--s-2);
+  font-size: var(--fs-qualifier);
+  color: var(--uncertain);
+}
+
+.ms-risk-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: var(--bw) solid var(--border-hairline);
+  cursor: pointer;
+  outline: none;
+}
+
+.ms-risk-row:hover {
+  background: var(--surface-hover);
+}
+
+.ms-risk-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-4);
+}
+
+.ms-risk-name {
+  margin: 0;
+  font: var(--fw-semibold) 14px / 1.3 var(--font-editorial);
+  color: var(--text-hero);
+  text-wrap: pretty;
+}
+
+.ms-risk-row-detail {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding-left: 20px;
+  flex-wrap: wrap;
+}
+
+.ms-risk-summary {
+  margin: var(--s-1) 0 0;
+  padding-left: 20px;
+  font: var(--fw-regular) var(--fs-supporting) / 1.45 var(--font-ui);
+  color: var(--text-supporting);
+  max-width: var(--measure-narrow);
+}
+
+/* ---------- today's intelligence: bounded horizontal strip (max 4 cards) ---------- */
+
+.ms-intelligence-pane {
+  flex: 0 0 auto;
+}
+
+.ms-intelligence-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--s-4) var(--s-5);
+  display: flex;
+  gap: var(--s-4);
+  overflow-x: auto;
+}
+
+.ms-intelligence-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 296px;
+  flex: 0 0 auto;
+  padding: var(--s-4);
+  border: var(--bw) solid var(--border-hairline);
+  cursor: pointer;
+  outline: none;
+}
+
+.ms-intelligence-card:hover {
+  background: var(--surface-hover);
+}
+
+.ms-intelligence-title {
+  margin: 0;
+  font: var(--fw-semibold) 14px / 1.32 var(--font-editorial);
+  color: var(--text-hero);
+  text-wrap: pretty;
+}
+
+.ms-intelligence-meta {
+  margin-top: var(--s-1);
+}
+
+/* ---------- relevant news: full-width, bounded internal scroll ---------- */
+
+.ms-articles-pane {
+  flex: 0 0 auto;
+  height: 380px;
+}
+
+.ms-filter-control {
+  height: var(--toolbar-h);
+  padding: 0 var(--s-2);
+  font: var(--fw-regular) var(--fs-qualifier) var(--font-ui);
+  color: var(--text-body);
+  background: var(--surface-pane);
+  border: var(--bw) solid var(--border-hairline);
+  border-radius: var(--r-0);
+  /* A select otherwise widens to its longest option -- publisher names run long enough to
+     squeeze the pane meta into an ellipsis, and that meta is what states the true article
+     count and window. */
+  max-width: 152px;
+}
+
+.ms-filter-control:focus-visible {
+  border-color: var(--accent);
+}
+
+.ms-articles-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ms-articles-row {
+  display: grid;
+  grid-template-columns: 84px 1fr 168px 92px 96px 68px;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-5);
+  border-bottom: var(--bw) solid var(--border-hairline);
+  outline: none;
+}
+
+.ms-articles-row:hover {
+  background: var(--surface-hover);
+}
+
+/* Only a row with a stored analysis opens one, so only it reads as actionable. */
+.ms-articles-row-analysed {
+  cursor: pointer;
+}
+
+.ms-articles-row-analysed:hover .ms-articles-title {
+  color: var(--accent);
+}
+
+.ms-articles-original {
+  font-size: var(--fs-qualifier);
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+  justify-self: end;
+}
+
+.ms-articles-original:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.ms-articles-date {
+  white-space: nowrap;
+}
+
+.ms-articles-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--fw-medium) var(--fs-supporting) var(--font-editorial);
+  color: var(--text-body);
+  text-decoration: none;
+}
+
+.ms-articles-title:hover {
+  color: var(--accent);
+}
+
+.ms-articles-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- controls: button, tag, evidence, risk marker, source ---------- */
+
+.ms-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 var(--s-4);
+  font: var(--fw-medium) var(--fs-qualifier) var(--font-ui);
+  border: var(--bw) solid var(--border-hairline);
+  background: var(--surface-pane);
+  color: var(--text-body);
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: var(--r-0);
+  transition: var(--transition-state);
+}
+
+.ms-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.ms-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.ms-btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.ms-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.ms-btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.ms-btn:disabled {
+  color: var(--text-disabled);
+  border-color: var(--border-hairline);
+  background: var(--surface-pane);
+  cursor: not-allowed;
+}
+
+.ms-tag {
+  display: inline-flex;
+  align-items: center;
+  font: var(--fw-semibold) var(--fs-micro) var(--font-ui);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  padding: 2px 5px;
+}
+
+.ms-tag-positive {
+  color: var(--sentiment-pos);
+  background: var(--sentiment-pos-tint);
+}
+
+.ms-tag-negative {
+  color: var(--sentiment-neg);
+  background: var(--sentiment-neg-tint);
+}
+
+.ms-tag-neutral {
+  color: var(--ink-2);
+  background: var(--surface-hover);
+}
+
+.ms-evidence {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.ms-evidence-track {
+  width: 60px;
+  height: 4px;
+  background: var(--risk-track);
+  position: relative;
+}
+
+.ms-evidence-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  background: var(--evidence-strong);
+}
+
+.ms-evidence-label {
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+  white-space: nowrap;
+}
+
+.ms-risk-marker {
+  position: relative;
+  display: inline-block;
+  height: var(--marker-h);
+}
+
+.ms-risk-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--track-h);
+  transform: translateY(-50%);
+  background: var(--risk-track);
+}
+
+.ms-risk-dot {
+  position: absolute;
+  top: 50%;
+  width: var(--marker-h);
+  height: var(--marker-h);
+  transform: translate(-50%, -50%);
+  border: var(--bw-emphasis) solid;
+  background: var(--surface-pane);
+  border-radius: var(--r-pill);
+}
+
+.ms-source-ref {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  font: var(--fw-regular) var(--fs-raw) var(--font-numeric);
+  color: var(--accent);
+  border-bottom: none;
+}
+
+.ms-source-ref:hover {
+  color: var(--accent-hover);
+}
+
+.ms-source-publisher {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.ms-source-date {
+  color: var(--text-qualifier);
+  white-space: nowrap;
+}
+
+.ms-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--s-3);
+  font: var(--fw-regular) var(--fs-qualifier) var(--font-ui);
+  color: var(--text-supporting);
+  background: var(--surface-sunken);
+  border: var(--bw) solid var(--border-hairline);
+}
+
+.ms-publisher-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.ms-num-qualifier {
+  font: var(--fw-regular) var(--fs-raw) var(--font-numeric);
+  color: var(--text-qualifier);
+  font-feature-settings: var(--fv-tabular);
+}
+
+.ms-qualifier {
+  font: var(--type-qualifier);
+  color: var(--text-qualifier);
+}
+
+.ms-prose {
+  margin: 0;
+  font: var(--fw-regular) var(--fs-body) / var(--lh-body) var(--font-editorial);
+  color: var(--text-body);
+  max-width: var(--measure-prose);
+  text-wrap: pretty;
+}
+
+/* ---------- chart pane ---------- */
+
+/* The plot is sized by the pane, not the other way round. The chart previously used a fixed
+   280px ResponsiveContainer inside a pane whose height varies with the viewport; on a shorter
+   desktop the pane resolved smaller than that and `.ms-pane { overflow: hidden }` cut the series
+   off, so the price line appeared to leave through the top and bottom edges. The floor below is
+   what the chart needs to stay legible -- the main column scrolls rather than compressing it. */
+.ms-chart-pane {
+  flex: var(--chart-region-grow) 1 0;
+  min-height: 320px;
+}
+
+.ms-chart-body {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  gap: var(--s-5);
+  padding: var(--s-4) var(--s-5) var(--s-2);
+}
+
+.ms-chart-plot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Owns the definite height ResponsiveContainer measures against. */
+.ms-chart-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+/* Recharts renders the range slider as part of the SVG; these only restrain its chrome. */
+.ms-chart-plot .recharts-brush-traveller rect {
+  fill: var(--surface-pane);
+  stroke: var(--border-emphasis);
+}
+
+.ms-chart-plot .recharts-brush-slide {
+  fill: var(--accent);
+  fill-opacity: 0.08;
+}
+
+.ms-chart-legend {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: var(--s-1) 0;
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+  pointer-events: none;
+}
+
+.ms-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.ms-chart-legend-swatch-line {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  background: var(--series-1);
+}
+
+.ms-chart-legend-swatch-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.ms-chart-legend-swatch-bars span {
+  display: inline-block;
+  width: 4px;
+  height: 8px;
+}
+
+.ms-chart-legend-swatch-bar-pos {
+  background: var(--sentiment-pos);
+}
+
+.ms-chart-legend-swatch-bar-neg {
+  background: var(--sentiment-neg);
+}
+
+.ms-chart-marker {
+  cursor: pointer;
+  outline: none;
+}
+
+.ms-chart-marker-box {
+  fill: var(--surface-pane);
+  stroke-width: 1.4;
+}
+
+.ms-chart-marker-label {
+  font: var(--fw-medium) 9px var(--font-numeric);
+  fill: var(--ink-0);
+}
+
+.ms-chart-tooltip {
+  background: var(--surface-pane);
+  border: var(--bw) solid var(--border-emphasis);
+  box-shadow: var(--shadow-popover);
+  padding: var(--s-3) var(--s-4);
+  min-width: 180px;
+  max-width: 260px;
+  font-family: var(--font-ui);
+}
+
+.ms-chart-tooltip-date {
+  font: var(--fw-semibold) var(--fs-qualifier) var(--font-ui);
+  color: var(--text-hero);
+  margin-bottom: var(--s-2);
+}
+
+.ms-chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  font-size: var(--fs-supporting);
+  color: var(--text-body);
+}
+
+.ms-chart-tooltip-marker {
+  margin-top: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: var(--bw) solid var(--border-hairline);
+}
+
+.ms-chart-tooltip-summary {
+  margin: var(--s-1) 0 0;
+  max-width: 220px;
+}
+
+.ms-toggle-btn {
+  height: var(--toolbar-h);
+  padding: 0 var(--s-3);
+  font: var(--fw-regular) var(--fs-qualifier) var(--font-ui);
+  color: var(--text-qualifier);
+  background: var(--surface-pane);
+  border: var(--bw) solid var(--border-hairline);
+  cursor: pointer;
+}
+
+.ms-toggle-btn-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-selected);
+}
+
+.ms-chart-annotation {
+  flex: 0 0 auto;
+  width: 196px;
+  border-left: var(--bw) solid var(--border-emphasis);
+  padding-left: var(--s-4);
+}
+
+.ms-annotation-text {
+  margin: 0;
+  font: var(--fw-regular) var(--fs-body) / 1.4 var(--font-editorial);
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+
+.ms-annotation-meta {
+  margin-top: var(--s-2);
+}
+
+.ms-time-range {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.ms-time-range-btn {
+  height: var(--toolbar-h);
+  padding: 0 var(--s-3);
+  font: var(--fw-regular) var(--fs-qualifier) var(--font-ui);
+  color: var(--text-qualifier);
+  background: transparent;
+  border: none;
+  border-bottom: var(--bw-emphasis) solid transparent;
+  cursor: pointer;
+}
+
+.ms-time-range-btn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.ms-time-range-btn-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: var(--fw-medium);
+}
+
+/* ---------- persistent detail pane ---------- */
+
+.ms-detail {
+  width: var(--detail-w);
+  flex: 0 0 auto;
+  min-width: var(--detail-w);
+  background: var(--surface-pane);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ms-detail-empty {
+  padding: var(--s-6) var(--s-5);
+}
+
+.ms-detail-header {
+  flex: 0 0 auto;
+  padding: var(--s-4) var(--s-5);
+  border-bottom: var(--bw) solid var(--border-hairline);
+}
+
+.ms-detail-header-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  margin-bottom: var(--s-2);
+}
+
+.ms-detail-ref {
+  margin-left: auto;
+}
+
+.ms-detail-title {
+  margin: 0;
+  font: var(--fw-semibold) 18px / 1.28 var(--font-editorial);
+  color: var(--text-hero);
+  text-wrap: pretty;
+}
+
+.ms-detail-risk-marker {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  padding: var(--s-4) var(--s-5);
+  background: var(--surface-sunken);
+  border-bottom: var(--bw) solid var(--border-hairline);
+}
+
+.ms-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ms-detail-section-head {
+  font: var(--fw-semibold) var(--fs-micro) var(--font-ui);
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+  color: var(--text-qualifier);
+  padding: var(--s-3) var(--s-5);
+  background: var(--surface-sunken);
+  border-top: var(--bw) solid var(--border-hairline);
+  border-bottom: var(--bw) solid var(--border-hairline);
+}
+
+.ms-detail-section-count {
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ms-detail-section-body {
+  padding: var(--s-4) var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.ms-claim {
+  padding-bottom: var(--s-4);
+  border-bottom: var(--bw) solid var(--border-hairline);
+}
+
+.ms-claim:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.ms-claim-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+}
+
+.ms-claim-reasoning {
+  margin: 0 0 var(--s-2);
+  font: var(--fw-regular) var(--fs-supporting) / 1.5 var(--font-ui);
+  color: var(--text-body);
+}
+
+.ms-claim-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.ms-bullet-list {
+  margin: 0;
+  padding-left: var(--s-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font: var(--fw-regular) var(--fs-supporting) / 1.5 var(--font-ui);
+  color: var(--text-body);
+}
+
+.ms-channel-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-5);
+}
+
+.ms-related {
+  padding-bottom: var(--s-3);
+}
+
+.ms-related-ticker {
+  font: var(--fw-medium) var(--fs-raw) var(--font-numeric);
+  color: var(--text-body);
+}
+
+.ms-detail-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-top: var(--bw) solid var(--border-hairline);
+}
+
+/* ---------- bottom utility strip ---------- */
+
+.ms-utility-strip {
+  flex: 0 0 auto;
+  height: var(--utility-strip-h);
+  display: flex;
+  align-items: center;
+  gap: var(--s-6);
+  padding: 0 var(--s-5);
+  background: var(--surface-sunken);
+  border-top: var(--bw) solid var(--border-hairline);
+  font-size: var(--fs-qualifier);
+  color: var(--text-qualifier);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ms-utility-spacer {
+  margin-left: auto;
+}
+
+/* ---------- full-page states ---------- */
+
+.ms-state-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--s-4);
+  padding: var(--s-11);
+  background: var(--surface-app);
+}
+
+.ms-state-title {
+  margin: 0;
+  font: var(--fw-medium) var(--fs-hero-sm) / var(--lh-title) var(--font-editorial);
+  color: var(--text-hero);
+}
+
+/* ---------- responsive behaviour ----------
+   The approved design has no documented breakpoint below desktop (it specifies a fixed
+   workspace grid). Below 1180px the persistent detail region moves under the main
+   column instead of beside it; below 860px the rail collapses since it carries a single
+   item in this slice. Panes keep scrolling internally down to --pane-min-w/--pane-min-h,
+   consistent with "panes have floors, not fluid minimums". */
+
+@media (max-width: 1179px) {
+  /* The rails stack instead of sitting beside the workspace, so there is no vertical seam left
+     to drag. Resizing is a desktop-only affordance; the stacked layout is untouched. */
+  .ms-resizer {
+    display: none;
+  }
+
+  .ms-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .ms-body-row {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .ms-main-column {
+    overflow: visible;
+  }
+
+  .ms-detail {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ms-chart-body {
+    flex-direction: column;
+  }
+
+  .ms-chart-annotation {
+    width: auto;
+    border-left: none;
+    border-top: var(--bw) solid var(--border-emphasis);
+    padding-left: 0;
+    padding-top: var(--s-4);
+  }
+}
+
+@media (max-width: 859px) {
+  .ms-rail {
+    width: 100%;
+    max-height: 40vh;
+  }
+
+  .ms-split-row {
+    flex-direction: column;
+  }
+
+  .ms-developments-pane,
+  .ms-risks-pane {
+    height: auto;
+  }
+
+  .ms-utility-strip {
+    white-space: normal;
+    height: auto;
+    padding: var(--s-2) var(--s-5);
+  }
+}

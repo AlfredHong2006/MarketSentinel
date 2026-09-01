@@ -7,20 +7,67 @@ Product intent lives in [PRODUCT.md](../product/PRODUCT.md); settled decisions i
 
 ## Shape of the system
 
-Two processes over one SQLite file:
+One API over one SQLite file, with two clients that serve different purposes:
 
 - **API** — FastAPI ([api/app.py](../../src/marketsentinel/api/app.py)). `build_services` wires
-  every concrete provider once; `create_app` exposes `/health`, `/api/v1/constituents/search`,
-  `/api/v1/analyze`, `/api/v1/companies/{symbol}/overview`, and `/api/v1/articles/analyze`.
-  Allowed browser origins come from `cors_allow_origins` in
-  [config.py](../../src/marketsentinel/config.py) rather than being hardcoded.
-- **Dashboard** — Streamlit ([dashboard.py](../../src/marketsentinel/dashboard.py)). A pure HTTP
-  client. It holds no database handle and calls no provider; every section it renders is prepared
-  by a `dashboard_*` module from the JSON payload.
+  every concrete provider once; `create_app` exposes the eight routes tabulated below. Allowed
+  browser origins come from `cors_allow_origins` in
+  [config.py](../../src/marketsentinel/config.py) rather than being hardcoded. `GZipMiddleware`
+  compresses responses over 1 KB — transport only, no contract change, and it matters because one
+  company's uncapped article list is several hundred KB of repetitive JSON.
+- **React client** ([frontend/](../../frontend)) — Vite + TypeScript + Recharts. The
+  recruiter-facing read surface. **GET-only: it contains no write client at all**, so it cannot
+  refresh coverage or request a paid analysis even when pointed at a private API.
+- **Streamlit dashboard** ([dashboard.py](../../src/marketsentinel/dashboard.py)) — the
+  private/local operational surface, and the only client that can trigger work: the explicit
+  company refresh and the manual per-article analysis. A pure HTTP client like the React one; it
+  holds no database handle and calls no provider.
+
+Both clients read the same conclusions from the same endpoints. Neither re-derives materiality,
+grouping, ranking, or corroboration.
+
+| Method | Route | Reads | Spends |
+| --- | --- | --- | --- |
+| GET | `/health` | — | no |
+| GET | `/api/v1/capabilities` | deployment mode, prepared set, stored-article counts | no |
+| GET | `/api/v1/constituents/search` | the constituent universe | no |
+| GET | `/api/v1/companies/{symbol}/overview` | the `CompanyOverview` projection | no |
+| GET | `/api/v1/companies/{symbol}/articles` | stored scored articles (Relevant News) | no |
+| GET | `/api/v1/companies/{symbol}/articles/{article_id}/analysis` | one stored analysis | no |
+| POST | `/api/v1/analyze` | refreshes coverage | **yes** |
+| POST | `/api/v1/articles/analyze` | generates one analysis | **yes** |
 
 Domain contracts are Pydantic models in [domain.py](../../src/marketsentinel/domain.py), which is
 also where the two projections live: `ArticleAnalysis.to_analyzed_event()` (chart markers) and
 `.to_company_intelligence_event()` (the product-facing record every downstream layer reads).
+
+## Deployment mode: public and private
+
+`public_mode` in [config.py](../../src/marketsentinel/config.py) (default `False`) is the single
+switch separating a published read-only deployment from a local operational one. Its **only**
+enforcement is closing the two rows marked *spends* above: both return `404`, so the surface does
+not exist rather than advertising a disabled capability. Everything else is identical in both
+modes.
+
+That enforcement lives at the API boundary and never in a client, because the API is reachable
+independently of any frontend — a hidden button restricts nothing.
+
+- **Search and reads stay open across the full constituent universe in both modes.** A public
+  deployment is genuinely searchable; it does not pretend the index is two companies wide.
+- **`public_prepared_companies`** (default `("NVDA", "PFE")`) is an editorial *label* for the
+  deliberately backfilled deep demonstrations — not an allowlist, and deliberately not a computed
+  quality threshold. Which companies count as prepared is a product decision, not something the
+  application infers from its own stored counts.
+- **`/api/v1/capabilities`** reports `mode`, `default_symbol`, `prepared_companies`, and
+  `coverage`: the raw stored-article count per ticker from `repository.stored_article_counts()`
+  (one `GROUP BY ticker`, demo rows excluded). A client joins these to label search results —
+  *Prepared coverage · N articles*, *N stored articles*, or *No stored coverage* — without
+  reordering or filtering what the server returned. The response is advisory: the POST
+  restrictions it describes are enforced above regardless of what a client does with it.
+
+A company the universe contains but the database does not is served as a real, empty
+`CompanyOverview`, not a 404. A 404 from a read endpoint means the symbol is not a constituent at
+all.
 
 ## The pipeline
 
@@ -194,14 +241,73 @@ re-deriving them.
 `MarketAnalysisService.read_stored` serves it over `GET /api/v1/companies/{symbol}/overview`. That
 path fetches no news, scores no sentiment, runs no article analysis, and writes no row — it reads
 the SQLite corpus, recomputes the deterministic layers, and resolves the constituent from the local
-cache only, so opening the product costs neither ingestion nor LLM spend. Price history is the one
-exception, because it is not persisted: it is fetched live, and a failed fetch reports an
-unavailable chart rather than substituting a series. Refreshing coverage stays an explicit
-`POST /api/v1/analyze`.
+cache only, so opening the product costs neither ingestion nor LLM spend. Refreshing coverage stays
+an explicit `POST /api/v1/analyze`.
+
+Price history is the one exception, because it is not persisted. Two bounds keep that honest and
+cheap on a broadly searchable public deployment:
+
+- **Zero-coverage reads fetch nothing.** `read_stored` reads the stored corpus *first*; if a
+  company has no articles, no sentiment, and no analyses, the price fetch is skipped entirely and
+  the chart is reported `unavailable` with `NO_STORED_COVERAGE_PRICE_MESSAGE`. The page renders an
+  intentional empty state that shows no chart, so the fetch would be the read's only external call,
+  made purely to be discarded — once per visitor per empty company across a ~600-company universe.
+- **`CachingPriceProvider`** ([sources/prices.py](../../src/marketsentinel/sources/prices.py))
+  wraps the live provider with a per-process, in-memory, per-symbol TTL
+  (`price_cache_ttl_seconds`, default 900). No database column, no migration, no external cache; a
+  restart simply starts cold. Only successes are cached, so a transient outage cannot be pinned in
+  place for the whole TTL. A failed fetch still reports an unavailable chart rather than
+  substituting a series.
+
+Two further read-only projections sit beside the overview, each with its own endpoint rather than
+being bundled into that payload:
+
+- **Relevant News** (`/articles`) — every stored, sentiment-scored article inside a 366-day window,
+  assembled by [dashboard_articles.py](../../src/marketsentinel/dashboard_articles.py) and
+  `overview.build_relevant_news`. The window is the *only* bound: there is deliberately no row cap,
+  because a cap on top of a bounded window drops real rows while presenting the truncated page as
+  the whole corpus. Each row carries `has_compatible_analysis`, which reuses the same
+  `accepts_for_display` test applied everywhere else — never a looser notion of "analysed".
+- **One stored analysis** (`/articles/{article_id}/analysis`) — `read_article_analysis` returns an
+  already-stored record through `prepare_intelligence_card`, the same function behind Today's
+  Intelligence, so an analysis opened from the article browser is described exactly as it would be
+  anywhere else. It never *generates*: an article with no compatible stored analysis is a 404, not
+  an offer to create one, which is why it is safe on a public deployment.
 
 ### 8. Presentation
 
-`dashboard_*` modules are pure and read the JSON payload only:
+Both clients render conclusions the server already reached. The `dashboard_*` modules are the
+shared preparation layer: pure, payload-only, and reachable from either the Streamlit process
+(directly) or the React client (through the typed projections in
+[overview.py](../../src/marketsentinel/overview.py)).
+
+**The React client re-derives none of it.** [api/types.ts](../../frontend/src/api/types.ts) mirrors
+`domain.py` field for field and adds nothing. Which rows are developments and in what order, which
+reports are one development, which stored analyses may carry a chart marker, what may be called
+external support, and every impact/tier/corroboration label all arrive already decided; the client
+maps them to elements. What it *does* compute is confined to presentation with no product
+judgement in it: marker ordinals from the server's own marker order, client-side date/source/
+sentiment/analysed filtering over the already-returned article rows, and the coverage labels
+described above from server-supplied counts. It applies no threshold, no ranking, and no gate.
+
+Two deliberate divergences from the Streamlit surface, both display-only:
+
+- The pane titled **Top intelligence** is the `todays_intelligence` field. `prepare_todays_intelligence`
+  applies no date filter — it ranks every eligible stored analysis by magnitude, confidence,
+  evidence strength, source class, then time, and takes the strongest few — so the React label
+  states what the ranking actually is. The API field and function names are unchanged.
+- The price/sentiment chart encodes the two series differently rather than as two similar lines:
+  price is a continuous line, sentiment a diverging bar per observed day. Chart rows are the union
+  of price dates, sentiment dates, and marker dates, and sentiment is scored on calendar days while
+  price exists only on trading days; the price line therefore connects across the resulting
+  weekend gaps. It displays no value that was not observed — no dot is drawn on a null and the
+  tooltip still gates each series on its own presence.
+
+The pure preparation modules:
+
+- [dashboard_articles.py](../../src/marketsentinel/dashboard_articles.py) — pairs each stored
+  article with its compatibility flag for the Relevant News browser. Owns no rule: "analysed" is
+  the existing exact-equality compatibility test, applied by the repository read.
 
 - [dashboard_intelligence.py](../../src/marketsentinel/dashboard_intelligence.py) — Today's
   Intelligence, plus **the corroboration semantics the whole product shares**. Only articles cited
@@ -238,7 +344,8 @@ and the frozen gold fixtures with
 `sources/*` (news, GDELT, prices), `normalization.py`, `storage/sqlite.py`, `sentiment/finbert.py`,
 `aggregation/sentiment.py`, `forecasting/baseline.py` (an explicitly experimental five-session
 direction diagnostic, never a validated trading signal), `constituents.py`, `config.py`,
-`dashboard_charts.py`, and the FastAPI and Streamlit boundaries themselves.
+`dashboard_charts.py`, and the FastAPI, Streamlit, and React boundaries themselves — including the
+React client's presentation choices, which are deliberately not where the product's value lives.
 
 ## Backfill: a manual, one-shot path
 

@@ -18,18 +18,28 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Literal
 
+from marketsentinel.dashboard_articles import (
+    EMPTY_RELEVANT_NEWS_MESSAGE,
+    RELEVANT_NEWS_CAPTION,
+    ArticleRow,
+    prepare_relevant_news,
+)
 from marketsentinel.dashboard_charts import (
+    CHART_TIMEFRAMES,
     DEFAULT_TIMEFRAME,
-    TIMEFRAME_MONTHS,
     observed_sentiment_frame,
     price_frame_for_timeframe,
     select_meaningful_events,
     sentiment_coverage_note,
 )
 from marketsentinel.dashboard_intelligence import (
+    EMPTY_TODAYS_INTELLIGENCE_MESSAGE,
+    TODAYS_INTELLIGENCE_CAPTION,
     CorroborationSummary,
+    IntelligenceCard,
     corroboration_label,
     evidence_breakdown_label,
+    prepare_intelligence_card,
     prepare_todays_intelligence,
 )
 from marketsentinel.dashboard_market_view import build_market_view
@@ -40,6 +50,8 @@ from marketsentinel.dashboard_risks import (
 )
 from marketsentinel.domain import (
     AnalyzedEvent,
+    ArticleAnalysis,
+    ArticleRowView,
     ChartTimeframeView,
     ChartView,
     CompanyIntelligenceEvent,
@@ -53,8 +65,12 @@ from marketsentinel.domain import (
     MarketViewSummaryView,
     MaterialityDiagnosticsView,
     PriceHistory,
+    RelevantNewsView,
     RiskRowView,
     ScoredArticle,
+    StoredArticleAnalysisView,
+    TodaysIntelligenceCardView,
+    TodaysIntelligenceView,
     TopRisksView,
 )
 from marketsentinel.materiality import (
@@ -91,11 +107,12 @@ def build_company_overview(
     sentiment_points = _as_payload(daily_sentiment)
     developments = prepare_key_developments(intelligence_events)
     risk_rows = prepare_top_risk_rows(risks.top_risks)
+    intelligence_cards = prepare_todays_intelligence(intelligence_events)
     market_view = build_market_view(
         price_points=price_points,
         daily_sentiment=sentiment_points,
         risk_rows=risk_rows,
-        intelligence_cards=prepare_todays_intelligence(intelligence_events),
+        intelligence_cards=intelligence_cards,
     )
     return CompanyOverview(
         constituent=constituent,
@@ -134,6 +151,11 @@ def build_company_overview(
             caption=key_developments_caption(developments.diagnostics),
             empty_message=EMPTY_KEY_DEVELOPMENTS_MESSAGE,
         ),
+        todays_intelligence=TodaysIntelligenceView(
+            cards=[_intelligence_card_view(card) for card in intelligence_cards],
+            caption=TODAYS_INTELLIGENCE_CAPTION,
+            empty_message=EMPTY_TODAYS_INTELLIGENCE_MESSAGE,
+        ),
         top_risks=TopRisksView(
             rows=[
                 RiskRowView(
@@ -155,6 +177,71 @@ def build_company_overview(
     )
 
 
+def build_relevant_news(
+    *,
+    articles: Sequence[ScoredArticle],
+    compatible_analyses: Sequence[ArticleAnalysis],
+    window_days: int,
+) -> RelevantNewsView:
+    """Project stored, sentiment-scored articles into the read-only Relevant News surface.
+
+    Deliberately independent of ``build_company_overview``: a wider read window over raw stored
+    articles, not a derived intelligence surface, so it is served by its own endpoint rather than
+    folded into ``CompanyOverview``.
+    """
+
+    rows = prepare_relevant_news(articles, compatible_analyses)
+    return RelevantNewsView(
+        articles=[_article_row_view(row) for row in rows],
+        window_days=window_days,
+        caption=RELEVANT_NEWS_CAPTION,
+        empty_message=EMPTY_RELEVANT_NEWS_MESSAGE,
+    )
+
+
+def build_stored_article_analysis(
+    event: CompanyIntelligenceEvent,
+) -> StoredArticleAnalysisView:
+    """Project one compatible stored analysis into the article-detail contract.
+
+    Every label and count comes from ``prepare_intelligence_card`` -- the same function behind
+    Today's Intelligence -- so an analysis opened from the article browser is described exactly as
+    it would be described anywhere else in the product.
+    """
+
+    card = prepare_intelligence_card(event)
+    return StoredArticleAnalysisView(
+        article_id=event.article_id,
+        event=card.event,
+        impact_label=card.impact_label,
+        impact_score=card.impact_score,
+        primary_source_label=card.primary_source_label,
+        corroboration=_corroboration_view(
+            card.corroboration,
+            metric_label=card.corroboration_metric,
+            contradiction=card.contradiction_label,
+        ),
+    )
+
+
+def _article_row_view(row: ArticleRow) -> ArticleRowView:
+    article = row.article
+    return ArticleRowView(
+        article_id=article.fingerprint,
+        title=article.title,
+        url=article.url,
+        source=article.source,
+        published_at=article.published_at,
+        label=article.label,
+        sentiment_score=article.sentiment_score,
+        positive=article.positive,
+        negative=article.negative,
+        neutral=article.neutral,
+        is_demo=article.is_demo,
+        has_compatible_analysis=row.has_compatible_analysis,
+    )
+
+
 def _development_view(row: KeyDevelopmentRow) -> KeyDevelopmentView:
     """Serialise one prepared row. Labels already on the row are reused, never re-derived."""
 
@@ -173,6 +260,23 @@ def _development_view(row: KeyDevelopmentRow) -> KeyDevelopmentView:
             row.corroboration,
             metric_label=row.corroboration_metric,
             contradiction=row.contradiction_label,
+        ),
+    )
+
+
+def _intelligence_card_view(card: IntelligenceCard) -> TodaysIntelligenceCardView:
+    """Serialise one prepared card. Labels already on the card are reused, never re-derived."""
+
+    return TodaysIntelligenceCardView(
+        article_id=card.event.article_id,
+        event=card.event,
+        impact_label=card.impact_label,
+        impact_score=card.impact_score,
+        primary_source_label=card.primary_source_label,
+        corroboration=_corroboration_view(
+            card.corroboration,
+            metric_label=card.corroboration_metric,
+            contradiction=card.contradiction_label,
         ),
     )
 
@@ -234,7 +338,7 @@ def _chart_view(
                 event_payload=event_payload,
                 events_by_id=events_by_id,
             )
-            for timeframe in TIMEFRAME_MONTHS
+            for timeframe in CHART_TIMEFRAMES
         ],
     )
 

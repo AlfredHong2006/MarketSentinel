@@ -338,6 +338,21 @@ class SQLiteRepository:
                 break
         return results
 
+    def stored_article_counts(self) -> dict[str, int]:
+        """Raw stored-article count per ticker, demo rows excluded, ordered by ticker.
+
+        Feeds the capabilities endpoint's coverage map: a plain fact about the database so a
+        client can say which companies have stored coverage. Deliberately not an analysed count,
+        a browsable-row count, or any kind of quality metric.
+        """
+
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                "SELECT ticker, COUNT(*) FROM articles WHERE is_demo = 0 "
+                "GROUP BY ticker ORDER BY ticker"
+            ).fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
     def upsert_sentiments(self, articles: Iterable[ScoredArticle]) -> None:
         rows = [
             (
@@ -377,8 +392,15 @@ class SQLiteRepository:
         self,
         ticker: str,
         since: datetime | None = None,
-        limit: int = 500,
+        limit: int | None = 500,
     ) -> list[ScoredArticle]:
+        """Return stored scored articles, newest first.
+
+        ``limit=None`` returns every row matching the filters. A caller uses it when its window
+        is already the bound -- a row cap on top of a bounded window silently drops real stored
+        articles and makes a truncated page read as the whole corpus.
+        """
+
         query = """
             SELECT a.*, s.label, s.positive, s.negative, s.neutral,
                    s.sentiment_score, s.model_name, s.scored_at
@@ -390,8 +412,10 @@ class SQLiteRepository:
         if since is not None:
             query += " AND a.published_at >= ?"
             parameters.append(since.isoformat())
-        query += " ORDER BY a.published_at DESC LIMIT ?"
-        parameters.append(limit)
+        query += " ORDER BY a.published_at DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters.append(limit)
         with closing(self._connect()) as connection, connection:
             rows = connection.execute(query, parameters).fetchall()
         return [_row_to_scored_article(row) for row in rows]

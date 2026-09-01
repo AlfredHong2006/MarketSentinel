@@ -30,6 +30,8 @@ from marketsentinel.dashboard_charts import (
     select_meaningful_events,
 )
 from marketsentinel.dashboard_intelligence import (
+    EMPTY_TODAYS_INTELLIGENCE_MESSAGE,
+    TODAYS_INTELLIGENCE_CAPTION,
     corroboration_label,
     evidence_breakdown_label,
     prepare_todays_intelligence,
@@ -331,6 +333,45 @@ def test_a_contradicted_claim_is_carried_forward_rather_than_deleted() -> None:
     assert disputed.corroboration.contradicted_claims == 1
 
 
+def test_todays_intelligence_projection_repeats_the_prepared_cards_exactly() -> None:
+    """The API must not be able to hold a second opinion about Today's Intelligence either."""
+
+    events = sample_events()
+    expected = prepare_todays_intelligence(events)
+    section = build_overview(events).todays_intelligence
+
+    assert [card.article_id for card in section.cards] == [
+        card.event.article_id for card in expected
+    ]
+    assert section.caption == TODAYS_INTELLIGENCE_CAPTION
+    assert section.empty_message == EMPTY_TODAYS_INTELLIGENCE_MESSAGE
+    assert len(section.cards) <= 4
+
+    for actual, want in zip(section.cards, expected, strict=True):
+        assert actual.event == want.event
+        assert actual.impact_label == want.impact_label
+        assert actual.impact_score == want.impact_score
+        assert actual.primary_source_label == want.primary_source_label
+        assert actual.corroboration.metric_label == want.corroboration_metric
+        assert actual.corroboration.contradiction_label == want.contradiction_label
+        assert actual.corroboration.summary_label == corroboration_label(want.corroboration)
+        assert actual.corroboration.breakdown_label == evidence_breakdown_label(want.corroboration)
+        assert actual.corroboration.external_sources == want.corroboration.external_sources
+        assert actual.corroboration.comparison_articles == want.corroboration.comparison_articles
+        assert actual.corroboration.corroborated_claims == want.corroboration.corroborated_claims
+        assert actual.corroboration.contradicted_claims == want.corroboration.contradicted_claims
+        assert actual.corroboration.unresolved_claims == want.corroboration.unresolved_claims
+        assert actual.corroboration.supporting_articles == want.corroboration.supporting_articles
+        assert actual.corroboration.primary_is_official == want.corroboration.primary_is_official
+
+
+def test_todays_intelligence_reports_the_shared_empty_message_when_nothing_qualifies() -> None:
+    section = build_overview([]).todays_intelligence
+
+    assert section.cards == []
+    assert section.empty_message == EMPTY_TODAYS_INTELLIGENCE_MESSAGE
+
+
 def test_top_risks_projection_repeats_the_prepared_rows_without_reordering() -> None:
     risks = sample_risks()
     expected = prepare_top_risk_rows(risks.top_risks)
@@ -388,7 +429,7 @@ def test_chart_markers_repeat_the_shared_meaningful_event_floor_per_timeframe() 
     marker_payload = [item.model_dump(mode="json") for item in markers]
 
     assert overview.chart.status == "available"
-    assert [view.timeframe for view in overview.chart.timeframes] == ["1M", "3M", "6M", "1Y"]
+    assert [view.timeframe for view in overview.chart.timeframes] == ["1M", "3M", "6M", "1Y", "MAX"]
     assert overview.chart.default_timeframe == "6M"
     for view in overview.chart.timeframes:
         frame = price_frame_for_timeframe(price_payload, view.timeframe)
@@ -401,6 +442,24 @@ def test_chart_markers_repeat_the_shared_meaningful_event_floor_per_timeframe() 
         assert "m-trivial" not in {item.article_id for item in view.markers}
     assert {item.article_id for item in overview.chart.timeframes[0].markers} == {"m-recent"}
     assert "m-old" in {item.article_id for item in overview.chart.timeframes[-1].markers}
+
+
+def test_the_max_timeframe_covers_every_observation_without_a_calendar_cutoff() -> None:
+    """MAX is a window, not a new selection rule: the widest one, still server-selected.
+
+    A client must never widen a chart by choosing its own markers, so MAX exists server-side and
+    is subject to the same shared meaningful-event floor as every other timeframe.
+    """
+
+    history = make_price_history(days=400)
+    overview = build_overview([], price_history=history)
+    frames = {view.timeframe: view for view in overview.chart.timeframes}
+
+    assert frames["MAX"].price_observations == len(history.points)
+    assert frames["MAX"].start_date == history.points[0].date
+    assert frames["MAX"].end_date == history.points[-1].date
+    # Widest of them all, and never narrower than the longest calendar preset.
+    assert frames["MAX"].price_observations >= frames["1Y"].price_observations
 
 
 def test_a_failed_price_fetch_reports_an_unavailable_chart_and_invents_nothing() -> None:
@@ -662,6 +721,30 @@ def test_read_stored_survives_a_failed_price_fetch_without_failing_the_request(
     assert overview.coverage.analysed_articles == 1
 
 
+def test_read_stored_skips_the_price_fetch_when_nothing_is_stored(writable_tmp_path) -> None:
+    """A zero-coverage company renders an intentional empty state, so its read must make no
+    external call at all -- the price series would be this read's only third-party request,
+    fetched purely to be discarded behind a page that never shows a chart."""
+
+    from marketsentinel.service import NO_STORED_COVERAGE_PRICE_MESSAGE
+
+    repository = SQLiteRepository(writable_tmp_path / "market.db")
+    repository.initialize()
+    prices = FakePrices()
+    service = read_only_service(repository, prices)
+
+    overview = service.read_stored("ACME")
+
+    assert prices.calls == 0
+    assert overview.coverage.articles == 0
+    assert overview.coverage.analysed_articles == 0
+    assert overview.key_developments.rows == []
+    assert overview.top_risks.rows == []
+    assert overview.chart.status == "unavailable"
+    assert overview.chart.message == NO_STORED_COVERAGE_PRICE_MESSAGE
+    assert overview.chart.points == []
+
+
 def test_stale_stored_analyses_are_excluded_by_the_compatibility_rule(writable_tmp_path) -> None:
     """The read path applies the same exact-equality contract the refresh path applies.
 
@@ -720,6 +803,7 @@ def test_overview_endpoint_serves_the_projection_over_a_get(writable_tmp_path) -
     assert CompanyOverview.model_validate_json(response.text).constituent.symbol == "ACME"
     assert payload["data_source"] == "stored"
     assert payload["key_developments"]["caption"]
+    assert payload["todays_intelligence"]["caption"]
     assert "forecast" not in payload
     assert "automatic_analysis" not in payload
 

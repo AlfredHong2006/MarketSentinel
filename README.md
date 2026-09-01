@@ -13,14 +13,16 @@ event, merged across syndicated reporting, passed through a four-condition mater
 annotated with the publishers that corroborated it.
 
 **125-row hand-labelled evaluation** · **raw gate P 0.907 / R 0.942** · **0 unexplained
-disagreements** (in-sample) · **711 deterministic tests** · **evaluation runs offline from a fresh
+disagreements** (in-sample) · **825 deterministic tests** · **evaluation runs offline from a fresh
 clone**
 
-![MarketSentinel market overview for NVDA: price, news sentiment, and analysed-event markers on one chart, above a plain-language Current Market View](docs/images/market-overview.png)
+![MarketSentinel company overview for NVDA: four separate market-view statements, ranked Top Intelligence cards, Key Developments beside Top Risks, and a price chart carrying diverging sentiment bars and numbered event markers](docs/images/02_mainnvda.png)
 
-*One company, one screen, with toggleable layers and timeframes. Sentiment points are **observed
-only** — dates with no coverage are absent, never interpolated to neutral — and the Current Market
-View reports each finding separately rather than as one blended score.*
+*One company, one screen. The four market-view statements stay **separate** rather than being fused
+into a score; 130 analysed articles compress to 54 developments; and the chart carries price as a
+continuous line, daily sentiment as diverging bars, and numbered markers for the events that clear
+the shared materiality floor. Sentiment points are **observed only** — dates with no coverage are
+absent, never interpolated to neutral.*
 
 ---
 
@@ -30,7 +32,7 @@ View reports each finding separately rather than as one blended score.*
 | --- | --- |
 | **Current Market View** | Price move, recent observed sentiment, the highest evidenced downside concern, and the latest material event — four separate statements, not a verdict. |
 | **Key Developments** | The strongest material developments, ranked. One row is one *underlying event*, not one article. |
-| **Today's Intelligence** | The evidence behind each event: corroborating publishers, transmission channels, related companies, full stored analysis. |
+| **Top Intelligence** | The evidence behind each event: corroborating publishers, transmission channels, related companies, full stored analysis. |
 | **Top Risks** | Downside themes ranked by a bounded 0–100 **Concern Index**, each backed by named signals, publisher counts, and a dated link. |
 
 > **Not financial advice.** An educational portfolio project. Nothing here is a price prediction,
@@ -79,45 +81,74 @@ sector membership is insufficient.
 
 ## Key Developments
 
-![Key Developments for NVDA: ranked development cards with Impact, Direction, Persistence, and Corroboration, above a funnel caption](docs/images/key-developments.png)
-
-Each card is one underlying development, with **Impact**, **Direction**, **Persistence**, and
+Each row is one underlying development, with **Impact**, **Direction**, **Persistence**, and
 **Corroboration** stated separately rather than fused into one number. A group of several reports
-expands in place (`All 3 reports · 3 publishers`). Two details worth noting above:
+collapses to one row (`1 report · 1 publisher`, or more where syndication was merged). Two details
+worth noting in the overview above:
 
-- The funnel caption (`131 analysed → 58 material → 53 developments · showing the strongest 8`)
+- The funnel caption (`130 analysed → 59 material → 54 developments · showing the strongest 8`)
   states what was examined, what passed the gate, and how many rows grouping merged away. These are
   **live-database** figures from the moment of capture, deliberately larger than the frozen 125-row
   evaluation snapshot below — the corpus kept collecting after the gold labels were frozen.
-- Corroboration reads `None found` where a claim has no external support. A well-evidenced row and
-  a single-publisher row look different.
+- Corroboration is stated per row, so a well-evidenced development and a single-publisher one do
+  not look alike.
 
 ---
 
-## Today's Intelligence
+## The evidence behind a claim
 
-![Today's Intelligence for NVDA: per-event evidence cards showing corroboration, transmission channels, and related companies](docs/images/todays-intelligence.png)
+![Stored analysis detail for an NVDA earnings report: two important claims, each corroborated with a confidence figure and the specific publishers cited, followed by corroboration counts, transmission channels, and related companies](docs/images/02_keydevdetail.png)
 
-The audit trail. Each event states its corroboration in plain words — `1 claim corroborated ·
-1 external source`, or `Supported only by the same publisher` — plus transmission channels, which
-read `None identified from supplied evidence.` when the model found none. Related companies carry a
-stated mechanism per name, not a sector label. **View analysis** expands the full stored record and
-**Original article** links out, so any row can be checked against its source. Ordering is stated in
-the UI: magnitude, extraction confidence, evidence strength, source class, publication time.
+Selecting anything on the page opens its **stored analysis** — the audit trail that makes a verdict
+arguable. Each extracted claim carries its own status and confidence, and lists the *specific*
+articles that supported it (`WSJ`, `Reuters`, `Financial Times`), not a count. The corroboration
+line reconciles exactly: `5 comparison articles evaluated · 2 of 2 claims corroborated ·
+0 contradicted · 0 unsupported or uncertain` — comparison material examined is reported separately
+from support actually found. Transmission channels and related companies each state a concrete
+mechanism rather than a sector label, and **Original article** links back to the source.
+
+---
+
+## Top Intelligence
+
+![Top Intelligence detail for the Nvidia–Hugging Face acquisition: one corroborated claim at 90% confidence citing The Information, corroboration counts, transmission channels, and related companies](docs/images/02_topintelligence.png)
+
+The most material stored analyses, ranked by magnitude, extraction confidence, evidence strength,
+source class, then publication time — an ordering the UI states rather than hides. The detail shows
+why a claim is believed: here a single cited source at 90% confidence, with the reasoning noting
+that a competing article gave a different figure. `marker 8` ties the row to its numbered point on
+the chart, so the timeline and the evidence are the same object.
 
 ---
 
 ## Top Risks
 
-![Top Risks for NVDA: downside themes ranked by Concern Index with supporting signal counts and dated sources](docs/images/top-risks.png)
+![Ranked risk detail for NVDA: Regulatory & government action at rank 1 of 4, band Moderate, with a one-sentence mechanism, 8 supporting signals across 4 groups, and the publishers that evidenced it](docs/images/02_toprisk.png)
 
-Stored events map through a **fixed taxonomy** into ranked downside themes. Each row carries the
-mechanism in one sentence, the number of supporting signals, how many publishers they span, the
-latest date, and a source link.
+Stored events map through a **fixed taxonomy** into ranked downside themes. Each theme carries the
+mechanism in one sentence, how many signals support it, how many event groups they span, the dates
+it was first and last evidenced, and the publishers behind it.
 
 > The **Concern Index** is an evidence-weighted salience ranking. It is not a probability, an
 > expected loss, or a price prediction, and it is not comparable across companies. The UI says so
 > too.
+
+---
+
+## Relevant News drills into the stored analysis
+
+![Stored analysis opened from a Relevant News row: one corroborated claim at 85% confidence citing CNBC and Reuters, corroboration counts, and an explicit Uncertainties section](docs/images/02_storedanalysis.png)
+
+Below the chart, **Relevant News** lists every stored article for the company across the full
+366-day window — filterable by date, source, sentiment, and whether it was analysed. A row marked
+*Analysed* opens **the persisted claim/evidence analysis for that article**, without leaving the
+page and without generating anything new: the record shown was produced once and stored, so opening
+it costs nothing and always returns the same verdict.
+
+That makes the corpus browsable rather than merely summarised — a reader can start from any single
+headline and reach the same audited structure the ranked surfaces are built from. Note the
+**Uncertainties** section: what the extraction could *not* establish is surfaced, not hidden, and
+`Original article` remains a separate link out to the publisher.
 
 ---
 
@@ -197,9 +228,35 @@ flowchart TB
     KD --> API["FastAPI service"]
     RSK --> API
     AGG --> API
-    API --> UI["Streamlit + Plotly dashboard"]
+    API --> WEB["React + Recharts (public, read-only)"]
+    API --> UI["Streamlit + Plotly (private, operational)"]
     API --> DIAG["Research diagnostics"]
 ```
+
+### Two clients, one set of conclusions
+
+| | **React** (`frontend/`) | **Streamlit** (`dashboard.py`) |
+| --- | --- | --- |
+| Purpose | The polished public read experience | Private/local operational surface |
+| HTTP verbs | **GET only — no write client exists** | GET + the two POSTs |
+| Can refresh coverage / run analysis | No | Yes |
+| Deployed as | Public demo | Run locally |
+
+Both read the same endpoints and render the same server-owned conclusions. **Neither re-derives
+materiality, grouping, ranking, or corroboration** — [frontend/src/api/types.ts](frontend/src/api/types.ts)
+mirrors `domain.py` field for field and adds nothing, so which rows are developments, in what
+order, and with what labels all arrive already decided.
+
+**Public mode** (`MARKETSENTINEL_PUBLIC_MODE=true`) closes exactly one thing: the two endpoints
+that spend money return `404`, enforced at the API boundary rather than by hiding a button. Search
+and every read stay open across the **full S&P 500 / FTSE 100 universe** — a public deployment is
+genuinely searchable, not narrowed to a demo pair. `/api/v1/capabilities` reports the raw stored
+article count per ticker so results can be labelled *Prepared coverage · N articles*, *N stored
+articles*, or *No stored coverage*; a supported company with nothing stored yet renders an honest
+empty state rather than a 404, and skips the price fetch entirely.
+
+`NVDA` and `PFE` are simply the two companies with deliberate deep backfill — an editorial label,
+not an allowlist and not a computed quality score.
 
 A `src/` layout with explicit boundaries (abridged — key modules only):
 
@@ -218,8 +275,15 @@ src/marketsentinel/
 ├── risk_signals.py         # Risk-signal extraction
 ├── risk_scoring.py         # Bounded Concern Index aggregation
 ├── dashboard*.py           # Streamlit client and pure view models
+├── overview.py             # Typed Company Overview projection for non-Python clients
 ├── domain.py               # Pydantic domain contracts
 └── service.py              # End-to-end orchestration
+
+frontend/                   # React + Vite public read client
+└── src/
+    ├── api/                # Typed mirror of domain.py + GET-only client
+    ├── components/         # Panes: chart, developments, risks, relevant news, detail
+    └── ds/                 # Vendored design tokens
 ```
 
 - **Deterministic where it matters.** Stages 4–7 contain no LLM call, no embedding, and no fuzzy
@@ -302,7 +366,7 @@ uv run ruff format --check .
 uv run pytest --cov=marketsentinel --cov-report=term-missing
 ```
 
-**711 tests pass** with lint and formatting clean; CI runs all three on every push and pull request
+**825 tests pass** with lint and formatting clean; CI runs all three on every push and pull request
 against a locked dependency set. Coverage spans FinBERT label mapping, normalization and
 deduplication, SQLite round-trips, chronological forecast targets, the three-stage analysis
 contracts, risk scoring, the materiality gate and grouping, the gold-census harness, and the full
@@ -334,7 +398,19 @@ uv run uvicorn marketsentinel.api.app:app --host 127.0.0.1 --port 8000 &
 uv run streamlit run src/marketsentinel/dashboard.py --server.port=8501
 ```
 
-Dashboard at `http://localhost:8501`; API docs at `http://127.0.0.1:8000/docs`.
+Streamlit dashboard at `http://localhost:8501`; API docs at `http://127.0.0.1:8000/docs`.
+
+To run the React client (Node 18+), against the same API:
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:5173
+```
+
+It needs no key and writes nothing. Point it elsewhere with `VITE_API_BASE_URL`, and add that
+origin to `MARKETSENTINEL_CORS_ALLOW_ORIGINS`. To preview the public read-only behaviour, start the
+API with `MARKETSENTINEL_PUBLIC_MODE=true`.
 
 The first analysis with unscored articles downloads the public `ProsusAI/finbert` model and takes
 longer; it loads once per API process and needs no Hugging Face token. **Event intelligence
@@ -353,6 +429,11 @@ Settings use the `MARKETSENTINEL_` prefix and may be placed in `.env`. The ones 
 | `DATABASE_PATH` | `data/marketsentinel.db` | Local SQLite runtime database |
 | `FINBERT_DEVICE` | `auto` | CPU/CUDA selection; CPU is the fallback |
 | `ALLOW_DEMO_FALLBACK` | `true` | Permit visibly labelled synthetic fallback headlines |
+| `PUBLIC_MODE` | `false` | Read-only deployment: both spending `POST`s return `404` |
+| `PUBLIC_PREPARED_COMPANIES` | `["NVDA","PFE"]` | Editorial "prepared coverage" label — not an allowlist |
+| `PUBLIC_DEFAULT_SYMBOL` | `NVDA` | Company the public client opens on |
+| `PRICE_CACHE_TTL_SECONDS` | `900` | In-process price cache; `0` disables |
+| `CORS_ALLOW_ORIGINS` | local ports | Set to the real origin for a deployed client |
 
 See [.env.example](.env.example) for the full configuration, including FinBERT batch size, news
 lookback windows, and GDELT request pacing. `.env`, SQLite databases, and caches are gitignored.
@@ -361,17 +442,27 @@ lookback windows, and GDELT request pacing. `.env`, SQLite databases, and caches
 
 ```text
 GET  /health
-GET  /api/v1/constituents/search?q=Apple&market=S%26P%20500&limit=20
-POST /api/v1/analyze              # full company analysis
-POST /api/v1/articles/analyze     # manual per-article intelligence
+GET  /api/v1/capabilities                                    # mode, prepared set, stored counts
+GET  /api/v1/constituents/search?q=Apple&market=S%26P%20500  # full universe, both modes
+GET  /api/v1/companies/{symbol}/overview                     # the Company Overview projection
+GET  /api/v1/companies/{symbol}/articles                     # stored scored articles
+GET  /api/v1/companies/{symbol}/articles/{id}/analysis       # one stored analysis, never generated
+
+POST /api/v1/analyze                                         # refreshes coverage    — 404 in public mode
+POST /api/v1/articles/analyze                                # generates an analysis — 404 in public mode
 ```
+
+Every `GET` is a genuine read: no ingestion, no scoring, no analysis, no writes. The two `POST`
+routes are the only ones that spend, and public mode closes both server-side. Responses over 1 KB
+are gzip-compressed.
 
 ### Stack
 
-**Python 3.11** · **FastAPI** + **Uvicorn** · **Streamlit** + **Plotly** · **Pydantic v2** ·
-**SQLite** · **transformers** + **PyTorch** (FinBERT) · **scikit-learn** · **pandas** / **NumPy** ·
-**OpenAI** typed structured outputs · **httpx** / **requests** / **feedparser** · **tenacity** ·
-**uv** (locked dependencies) · **ruff** · **pytest** + pytest-cov · **GitHub Actions**.
+**Python 3.11** · **FastAPI** + **Uvicorn** · **React 18** + **TypeScript** + **Vite** +
+**Recharts** · **Streamlit** + **Plotly** · **Pydantic v2** · **SQLite** · **transformers** +
+**PyTorch** (FinBERT) · **scikit-learn** · **pandas** / **NumPy** · **OpenAI** typed structured
+outputs · **httpx** / **requests** / **feedparser** · **tenacity** · **uv** (locked dependencies) ·
+**ruff** · **pytest** + pytest-cov · **ESLint** · **GitHub Actions**.
 
 ---
 
