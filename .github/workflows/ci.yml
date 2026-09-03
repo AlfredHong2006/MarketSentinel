@@ -23,8 +23,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      # --all-extras keeps CI installing the full development environment. The ml and dashboard
+      # extras are excluded from the default install so the public deployment image stays lean,
+      # but the test suite still exercises the Streamlit client, so CI needs them.
       - name: Install Python 3.11 and dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --all-extras --dev
 
       - name: Lint
         run: uv run ruff check .

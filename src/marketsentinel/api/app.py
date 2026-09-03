@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
@@ -341,6 +342,22 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
         refuse_when_public()
         return services.article_events.analyze_article(request.article_id)
+
+    # Mounted last, deliberately. Starlette matches routes in registration order, so every route
+    # above -- /health, /docs, and all of /api/v1 -- still wins before the catch-all reaches the
+    # static client. Serving the built client from the API process is what makes a single-service
+    # deployment same-origin: the browser then issues relative requests and CORS is not involved.
+    #
+    # Unset by default, so a local run is unchanged and the Vite dev server keeps owning the
+    # frontend. A configured directory that does not exist is a deployment mistake worth failing
+    # loudly on at startup, rather than silently serving 404s for every page.
+    if settings.frontend_dist_path is not None:
+        dist = settings.frontend_dist_path
+        if not (dist / "index.html").is_file():
+            raise RuntimeError(
+                f"frontend_dist_path {dist} does not contain index.html; build the client first"
+            )
+        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
 
     return app
 

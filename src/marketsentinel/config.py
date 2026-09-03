@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     demo_news_path: Path = Path("data/demo/articles.json")
     api_base_url: str = "http://127.0.0.1:8000"
 
+    # Directory of a built React client to serve from the API process itself. Unset by default,
+    # so a local run keeps the two processes separate and the Vite dev server owns the frontend.
+    # A single-service deployment sets it, which puts the client and the API on one origin --
+    # the browser then makes same-origin requests and CORS stops being involved at all.
+    frontend_dist_path: Path | None = None
+
     # Public deployment mode. Off by default, so a local/private run keeps every existing
     # capability. When on, the API refuses the two spending endpoints (POST /analyze and
     # POST /articles/analyze) -- enforced at the API boundary, never in the client, because the

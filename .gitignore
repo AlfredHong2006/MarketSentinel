@@ -30,6 +30,11 @@ dist/
 .env
 .env.*
 !.env.example
+# Build-time client config for the single-service deployment. Contains no secret: it only sets an
+# empty API base URL so the built client makes same-origin requests. It must be committed, or a
+# deployment build would silently bake in the localhost fallback and the public site would call
+# 127.0.0.1 from the visitor's browser.
+!frontend/.env.production
 .streamlit/secrets.toml
 
 # Runtime data and downloaded artifacts
@@ -40,6 +45,14 @@ data/*.sqlite*
 data/constituents_cache.json
 data/test-runtime/
 models/
+
+# The deployment artifacts under deploy/ are the deliberate exception to the rule above. They are
+# frozen, reviewed snapshots -- not the live runtime database -- produced by
+# scripts/build_deployment_snapshot.py and committed on purpose so the public deployment builds
+# from the repository alone. The live data/ files stay ignored and keep growing independently.
+# Anything genuinely transient that lands in deploy/ is still excluded:
+deploy/*.db-wal
+deploy/*.db-shm
 
 # Editors and operating systems
 .idea/

@@ -35,12 +35,25 @@ dependencies = [
     "pydantic-settings>=2.10",
     "requests>=2.32",
     "scikit-learn>=1.6",
-    "streamlit>=1.47",
     "tenacity>=9.1",
-    "torch>=2.7",
-    "transformers>=4.50,<5",
     "uvicorn[standard]>=0.35",
     "yfinance>=0.2.65",
+]
+
+# Optional extras keep the public read-only deployment lean. The public API is GET-only: it
+# never scores sentiment (POST /api/v1/analyze returns 404 in public mode) and never imports
+# the Streamlit client, so shipping PyTorch -- which on Linux drags in ~3GB of nvidia-* CUDA
+# wheels -- would install code that cannot execute. Verified empirically: importing
+# marketsentinel.api.app loads neither torch, transformers, nor streamlit.
+#
+# Full local development installs everything: uv sync --all-extras --dev
+[project.optional-dependencies]
+ml = [
+    "torch>=2.7",
+    "transformers>=4.50,<5",
+]
+dashboard = [
+    "streamlit>=1.47",
 ]
 
 [project.urls]

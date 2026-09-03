@@ -1,0 +1,4243 @@
+{
+  "constituents": [
+    {
+      "symbol": "III",
+      "yahoo_symbol": "III.L",
+      "name": "3i",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ABDN",
+      "yahoo_symbol": "ABDN.L",
+      "name": "Aberdeen Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ADM",
+      "yahoo_symbol": "ADM.L",
+      "name": "Admiral Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "AAF",
+      "yahoo_symbol": "AAF.L",
+      "name": "Airtel Africa",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ALW",
+      "yahoo_symbol": "ALW.L",
+      "name": "Alliance Witan",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "AAL",
+      "yahoo_symbol": "AAL.L",
+      "name": "Anglo American plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ANTO",
+      "yahoo_symbol": "ANTO.L",
+      "name": "Antofagasta plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ABF",
+      "yahoo_symbol": "ABF.L",
+      "name": "Associated British Foods",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "AZN",
+      "yahoo_symbol": "AZN.L",
+      "name": "AstraZeneca",
+      "market": "FTSE 100",
+      "aliases": [
+        "AstraZeneca PLC"
+      ]
+    },
+    {
+      "symbol": "AUTO",
+      "yahoo_symbol": "AUTO.L",
+      "name": "Autotrader Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "AV",
+      "yahoo_symbol": "AV.L",
+      "name": "Aviva",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BA",
+      "yahoo_symbol": "BA.L",
+      "name": "BAE Systems",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BP",
+      "yahoo_symbol": "BP.L",
+      "name": "BP",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BT.A",
+      "yahoo_symbol": "BT.A.L",
+      "name": "BT Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BAB",
+      "yahoo_symbol": "BAB.L",
+      "name": "Babcock International",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BARC",
+      "yahoo_symbol": "BARC.L",
+      "name": "Barclays",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BTRW",
+      "yahoo_symbol": "BTRW.L",
+      "name": "Barratt Redrow",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BEZ",
+      "yahoo_symbol": "BEZ.L",
+      "name": "Beazley",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BATS",
+      "yahoo_symbol": "BATS.L",
+      "name": "British American Tobacco",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BLND",
+      "yahoo_symbol": "BLND.L",
+      "name": "British Land",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BNZL",
+      "yahoo_symbol": "BNZL.L",
+      "name": "Bunzl",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BRBY",
+      "yahoo_symbol": "BRBY.L",
+      "name": "Burberry Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CNA",
+      "yahoo_symbol": "CNA.L",
+      "name": "Centrica",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CCEP",
+      "yahoo_symbol": "CCEP.L",
+      "name": "Coca-Cola Europacific Partners",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CCH",
+      "yahoo_symbol": "CCH.L",
+      "name": "Coca-Cola HBC",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CPG",
+      "yahoo_symbol": "CPG.L",
+      "name": "Compass Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CCC",
+      "yahoo_symbol": "CCC.L",
+      "name": "Computacenter",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CTEC",
+      "yahoo_symbol": "CTEC.L",
+      "name": "Convatec",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "CRDA",
+      "yahoo_symbol": "CRDA.L",
+      "name": "Croda International",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "DCC",
+      "yahoo_symbol": "DCC.L",
+      "name": "DCC Energy",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "DGE",
+      "yahoo_symbol": "DGE.L",
+      "name": "Diageo",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "DPLM",
+      "yahoo_symbol": "DPLM.L",
+      "name": "Diploma",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "EDV",
+      "yahoo_symbol": "EDV.L",
+      "name": "Endeavour Mining",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ENT",
+      "yahoo_symbol": "ENT.L",
+      "name": "Entain",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "EXPN",
+      "yahoo_symbol": "EXPN.L",
+      "name": "Experian",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "FCIT",
+      "yahoo_symbol": "FCIT.L",
+      "name": "F & C Investment Trust",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "FRES",
+      "yahoo_symbol": "FRES.L",
+      "name": "Fresnillo plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "GSK",
+      "yahoo_symbol": "GSK.L",
+      "name": "GSK plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "GAW",
+      "yahoo_symbol": "GAW.L",
+      "name": "Games Workshop",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "GLEN",
+      "yahoo_symbol": "GLEN.L",
+      "name": "Glencore",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "HSBA",
+      "yahoo_symbol": "HSBA.L",
+      "name": "HSBC",
+      "market": "FTSE 100",
+      "aliases": [
+        "HSBC"
+      ]
+    },
+    {
+      "symbol": "HLN",
+      "yahoo_symbol": "HLN.L",
+      "name": "Haleon",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "HLMA",
+      "yahoo_symbol": "HLMA.L",
+      "name": "Halma plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "HSX",
+      "yahoo_symbol": "HSX.L",
+      "name": "Hiscox",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "HWDN",
+      "yahoo_symbol": "HWDN.L",
+      "name": "Howdens Joinery",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ICG",
+      "yahoo_symbol": "ICG.L",
+      "name": "ICG",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "IGG",
+      "yahoo_symbol": "IGG.L",
+      "name": "IG Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "IHG",
+      "yahoo_symbol": "IHG.L",
+      "name": "IHG Hotels & Resorts",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "IMI",
+      "yahoo_symbol": "IMI.L",
+      "name": "IMI",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "IMB",
+      "yahoo_symbol": "IMB.L",
+      "name": "Imperial Brands",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "INF",
+      "yahoo_symbol": "INF.L",
+      "name": "Informa",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "IAG",
+      "yahoo_symbol": "IAG.L",
+      "name": "International Airlines Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ITRK",
+      "yahoo_symbol": "ITRK.L",
+      "name": "Intertek",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "INVP",
+      "yahoo_symbol": "INVP.L",
+      "name": "Investec",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "JD",
+      "yahoo_symbol": "JD.L",
+      "name": "JD Sports",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "KGF",
+      "yahoo_symbol": "KGF.L",
+      "name": "Kingfisher plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "LAND",
+      "yahoo_symbol": "LAND.L",
+      "name": "Land Securities",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "LGEN",
+      "yahoo_symbol": "LGEN.L",
+      "name": "Legal & General",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BGEO",
+      "yahoo_symbol": "BGEO.L",
+      "name": "Lion Finance Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "LLOY",
+      "yahoo_symbol": "LLOY.L",
+      "name": "Lloyds Banking Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "LSEG",
+      "yahoo_symbol": "LSEG.L",
+      "name": "London Stock Exchange Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "LMP",
+      "yahoo_symbol": "LMP.L",
+      "name": "LondonMetric Property",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "MNG",
+      "yahoo_symbol": "MNG.L",
+      "name": "M&G",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "MKS",
+      "yahoo_symbol": "MKS.L",
+      "name": "Marks & Spencer",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "MRO",
+      "yahoo_symbol": "MRO.L",
+      "name": "Melrose Industries",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "MTLN",
+      "yahoo_symbol": "MTLN.L",
+      "name": "Metlen Energy & Metals",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "NWG",
+      "yahoo_symbol": "NWG.L",
+      "name": "NatWest Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "NG",
+      "yahoo_symbol": "NG.L",
+      "name": "National Grid plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "NXT",
+      "yahoo_symbol": "NXT.L",
+      "name": "Next plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "PSON",
+      "yahoo_symbol": "PSON.L",
+      "name": "Pearson plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "PSH",
+      "yahoo_symbol": "PSH.L",
+      "name": "Pershing Square Holdings",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "PSN",
+      "yahoo_symbol": "PSN.L",
+      "name": "Persimmon",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "PCT",
+      "yahoo_symbol": "PCT.L",
+      "name": "Polar Capital Technology Trust",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "PRU",
+      "yahoo_symbol": "PRU.L",
+      "name": "Prudential plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "REL",
+      "yahoo_symbol": "REL.L",
+      "name": "RELX",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "RKT",
+      "yahoo_symbol": "RKT.L",
+      "name": "Reckitt",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "RTO",
+      "yahoo_symbol": "RTO.L",
+      "name": "Rentokil Initial",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "RIO",
+      "yahoo_symbol": "RIO.L",
+      "name": "Rio Tinto",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "RR",
+      "yahoo_symbol": "RR.L",
+      "name": "Rolls-Royce Holdings",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SSE",
+      "yahoo_symbol": "SSE.L",
+      "name": "SSE plc",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SGE",
+      "yahoo_symbol": "SGE.L",
+      "name": "Sage Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SBRY",
+      "yahoo_symbol": "SBRY.L",
+      "name": "Sainsbury's",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SDR",
+      "yahoo_symbol": "SDR.L",
+      "name": "Schroders",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SMT",
+      "yahoo_symbol": "SMT.L",
+      "name": "Scottish Mortgage Investment Trust",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SGRO",
+      "yahoo_symbol": "SGRO.L",
+      "name": "Segro",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SVT",
+      "yahoo_symbol": "SVT.L",
+      "name": "Severn Trent",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SHEL",
+      "yahoo_symbol": "SHEL.L",
+      "name": "Shell plc",
+      "market": "FTSE 100",
+      "aliases": [
+        "Shell plc"
+      ]
+    },
+    {
+      "symbol": "SN",
+      "yahoo_symbol": "SN.L",
+      "name": "Smith & Nephew",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SMIN",
+      "yahoo_symbol": "SMIN.L",
+      "name": "Smiths Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SPX",
+      "yahoo_symbol": "SPX.L",
+      "name": "Spirax Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "STJ",
+      "yahoo_symbol": "STJ.L",
+      "name": "St. James's Place",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "STAN",
+      "yahoo_symbol": "STAN.L",
+      "name": "Standard Chartered",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "SDLF",
+      "yahoo_symbol": "SDLF.L",
+      "name": "Standard Life",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "TSCO",
+      "yahoo_symbol": "TSCO.L",
+      "name": "Tesco",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "BBOX",
+      "yahoo_symbol": "BBOX.L",
+      "name": "Tritax Big Box REIT",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "ULVR",
+      "yahoo_symbol": "ULVR.L",
+      "name": "Unilever",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "UU",
+      "yahoo_symbol": "UU.L",
+      "name": "United Utilities",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "VOD",
+      "yahoo_symbol": "VOD.L",
+      "name": "Vodafone Group",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "WEIR",
+      "yahoo_symbol": "WEIR.L",
+      "name": "Weir",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "WTB",
+      "yahoo_symbol": "WTB.L",
+      "name": "Whitbread",
+      "market": "FTSE 100",
+      "aliases": []
+    },
+    {
+      "symbol": "MMM",
+      "yahoo_symbol": "MMM",
+      "name": "3M",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AOS",
+      "yahoo_symbol": "AOS",
+      "name": "A. O. Smith",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AES",
+      "yahoo_symbol": "AES",
+      "name": "AES Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "APA",
+      "yahoo_symbol": "APA",
+      "name": "APA Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "T",
+      "yahoo_symbol": "T",
+      "name": "AT&T",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ABBV",
+      "yahoo_symbol": "ABBV",
+      "name": "AbbVie",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ABT",
+      "yahoo_symbol": "ABT",
+      "name": "Abbott Laboratories",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ACN",
+      "yahoo_symbol": "ACN",
+      "name": "Accenture",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ADBE",
+      "yahoo_symbol": "ADBE",
+      "name": "Adobe Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMD",
+      "yahoo_symbol": "AMD",
+      "name": "Advanced Micro Devices",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AFL",
+      "yahoo_symbol": "AFL",
+      "name": "Aflac",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "A",
+      "yahoo_symbol": "A",
+      "name": "Agilent Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "APD",
+      "yahoo_symbol": "APD",
+      "name": "Air Products",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ABNB",
+      "yahoo_symbol": "ABNB",
+      "name": "Airbnb",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AKAM",
+      "yahoo_symbol": "AKAM",
+      "name": "Akamai Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ALB",
+      "yahoo_symbol": "ALB",
+      "name": "Albemarle Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ARE",
+      "yahoo_symbol": "ARE",
+      "name": "Alexandria Real Estate Equities",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ALGN",
+      "yahoo_symbol": "ALGN",
+      "name": "Align Technology",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ALLE",
+      "yahoo_symbol": "ALLE",
+      "name": "Allegion",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LNT",
+      "yahoo_symbol": "LNT",
+      "name": "Alliant Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ALL",
+      "yahoo_symbol": "ALL",
+      "name": "Allstate",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GOOGL",
+      "yahoo_symbol": "GOOGL",
+      "name": "Alphabet Inc. (Class A)",
+      "market": "S&P 500",
+      "aliases": [
+        "Google"
+      ]
+    },
+    {
+      "symbol": "GOOG",
+      "yahoo_symbol": "GOOG",
+      "name": "Alphabet Inc. (Class C)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MO",
+      "yahoo_symbol": "MO",
+      "name": "Altria",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMZN",
+      "yahoo_symbol": "AMZN",
+      "name": "Amazon",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMCR",
+      "yahoo_symbol": "AMCR",
+      "name": "Amcor",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AEE",
+      "yahoo_symbol": "AEE",
+      "name": "Ameren",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AEP",
+      "yahoo_symbol": "AEP",
+      "name": "American Electric Power",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AXP",
+      "yahoo_symbol": "AXP",
+      "name": "American Express",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AIG",
+      "yahoo_symbol": "AIG",
+      "name": "American International Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMT",
+      "yahoo_symbol": "AMT",
+      "name": "American Tower",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AWK",
+      "yahoo_symbol": "AWK",
+      "name": "American Water Works",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMP",
+      "yahoo_symbol": "AMP",
+      "name": "Ameriprise Financial",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AME",
+      "yahoo_symbol": "AME",
+      "name": "Ametek",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMGN",
+      "yahoo_symbol": "AMGN",
+      "name": "Amgen",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "APH",
+      "yahoo_symbol": "APH",
+      "name": "Amphenol",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ADI",
+      "yahoo_symbol": "ADI",
+      "name": "Analog Devices",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AON",
+      "yahoo_symbol": "AON",
+      "name": "Aon plc",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "APO",
+      "yahoo_symbol": "APO",
+      "name": "Apollo Global Management",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "APP",
+      "yahoo_symbol": "APP",
+      "name": "AppLovin",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AAPL",
+      "yahoo_symbol": "AAPL",
+      "name": "Apple Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AMAT",
+      "yahoo_symbol": "AMAT",
+      "name": "Applied Materials",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "APTV",
+      "yahoo_symbol": "APTV",
+      "name": "Aptiv",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ACGL",
+      "yahoo_symbol": "ACGL",
+      "name": "Arch Capital Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ADM",
+      "yahoo_symbol": "ADM",
+      "name": "Archer Daniels Midland",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ARES",
+      "yahoo_symbol": "ARES",
+      "name": "Ares Management",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ANET",
+      "yahoo_symbol": "ANET",
+      "name": "Arista Networks",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AJG",
+      "yahoo_symbol": "AJG",
+      "name": "Arthur J. Gallagher & Co.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AIZ",
+      "yahoo_symbol": "AIZ",
+      "name": "Assurant",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ATO",
+      "yahoo_symbol": "ATO",
+      "name": "Atmos Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AZO",
+      "yahoo_symbol": "AZO",
+      "name": "AutoZone",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ADSK",
+      "yahoo_symbol": "ADSK",
+      "name": "Autodesk",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ADP",
+      "yahoo_symbol": "ADP",
+      "name": "Automatic Data Processing",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AVY",
+      "yahoo_symbol": "AVY",
+      "name": "Avery Dennison",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AXON",
+      "yahoo_symbol": "AXON",
+      "name": "Axon Enterprise",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BNY",
+      "yahoo_symbol": "BNY",
+      "name": "BNY Mellon",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BXP",
+      "yahoo_symbol": "BXP",
+      "name": "BXP, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BKR",
+      "yahoo_symbol": "BKR",
+      "name": "Baker Hughes",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BALL",
+      "yahoo_symbol": "BALL",
+      "name": "Ball Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BAC",
+      "yahoo_symbol": "BAC",
+      "name": "Bank of America",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BAX",
+      "yahoo_symbol": "BAX",
+      "name": "Baxter International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BDX",
+      "yahoo_symbol": "BDX",
+      "name": "Becton Dickinson",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BRK.B",
+      "yahoo_symbol": "BRK-B",
+      "name": "Berkshire Hathaway",
+      "market": "S&P 500",
+      "aliases": [
+        "Berkshire Hathaway"
+      ]
+    },
+    {
+      "symbol": "BBY",
+      "yahoo_symbol": "BBY",
+      "name": "Best Buy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TECH",
+      "yahoo_symbol": "TECH",
+      "name": "Bio-Techne",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BIIB",
+      "yahoo_symbol": "BIIB",
+      "name": "Biogen",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BLK",
+      "yahoo_symbol": "BLK",
+      "name": "BlackRock",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BX",
+      "yahoo_symbol": "BX",
+      "name": "Blackstone Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "XYZ",
+      "yahoo_symbol": "XYZ",
+      "name": "Block, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BA",
+      "yahoo_symbol": "BA",
+      "name": "Boeing",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BKNG",
+      "yahoo_symbol": "BKNG",
+      "name": "Booking Holdings",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BSX",
+      "yahoo_symbol": "BSX",
+      "name": "Boston Scientific",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BMY",
+      "yahoo_symbol": "BMY",
+      "name": "Bristol Myers Squibb",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "AVGO",
+      "yahoo_symbol": "AVGO",
+      "name": "Broadcom",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BR",
+      "yahoo_symbol": "BR",
+      "name": "Broadridge Financial Solutions",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BRO",
+      "yahoo_symbol": "BRO",
+      "name": "Brown & Brown",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BF.B",
+      "yahoo_symbol": "BF-B",
+      "name": "Brown\u2013Forman",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BLDR",
+      "yahoo_symbol": "BLDR",
+      "name": "Builders FirstSource",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BG",
+      "yahoo_symbol": "BG",
+      "name": "Bunge Global",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CHRW",
+      "yahoo_symbol": "CHRW",
+      "name": "C.H. Robinson",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CBRE",
+      "yahoo_symbol": "CBRE",
+      "name": "CBRE Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CDW",
+      "yahoo_symbol": "CDW",
+      "name": "CDW Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CF",
+      "yahoo_symbol": "CF",
+      "name": "CF Industries",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CME",
+      "yahoo_symbol": "CME",
+      "name": "CME Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CMS",
+      "yahoo_symbol": "CMS",
+      "name": "CMS Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CRH",
+      "yahoo_symbol": "CRH",
+      "name": "CRH plc",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CSX",
+      "yahoo_symbol": "CSX",
+      "name": "CSX Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CVS",
+      "yahoo_symbol": "CVS",
+      "name": "CVS Health",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CDNS",
+      "yahoo_symbol": "CDNS",
+      "name": "Cadence Design Systems",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CPT",
+      "yahoo_symbol": "CPT",
+      "name": "Camden Property Trust",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COF",
+      "yahoo_symbol": "COF",
+      "name": "Capital One",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CAH",
+      "yahoo_symbol": "CAH",
+      "name": "Cardinal Health",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CCL",
+      "yahoo_symbol": "CCL",
+      "name": "Carnival Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CARR",
+      "yahoo_symbol": "CARR",
+      "name": "Carrier Global",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CVNA",
+      "yahoo_symbol": "CVNA",
+      "name": "Carvana",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CASY",
+      "yahoo_symbol": "CASY",
+      "name": "Casey's",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CAT",
+      "yahoo_symbol": "CAT",
+      "name": "Caterpillar Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CBOE",
+      "yahoo_symbol": "CBOE",
+      "name": "Cboe Global Markets",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COR",
+      "yahoo_symbol": "COR",
+      "name": "Cencora",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CNC",
+      "yahoo_symbol": "CNC",
+      "name": "Centene Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CNP",
+      "yahoo_symbol": "CNP",
+      "name": "CenterPoint Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CRL",
+      "yahoo_symbol": "CRL",
+      "name": "Charles River Laboratories",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SCHW",
+      "yahoo_symbol": "SCHW",
+      "name": "Charles Schwab Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CHTR",
+      "yahoo_symbol": "CHTR",
+      "name": "Charter Communications",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CVX",
+      "yahoo_symbol": "CVX",
+      "name": "Chevron Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CMG",
+      "yahoo_symbol": "CMG",
+      "name": "Chipotle Mexican Grill",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CB",
+      "yahoo_symbol": "CB",
+      "name": "Chubb Limited",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CHD",
+      "yahoo_symbol": "CHD",
+      "name": "Church & Dwight",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CIEN",
+      "yahoo_symbol": "CIEN",
+      "name": "Ciena",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CI",
+      "yahoo_symbol": "CI",
+      "name": "Cigna",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CINF",
+      "yahoo_symbol": "CINF",
+      "name": "Cincinnati Financial",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CTAS",
+      "yahoo_symbol": "CTAS",
+      "name": "Cintas",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CSCO",
+      "yahoo_symbol": "CSCO",
+      "name": "Cisco",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "C",
+      "yahoo_symbol": "C",
+      "name": "Citigroup",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CFG",
+      "yahoo_symbol": "CFG",
+      "name": "Citizens Financial Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CLX",
+      "yahoo_symbol": "CLX",
+      "name": "Clorox",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CSGP",
+      "yahoo_symbol": "CSGP",
+      "name": "CoStar Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KO",
+      "yahoo_symbol": "KO",
+      "name": "Coca-Cola Company (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CTSH",
+      "yahoo_symbol": "CTSH",
+      "name": "Cognizant",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COHR",
+      "yahoo_symbol": "COHR",
+      "name": "Coherent Corp.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COIN",
+      "yahoo_symbol": "COIN",
+      "name": "Coinbase",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CL",
+      "yahoo_symbol": "CL",
+      "name": "Colgate-Palmolive",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CMCSA",
+      "yahoo_symbol": "CMCSA",
+      "name": "Comcast",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FIX",
+      "yahoo_symbol": "FIX",
+      "name": "Comfort Systems USA",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COP",
+      "yahoo_symbol": "COP",
+      "name": "ConocoPhillips",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ED",
+      "yahoo_symbol": "ED",
+      "name": "Consolidated Edison",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "STZ",
+      "yahoo_symbol": "STZ",
+      "name": "Constellation Brands",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CEG",
+      "yahoo_symbol": "CEG",
+      "name": "Constellation Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COO",
+      "yahoo_symbol": "COO",
+      "name": "Cooper Companies (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CPRT",
+      "yahoo_symbol": "CPRT",
+      "name": "Copart",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GLW",
+      "yahoo_symbol": "GLW",
+      "name": "Corning Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CPAY",
+      "yahoo_symbol": "CPAY",
+      "name": "Corpay",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CTVA",
+      "yahoo_symbol": "CTVA",
+      "name": "Corteva",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "COST",
+      "yahoo_symbol": "COST",
+      "name": "Costco",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CRWD",
+      "yahoo_symbol": "CRWD",
+      "name": "CrowdStrike",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CCI",
+      "yahoo_symbol": "CCI",
+      "name": "Crown Castle",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CMI",
+      "yahoo_symbol": "CMI",
+      "name": "Cummins",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DHI",
+      "yahoo_symbol": "DHI",
+      "name": "D. R. Horton",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DTE",
+      "yahoo_symbol": "DTE",
+      "name": "DTE Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DVA",
+      "yahoo_symbol": "DVA",
+      "name": "DaVita",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DHR",
+      "yahoo_symbol": "DHR",
+      "name": "Danaher Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DRI",
+      "yahoo_symbol": "DRI",
+      "name": "Darden Restaurants",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DDOG",
+      "yahoo_symbol": "DDOG",
+      "name": "Datadog",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DECK",
+      "yahoo_symbol": "DECK",
+      "name": "Deckers Brands",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DE",
+      "yahoo_symbol": "DE",
+      "name": "Deere & Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DELL",
+      "yahoo_symbol": "DELL",
+      "name": "Dell Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DAL",
+      "yahoo_symbol": "DAL",
+      "name": "Delta Air Lines",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DVN",
+      "yahoo_symbol": "DVN",
+      "name": "Devon Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DXCM",
+      "yahoo_symbol": "DXCM",
+      "name": "Dexcom",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FANG",
+      "yahoo_symbol": "FANG",
+      "name": "Diamondback Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DLR",
+      "yahoo_symbol": "DLR",
+      "name": "Digital Realty",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DG",
+      "yahoo_symbol": "DG",
+      "name": "Dollar General",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DLTR",
+      "yahoo_symbol": "DLTR",
+      "name": "Dollar Tree",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "D",
+      "yahoo_symbol": "D",
+      "name": "Dominion Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DPZ",
+      "yahoo_symbol": "DPZ",
+      "name": "Domino's",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DASH",
+      "yahoo_symbol": "DASH",
+      "name": "DoorDash",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DOV",
+      "yahoo_symbol": "DOV",
+      "name": "Dover Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DOW",
+      "yahoo_symbol": "DOW",
+      "name": "Dow Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DD",
+      "yahoo_symbol": "DD",
+      "name": "DuPont",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DUK",
+      "yahoo_symbol": "DUK",
+      "name": "Duke Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EOG",
+      "yahoo_symbol": "EOG",
+      "name": "EOG Resources",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EQT",
+      "yahoo_symbol": "EQT",
+      "name": "EQT Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ETN",
+      "yahoo_symbol": "ETN",
+      "name": "Eaton Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ECHO",
+      "yahoo_symbol": "ECHO",
+      "name": "EchoStar",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ECL",
+      "yahoo_symbol": "ECL",
+      "name": "Ecolab",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EIX",
+      "yahoo_symbol": "EIX",
+      "name": "Edison International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EW",
+      "yahoo_symbol": "EW",
+      "name": "Edwards Lifesciences",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ELV",
+      "yahoo_symbol": "ELV",
+      "name": "Elevance Health",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EME",
+      "yahoo_symbol": "EME",
+      "name": "Emcor",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EMR",
+      "yahoo_symbol": "EMR",
+      "name": "Emerson Electric",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ETR",
+      "yahoo_symbol": "ETR",
+      "name": "Entergy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EFX",
+      "yahoo_symbol": "EFX",
+      "name": "Equifax",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EQIX",
+      "yahoo_symbol": "EQIX",
+      "name": "Equinix",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ERIE",
+      "yahoo_symbol": "ERIE",
+      "name": "Erie Indemnity",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ESS",
+      "yahoo_symbol": "ESS",
+      "name": "Essex Property Trust",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EL",
+      "yahoo_symbol": "EL",
+      "name": "Est\u00e9e Lauder Companies (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EG",
+      "yahoo_symbol": "EG",
+      "name": "Everest Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EVRG",
+      "yahoo_symbol": "EVRG",
+      "name": "Evergy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ES",
+      "yahoo_symbol": "ES",
+      "name": "Eversource Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EXC",
+      "yahoo_symbol": "EXC",
+      "name": "Exelon",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EXE",
+      "yahoo_symbol": "EXE",
+      "name": "Expand Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EXPE",
+      "yahoo_symbol": "EXPE",
+      "name": "Expedia Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EXPD",
+      "yahoo_symbol": "EXPD",
+      "name": "Expeditors International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EXR",
+      "yahoo_symbol": "EXR",
+      "name": "Extra Space Storage",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "XOM",
+      "yahoo_symbol": "XOM",
+      "name": "ExxonMobil",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FFIV",
+      "yahoo_symbol": "FFIV",
+      "name": "F5, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FDS",
+      "yahoo_symbol": "FDS",
+      "name": "FactSet",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FICO",
+      "yahoo_symbol": "FICO",
+      "name": "Fair Isaac",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FAST",
+      "yahoo_symbol": "FAST",
+      "name": "Fastenal",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FDX",
+      "yahoo_symbol": "FDX",
+      "name": "FedEx",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FDXF",
+      "yahoo_symbol": "FDXF",
+      "name": "FedEx Freight",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FRT",
+      "yahoo_symbol": "FRT",
+      "name": "Federal Realty Investment Trust",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FERG",
+      "yahoo_symbol": "FERG",
+      "name": "Ferguson Enterprises",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FIS",
+      "yahoo_symbol": "FIS",
+      "name": "Fidelity National Information Services",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FITB",
+      "yahoo_symbol": "FITB",
+      "name": "Fifth Third Bancorp",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FSLR",
+      "yahoo_symbol": "FSLR",
+      "name": "First Solar",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FE",
+      "yahoo_symbol": "FE",
+      "name": "FirstEnergy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FISV",
+      "yahoo_symbol": "FISV",
+      "name": "Fiserv",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FLEX",
+      "yahoo_symbol": "FLEX",
+      "name": "Flex Ltd.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "F",
+      "yahoo_symbol": "F",
+      "name": "Ford Motor Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FTNT",
+      "yahoo_symbol": "FTNT",
+      "name": "Fortinet",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FTV",
+      "yahoo_symbol": "FTV",
+      "name": "Fortive",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FOXA",
+      "yahoo_symbol": "FOXA",
+      "name": "Fox Corporation (Class A)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FOX",
+      "yahoo_symbol": "FOX",
+      "name": "Fox Corporation (Class B)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "BEN",
+      "yahoo_symbol": "BEN",
+      "name": "Franklin Resources",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "FCX",
+      "yahoo_symbol": "FCX",
+      "name": "Freeport-McMoRan",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GE",
+      "yahoo_symbol": "GE",
+      "name": "GE Aerospace",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GEHC",
+      "yahoo_symbol": "GEHC",
+      "name": "GE HealthCare",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GEV",
+      "yahoo_symbol": "GEV",
+      "name": "GE Vernova",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GRMN",
+      "yahoo_symbol": "GRMN",
+      "name": "Garmin",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IT",
+      "yahoo_symbol": "IT",
+      "name": "Gartner",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GEN",
+      "yahoo_symbol": "GEN",
+      "name": "Gen Digital",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GNRC",
+      "yahoo_symbol": "GNRC",
+      "name": "Generac",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GD",
+      "yahoo_symbol": "GD",
+      "name": "General Dynamics",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GIS",
+      "yahoo_symbol": "GIS",
+      "name": "General Mills",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GM",
+      "yahoo_symbol": "GM",
+      "name": "General Motors",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GPC",
+      "yahoo_symbol": "GPC",
+      "name": "Genuine Parts Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GILD",
+      "yahoo_symbol": "GILD",
+      "name": "Gilead Sciences",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GPN",
+      "yahoo_symbol": "GPN",
+      "name": "Global Payments",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GL",
+      "yahoo_symbol": "GL",
+      "name": "Globe Life",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GDDY",
+      "yahoo_symbol": "GDDY",
+      "name": "GoDaddy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GS",
+      "yahoo_symbol": "GS",
+      "name": "Goldman Sachs",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HCA",
+      "yahoo_symbol": "HCA",
+      "name": "HCA Healthcare",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HPQ",
+      "yahoo_symbol": "HPQ",
+      "name": "HP Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HAL",
+      "yahoo_symbol": "HAL",
+      "name": "Halliburton",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HIG",
+      "yahoo_symbol": "HIG",
+      "name": "Hartford (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HAS",
+      "yahoo_symbol": "HAS",
+      "name": "Hasbro",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DOC",
+      "yahoo_symbol": "DOC",
+      "name": "Healthpeak Properties",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HSIC",
+      "yahoo_symbol": "HSIC",
+      "name": "Henry Schein",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HSY",
+      "yahoo_symbol": "HSY",
+      "name": "Hershey Company (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HPE",
+      "yahoo_symbol": "HPE",
+      "name": "Hewlett Packard Enterprise",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HLT",
+      "yahoo_symbol": "HLT",
+      "name": "Hilton Worldwide",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HD",
+      "yahoo_symbol": "HD",
+      "name": "Home Depot (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HONA",
+      "yahoo_symbol": "HONA",
+      "name": "Honeywell Aerospace",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HON",
+      "yahoo_symbol": "HON",
+      "name": "Honeywell Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HRL",
+      "yahoo_symbol": "HRL",
+      "name": "Hormel Foods",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HST",
+      "yahoo_symbol": "HST",
+      "name": "Host Hotels & Resorts",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HWM",
+      "yahoo_symbol": "HWM",
+      "name": "Howmet Aerospace",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HUBB",
+      "yahoo_symbol": "HUBB",
+      "name": "Hubbell Incorporated",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HUM",
+      "yahoo_symbol": "HUM",
+      "name": "Humana",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HBAN",
+      "yahoo_symbol": "HBAN",
+      "name": "Huntington Bancshares",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HII",
+      "yahoo_symbol": "HII",
+      "name": "Huntington Ingalls Industries",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IBM",
+      "yahoo_symbol": "IBM",
+      "name": "IBM",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IEX",
+      "yahoo_symbol": "IEX",
+      "name": "IDEX Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IQV",
+      "yahoo_symbol": "IQV",
+      "name": "IQVIA",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IDXX",
+      "yahoo_symbol": "IDXX",
+      "name": "Idexx Laboratories",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ITW",
+      "yahoo_symbol": "ITW",
+      "name": "Illinois Tool Works",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "INCY",
+      "yahoo_symbol": "INCY",
+      "name": "Incyte",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IR",
+      "yahoo_symbol": "IR",
+      "name": "Ingersoll Rand",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PODD",
+      "yahoo_symbol": "PODD",
+      "name": "Insulet Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "INTC",
+      "yahoo_symbol": "INTC",
+      "name": "Intel",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IBKR",
+      "yahoo_symbol": "IBKR",
+      "name": "Interactive Brokers",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ICE",
+      "yahoo_symbol": "ICE",
+      "name": "Intercontinental Exchange",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IFF",
+      "yahoo_symbol": "IFF",
+      "name": "International Flavors & Fragrances",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IP",
+      "yahoo_symbol": "IP",
+      "name": "International Paper",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "INTU",
+      "yahoo_symbol": "INTU",
+      "name": "Intuit",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ISRG",
+      "yahoo_symbol": "ISRG",
+      "name": "Intuitive Surgical",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IVZ",
+      "yahoo_symbol": "IVZ",
+      "name": "Invesco",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "INVH",
+      "yahoo_symbol": "INVH",
+      "name": "Invitation Homes",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "IRM",
+      "yahoo_symbol": "IRM",
+      "name": "Iron Mountain",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "JBHT",
+      "yahoo_symbol": "JBHT",
+      "name": "J.B. Hunt",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SJM",
+      "yahoo_symbol": "SJM",
+      "name": "J.M. Smucker Company (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "JPM",
+      "yahoo_symbol": "JPM",
+      "name": "JPMorgan Chase",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "JBL",
+      "yahoo_symbol": "JBL",
+      "name": "Jabil",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "JKHY",
+      "yahoo_symbol": "JKHY",
+      "name": "Jack Henry & Associates",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "J",
+      "yahoo_symbol": "J",
+      "name": "Jacobs Solutions",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "JNJ",
+      "yahoo_symbol": "JNJ",
+      "name": "Johnson & Johnson",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "JCI",
+      "yahoo_symbol": "JCI",
+      "name": "Johnson Controls",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KKR",
+      "yahoo_symbol": "KKR",
+      "name": "KKR & Co.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KLAC",
+      "yahoo_symbol": "KLAC",
+      "name": "KLA Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KVUE",
+      "yahoo_symbol": "KVUE",
+      "name": "Kenvue",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KDP",
+      "yahoo_symbol": "KDP",
+      "name": "Keurig Dr Pepper",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KEY",
+      "yahoo_symbol": "KEY",
+      "name": "KeyCorp",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KEYS",
+      "yahoo_symbol": "KEYS",
+      "name": "Keysight Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KMB",
+      "yahoo_symbol": "KMB",
+      "name": "Kimberly-Clark",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KIM",
+      "yahoo_symbol": "KIM",
+      "name": "Kimco Realty",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KMI",
+      "yahoo_symbol": "KMI",
+      "name": "Kinder Morgan",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KHC",
+      "yahoo_symbol": "KHC",
+      "name": "Kraft Heinz",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "KR",
+      "yahoo_symbol": "KR",
+      "name": "Kroger",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LHX",
+      "yahoo_symbol": "LHX",
+      "name": "L3Harris",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LH",
+      "yahoo_symbol": "LH",
+      "name": "Labcorp",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LRCX",
+      "yahoo_symbol": "LRCX",
+      "name": "Lam Research",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LVS",
+      "yahoo_symbol": "LVS",
+      "name": "Las Vegas Sands",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LDOS",
+      "yahoo_symbol": "LDOS",
+      "name": "Leidos",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LEN",
+      "yahoo_symbol": "LEN",
+      "name": "Lennar",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LII",
+      "yahoo_symbol": "LII",
+      "name": "Lennox International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LLY",
+      "yahoo_symbol": "LLY",
+      "name": "Lilly (Eli)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LIN",
+      "yahoo_symbol": "LIN",
+      "name": "Linde plc",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LYV",
+      "yahoo_symbol": "LYV",
+      "name": "Live Nation Entertainment",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LMT",
+      "yahoo_symbol": "LMT",
+      "name": "Lockheed Martin",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "L",
+      "yahoo_symbol": "L",
+      "name": "Loews Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LOW",
+      "yahoo_symbol": "LOW",
+      "name": "Lowe's",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LULU",
+      "yahoo_symbol": "LULU",
+      "name": "Lululemon Athletica",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LITE",
+      "yahoo_symbol": "LITE",
+      "name": "Lumentum",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LYB",
+      "yahoo_symbol": "LYB",
+      "name": "LyondellBasell",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MTB",
+      "yahoo_symbol": "MTB",
+      "name": "M&T Bank",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MGM",
+      "yahoo_symbol": "MGM",
+      "name": "MGM Resorts",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MSCI",
+      "yahoo_symbol": "MSCI",
+      "name": "MSCI",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MPC",
+      "yahoo_symbol": "MPC",
+      "name": "Marathon Petroleum",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MAR",
+      "yahoo_symbol": "MAR",
+      "name": "Marriott International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MRSH",
+      "yahoo_symbol": "MRSH",
+      "name": "Marsh McLennan",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MLM",
+      "yahoo_symbol": "MLM",
+      "name": "Martin Marietta Materials",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MRVL",
+      "yahoo_symbol": "MRVL",
+      "name": "Marvell Technology",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MAS",
+      "yahoo_symbol": "MAS",
+      "name": "Masco",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MA",
+      "yahoo_symbol": "MA",
+      "name": "Mastercard",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MKC",
+      "yahoo_symbol": "MKC",
+      "name": "McCormick & Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MCD",
+      "yahoo_symbol": "MCD",
+      "name": "McDonald's",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MCK",
+      "yahoo_symbol": "MCK",
+      "name": "McKesson Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MDT",
+      "yahoo_symbol": "MDT",
+      "name": "Medtronic",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MRK",
+      "yahoo_symbol": "MRK",
+      "name": "Merck & Co.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MET",
+      "yahoo_symbol": "MET",
+      "name": "MetLife",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "META",
+      "yahoo_symbol": "META",
+      "name": "Meta Platforms",
+      "market": "S&P 500",
+      "aliases": [
+        "Facebook"
+      ]
+    },
+    {
+      "symbol": "MTD",
+      "yahoo_symbol": "MTD",
+      "name": "Mettler Toledo",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MCHP",
+      "yahoo_symbol": "MCHP",
+      "name": "Microchip Technology",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MU",
+      "yahoo_symbol": "MU",
+      "name": "Micron Technology",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MSFT",
+      "yahoo_symbol": "MSFT",
+      "name": "Microsoft",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MAA",
+      "yahoo_symbol": "MAA",
+      "name": "Mid-America Apartment Communities",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MRNA",
+      "yahoo_symbol": "MRNA",
+      "name": "Moderna",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TAP",
+      "yahoo_symbol": "TAP",
+      "name": "Molson Coors Beverage Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MDLZ",
+      "yahoo_symbol": "MDLZ",
+      "name": "Mondelez International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MPWR",
+      "yahoo_symbol": "MPWR",
+      "name": "Monolithic Power Systems",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MNST",
+      "yahoo_symbol": "MNST",
+      "name": "Monster Beverage",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MCO",
+      "yahoo_symbol": "MCO",
+      "name": "Moody's Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MS",
+      "yahoo_symbol": "MS",
+      "name": "Morgan Stanley",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MOS",
+      "yahoo_symbol": "MOS",
+      "name": "Mosaic Company (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "MSI",
+      "yahoo_symbol": "MSI",
+      "name": "Motorola Solutions",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NRG",
+      "yahoo_symbol": "NRG",
+      "name": "NRG Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NVR",
+      "yahoo_symbol": "NVR",
+      "name": "NVR, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NXPI",
+      "yahoo_symbol": "NXPI",
+      "name": "NXP Semiconductors",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NDAQ",
+      "yahoo_symbol": "NDAQ",
+      "name": "Nasdaq, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NTAP",
+      "yahoo_symbol": "NTAP",
+      "name": "NetApp",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NFLX",
+      "yahoo_symbol": "NFLX",
+      "name": "Netflix",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NEM",
+      "yahoo_symbol": "NEM",
+      "name": "Newmont",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NWSA",
+      "yahoo_symbol": "NWSA",
+      "name": "News Corp (Class A)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NWS",
+      "yahoo_symbol": "NWS",
+      "name": "News Corp (Class B)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NEE",
+      "yahoo_symbol": "NEE",
+      "name": "NextEra Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NI",
+      "yahoo_symbol": "NI",
+      "name": "NiSource",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NKE",
+      "yahoo_symbol": "NKE",
+      "name": "Nike, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NDSN",
+      "yahoo_symbol": "NDSN",
+      "name": "Nordson Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NSC",
+      "yahoo_symbol": "NSC",
+      "name": "Norfolk Southern",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NTRS",
+      "yahoo_symbol": "NTRS",
+      "name": "Northern Trust",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NOC",
+      "yahoo_symbol": "NOC",
+      "name": "Northrop Grumman",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NCLH",
+      "yahoo_symbol": "NCLH",
+      "name": "Norwegian Cruise Line Holdings",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NUE",
+      "yahoo_symbol": "NUE",
+      "name": "Nucor",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NVDA",
+      "yahoo_symbol": "NVDA",
+      "name": "Nvidia",
+      "market": "S&P 500",
+      "aliases": [
+        "Nvidia"
+      ]
+    },
+    {
+      "symbol": "ORLY",
+      "yahoo_symbol": "ORLY",
+      "name": "O'Reilly Automotive",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ON",
+      "yahoo_symbol": "ON",
+      "name": "ON Semiconductor",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "OXY",
+      "yahoo_symbol": "OXY",
+      "name": "Occidental Petroleum",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ODFL",
+      "yahoo_symbol": "ODFL",
+      "name": "Old Dominion",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "OMC",
+      "yahoo_symbol": "OMC",
+      "name": "Omnicom Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "OKE",
+      "yahoo_symbol": "OKE",
+      "name": "Oneok",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ORCL",
+      "yahoo_symbol": "ORCL",
+      "name": "Oracle Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "OTIS",
+      "yahoo_symbol": "OTIS",
+      "name": "Otis Worldwide",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PCG",
+      "yahoo_symbol": "PCG",
+      "name": "PG&E Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PNC",
+      "yahoo_symbol": "PNC",
+      "name": "PNC Financial Services",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PPG",
+      "yahoo_symbol": "PPG",
+      "name": "PPG Industries",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PPL",
+      "yahoo_symbol": "PPL",
+      "name": "PPL Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PTC",
+      "yahoo_symbol": "PTC",
+      "name": "PTC Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PCAR",
+      "yahoo_symbol": "PCAR",
+      "name": "Paccar",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PKG",
+      "yahoo_symbol": "PKG",
+      "name": "Packaging Corporation of America",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PLTR",
+      "yahoo_symbol": "PLTR",
+      "name": "Palantir Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PANW",
+      "yahoo_symbol": "PANW",
+      "name": "Palo Alto Networks",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PSKY",
+      "yahoo_symbol": "PSKY",
+      "name": "Paramount Skydance Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PH",
+      "yahoo_symbol": "PH",
+      "name": "Parker Hannifin",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PYPL",
+      "yahoo_symbol": "PYPL",
+      "name": "PayPal",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PAYX",
+      "yahoo_symbol": "PAYX",
+      "name": "Paychex",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PNR",
+      "yahoo_symbol": "PNR",
+      "name": "Pentair",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PEP",
+      "yahoo_symbol": "PEP",
+      "name": "PepsiCo",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PFE",
+      "yahoo_symbol": "PFE",
+      "name": "Pfizer",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PM",
+      "yahoo_symbol": "PM",
+      "name": "Philip Morris International",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PSX",
+      "yahoo_symbol": "PSX",
+      "name": "Phillips 66",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PNW",
+      "yahoo_symbol": "PNW",
+      "name": "Pinnacle West Capital",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PFG",
+      "yahoo_symbol": "PFG",
+      "name": "Principal Financial Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PG",
+      "yahoo_symbol": "PG",
+      "name": "Procter & Gamble",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PGR",
+      "yahoo_symbol": "PGR",
+      "name": "Progressive Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PLD",
+      "yahoo_symbol": "PLD",
+      "name": "Prologis",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PRU",
+      "yahoo_symbol": "PRU",
+      "name": "Prudential Financial",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PEG",
+      "yahoo_symbol": "PEG",
+      "name": "Public Service Enterprise Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PSA",
+      "yahoo_symbol": "PSA",
+      "name": "Public Storage",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PHM",
+      "yahoo_symbol": "PHM",
+      "name": "PulteGroup",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "Q",
+      "yahoo_symbol": "Q",
+      "name": "Qnity Electronics",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "QCOM",
+      "yahoo_symbol": "QCOM",
+      "name": "Qualcomm",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "PWR",
+      "yahoo_symbol": "PWR",
+      "name": "Quanta Services",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DGX",
+      "yahoo_symbol": "DGX",
+      "name": "Quest Diagnostics",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RTX",
+      "yahoo_symbol": "RTX",
+      "name": "RTX Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RL",
+      "yahoo_symbol": "RL",
+      "name": "Ralph Lauren Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RJF",
+      "yahoo_symbol": "RJF",
+      "name": "Raymond James Financial",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "O",
+      "yahoo_symbol": "O",
+      "name": "Realty Income",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RDDT",
+      "yahoo_symbol": "RDDT",
+      "name": "Reddit",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "REG",
+      "yahoo_symbol": "REG",
+      "name": "Regency Centers",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "REGN",
+      "yahoo_symbol": "REGN",
+      "name": "Regeneron Pharmaceuticals",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RF",
+      "yahoo_symbol": "RF",
+      "name": "Regions Financial Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RSG",
+      "yahoo_symbol": "RSG",
+      "name": "Republic Services",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RMD",
+      "yahoo_symbol": "RMD",
+      "name": "ResMed |",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RVTY",
+      "yahoo_symbol": "RVTY",
+      "name": "Revvity",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "HOOD",
+      "yahoo_symbol": "HOOD",
+      "name": "Robinhood Markets",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ROK",
+      "yahoo_symbol": "ROK",
+      "name": "Rockwell Automation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ROL",
+      "yahoo_symbol": "ROL",
+      "name": "Rollins, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ROP",
+      "yahoo_symbol": "ROP",
+      "name": "Roper Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ROST",
+      "yahoo_symbol": "ROST",
+      "name": "Ross Stores",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "RCL",
+      "yahoo_symbol": "RCL",
+      "name": "Royal Caribbean Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SPGI",
+      "yahoo_symbol": "SPGI",
+      "name": "S&P Global",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SBAC",
+      "yahoo_symbol": "SBAC",
+      "name": "SBA Communications",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "CRM",
+      "yahoo_symbol": "CRM",
+      "name": "Salesforce",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SNDK",
+      "yahoo_symbol": "SNDK",
+      "name": "Sandisk",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SLB",
+      "yahoo_symbol": "SLB",
+      "name": "Schlumberger",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "STX",
+      "yahoo_symbol": "STX",
+      "name": "Seagate Technology",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SRE",
+      "yahoo_symbol": "SRE",
+      "name": "Sempra",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "NOW",
+      "yahoo_symbol": "NOW",
+      "name": "ServiceNow",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SHW",
+      "yahoo_symbol": "SHW",
+      "name": "Sherwin-Williams",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SPG",
+      "yahoo_symbol": "SPG",
+      "name": "Simon Property Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SWKS",
+      "yahoo_symbol": "SWKS",
+      "name": "Skyworks Solutions",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SW",
+      "yahoo_symbol": "SW",
+      "name": "Smurfit Westrock",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SNA",
+      "yahoo_symbol": "SNA",
+      "name": "Snap-on",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SOLV",
+      "yahoo_symbol": "SOLV",
+      "name": "Solventum",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SO",
+      "yahoo_symbol": "SO",
+      "name": "Southern Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "LUV",
+      "yahoo_symbol": "LUV",
+      "name": "Southwest Airlines",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SWK",
+      "yahoo_symbol": "SWK",
+      "name": "Stanley Black & Decker",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SBUX",
+      "yahoo_symbol": "SBUX",
+      "name": "Starbucks",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "STT",
+      "yahoo_symbol": "STT",
+      "name": "State Street Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "STLD",
+      "yahoo_symbol": "STLD",
+      "name": "Steel Dynamics",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "STE",
+      "yahoo_symbol": "STE",
+      "name": "Steris",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SYK",
+      "yahoo_symbol": "SYK",
+      "name": "Stryker Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SMCI",
+      "yahoo_symbol": "SMCI",
+      "name": "Supermicro",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SYF",
+      "yahoo_symbol": "SYF",
+      "name": "Synchrony Financial",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SNPS",
+      "yahoo_symbol": "SNPS",
+      "name": "Synopsys",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "SYY",
+      "yahoo_symbol": "SYY",
+      "name": "Sysco",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TMUS",
+      "yahoo_symbol": "TMUS",
+      "name": "T-Mobile US",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TROW",
+      "yahoo_symbol": "TROW",
+      "name": "T. Rowe Price",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TEL",
+      "yahoo_symbol": "TEL",
+      "name": "TE Connectivity",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TJX",
+      "yahoo_symbol": "TJX",
+      "name": "TJX Companies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TKO",
+      "yahoo_symbol": "TKO",
+      "name": "TKO Group Holdings",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TTWO",
+      "yahoo_symbol": "TTWO",
+      "name": "Take-Two Interactive",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TPR",
+      "yahoo_symbol": "TPR",
+      "name": "Tapestry, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TRGP",
+      "yahoo_symbol": "TRGP",
+      "name": "Targa Resources",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TGT",
+      "yahoo_symbol": "TGT",
+      "name": "Target Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TDY",
+      "yahoo_symbol": "TDY",
+      "name": "Teledyne Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TER",
+      "yahoo_symbol": "TER",
+      "name": "Teradyne",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TSLA",
+      "yahoo_symbol": "TSLA",
+      "name": "Tesla, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TXN",
+      "yahoo_symbol": "TXN",
+      "name": "Texas Instruments",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TPL",
+      "yahoo_symbol": "TPL",
+      "name": "Texas Pacific Land Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TXT",
+      "yahoo_symbol": "TXT",
+      "name": "Textron",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TMO",
+      "yahoo_symbol": "TMO",
+      "name": "Thermo Fisher Scientific",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TSCO",
+      "yahoo_symbol": "TSCO",
+      "name": "Tractor Supply",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TTD",
+      "yahoo_symbol": "TTD",
+      "name": "Trade Desk (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TT",
+      "yahoo_symbol": "TT",
+      "name": "Trane Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TDG",
+      "yahoo_symbol": "TDG",
+      "name": "TransDigm Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TRV",
+      "yahoo_symbol": "TRV",
+      "name": "Travelers Companies (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TRMB",
+      "yahoo_symbol": "TRMB",
+      "name": "Trimble Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TFC",
+      "yahoo_symbol": "TFC",
+      "name": "Truist Financial",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TYL",
+      "yahoo_symbol": "TYL",
+      "name": "Tyler Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "TSN",
+      "yahoo_symbol": "TSN",
+      "name": "Tyson Foods",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "USB",
+      "yahoo_symbol": "USB",
+      "name": "U.S. Bancorp",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UDR",
+      "yahoo_symbol": "UDR",
+      "name": "UDR, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UBER",
+      "yahoo_symbol": "UBER",
+      "name": "Uber",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ULTA",
+      "yahoo_symbol": "ULTA",
+      "name": "Ulta Beauty",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UNP",
+      "yahoo_symbol": "UNP",
+      "name": "Union Pacific Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UAL",
+      "yahoo_symbol": "UAL",
+      "name": "United Airlines Holdings",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UPS",
+      "yahoo_symbol": "UPS",
+      "name": "United Parcel Service",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "URI",
+      "yahoo_symbol": "URI",
+      "name": "United Rentals",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UNH",
+      "yahoo_symbol": "UNH",
+      "name": "UnitedHealth Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "UHS",
+      "yahoo_symbol": "UHS",
+      "name": "Universal Health Services",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VLO",
+      "yahoo_symbol": "VLO",
+      "name": "Valero Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VEEV",
+      "yahoo_symbol": "VEEV",
+      "name": "Veeva Systems",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VTR",
+      "yahoo_symbol": "VTR",
+      "name": "Ventas",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VLTO",
+      "yahoo_symbol": "VLTO",
+      "name": "Veralto",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VRSN",
+      "yahoo_symbol": "VRSN",
+      "name": "Verisign",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VRSK",
+      "yahoo_symbol": "VRSK",
+      "name": "Verisk Analytics",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VZ",
+      "yahoo_symbol": "VZ",
+      "name": "Verizon",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VRTX",
+      "yahoo_symbol": "VRTX",
+      "name": "Vertex Pharmaceuticals",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VRT",
+      "yahoo_symbol": "VRT",
+      "name": "Vertiv",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VTRS",
+      "yahoo_symbol": "VTRS",
+      "name": "Viatris",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VICI",
+      "yahoo_symbol": "VICI",
+      "name": "Vici Properties",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "V",
+      "yahoo_symbol": "V",
+      "name": "Visa Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VST",
+      "yahoo_symbol": "VST",
+      "name": "Vistra Corp .",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VMRK",
+      "yahoo_symbol": "VMRK",
+      "name": "Vivmark Residential",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "VMC",
+      "yahoo_symbol": "VMC",
+      "name": "Vulcan Materials Company",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WRB",
+      "yahoo_symbol": "WRB",
+      "name": "W. R. Berkley Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "GWW",
+      "yahoo_symbol": "GWW",
+      "name": "W. W. Grainger",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WEC",
+      "yahoo_symbol": "WEC",
+      "name": "WEC Energy Group",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WAB",
+      "yahoo_symbol": "WAB",
+      "name": "Wabtec",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WMT",
+      "yahoo_symbol": "WMT",
+      "name": "Walmart",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "DIS",
+      "yahoo_symbol": "DIS",
+      "name": "Walt Disney Company (The)",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WBD",
+      "yahoo_symbol": "WBD",
+      "name": "Warner Bros. Discovery",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WM",
+      "yahoo_symbol": "WM",
+      "name": "Waste Management",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WAT",
+      "yahoo_symbol": "WAT",
+      "name": "Waters Corporation",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WFC",
+      "yahoo_symbol": "WFC",
+      "name": "Wells Fargo",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WELL",
+      "yahoo_symbol": "WELL",
+      "name": "Welltower",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WST",
+      "yahoo_symbol": "WST",
+      "name": "West Pharmaceutical Services",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WDC",
+      "yahoo_symbol": "WDC",
+      "name": "Western Digital",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WY",
+      "yahoo_symbol": "WY",
+      "name": "Weyerhaeuser",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WMB",
+      "yahoo_symbol": "WMB",
+      "name": "Williams Companies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WSM",
+      "yahoo_symbol": "WSM",
+      "name": "Williams-Sonoma, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WTW",
+      "yahoo_symbol": "WTW",
+      "name": "Willis Towers Watson",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WDAY",
+      "yahoo_symbol": "WDAY",
+      "name": "Workday, Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "WYNN",
+      "yahoo_symbol": "WYNN",
+      "name": "Wynn Resorts",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "XEL",
+      "yahoo_symbol": "XEL",
+      "name": "Xcel Energy",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "XYL",
+      "yahoo_symbol": "XYL",
+      "name": "Xylem Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "YUM",
+      "yahoo_symbol": "YUM",
+      "name": "Yum! Brands",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ZBRA",
+      "yahoo_symbol": "ZBRA",
+      "name": "Zebra Technologies",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ZBH",
+      "yahoo_symbol": "ZBH",
+      "name": "Zimmer Biomet",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "ZTS",
+      "yahoo_symbol": "ZTS",
+      "name": "Zoetis",
+      "market": "S&P 500",
+      "aliases": []
+    },
+    {
+      "symbol": "EBAY",
+      "yahoo_symbol": "EBAY",
+      "name": "eBay Inc.",
+      "market": "S&P 500",
+      "aliases": []
+    }
+  ],
+  "source": "Wikipedia constituent tables",
+  "is_fallback": false,
+  "fetched_at": "2026-09-01T11:09:33.802469Z",
+  "message": null
+}

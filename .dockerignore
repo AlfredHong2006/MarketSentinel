@@ -1,0 +1,63 @@
+# Keep the build context small and, more importantly, keep private and runtime data out of the
+# image. Everything the deployment genuinely needs is listed as an explicit exception below.
+
+# Secrets. Settings reads a .env file if one is present, so a stray copy inside the image would
+# silently override the deployment's configured environment -- and could ship a real API key to a
+# public host. .env.example and frontend/.env.production carry no secret and are needed.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!frontend/.env.production
+.streamlit/secrets.toml
+
+# Live runtime data. The deployment ships the reviewed deploy/ snapshot instead, so the growing
+# local database, its backups, and the test databases must never enter the build context.
+data/
+
+# Version control and local tooling
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# Python caches and virtual environments
+.venv/
+venv/
+env/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-tmp/
+pytest-cache-files-*/
+.coverage
+.coverage.*
+htmlcov/
+.ruff_cache/
+.uv-cache/
+.hf-cache/
+.mypy_cache/
+.pyright/
+build/
+dist/
+*.egg-info/
+
+# Node. The image builds the client from source in its own stage, so a host-built bundle and the
+# dependency tree would only invalidate layers and bloat the context.
+frontend/node_modules/
+frontend/dist/
+
+# Tests, evaluation fixtures, and docs are not part of the runtime image.
+tests/
+docs/
+models/
+*.log
+*.bak
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

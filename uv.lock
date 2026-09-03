@@ -629,12 +629,18 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "requests" },
     { name = "scikit-learn" },
-    { name = "streamlit" },
     { name = "tenacity" },
-    { name = "torch" },
-    { name = "transformers" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "yfinance" },
+]
+
+[package.optional-dependencies]
+dashboard = [
+    { name = "streamlit" },
+]
+ml = [
+    { name = "torch" },
+    { name = "transformers" },
 ]
 
 [package.dev-dependencies]
@@ -657,13 +663,14 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.10" },
     { name = "requests", specifier = ">=2.32" },
     { name = "scikit-learn", specifier = ">=1.6" },
-    { name = "streamlit", specifier = ">=1.47" },
+    { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.47" },
     { name = "tenacity", specifier = ">=9.1" },
-    { name = "torch", specifier = ">=2.7" },
-    { name = "transformers", specifier = ">=4.50,<5" },
+    { name = "torch", marker = "extra == 'ml'", specifier = ">=2.7" },
+    { name = "transformers", marker = "extra == 'ml'", specifier = ">=4.50,<5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
     { name = "yfinance", specifier = ">=0.2.65" },
 ]
+provides-extras = ["ml", "dashboard"]
 
 [package.metadata.requires-dev]
 dev = [

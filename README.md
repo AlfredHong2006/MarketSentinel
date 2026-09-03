@@ -13,7 +13,7 @@ event, merged across syndicated reporting, passed through a four-condition mater
 annotated with the publishers that corroborated it.
 
 **125-row hand-labelled evaluation** · **raw gate P 0.907 / R 0.942** · **0 unexplained
-disagreements** (in-sample) · **825 deterministic tests** · **evaluation runs offline from a fresh
+disagreements** (in-sample) · **832 deterministic tests** · **evaluation runs offline from a fresh
 clone**
 
 ![MarketSentinel company overview for NVDA: four separate market-view statements, ranked Top Intelligence cards, Key Developments beside Top Risks, and a price chart carrying diverging sentiment bars and numbered event markers](docs/images/02_mainnvda.png)
@@ -366,7 +366,7 @@ uv run ruff format --check .
 uv run pytest --cov=marketsentinel --cov-report=term-missing
 ```
 
-**825 tests pass** with lint and formatting clean; CI runs all three on every push and pull request
+**832 tests pass** with lint and formatting clean; CI runs all three on every push and pull request
 against a locked dependency set. Coverage spans FinBERT label mapping, normalization and
 deduplication, SQLite round-trips, chronological forecast targets, the three-stage analysis
 contracts, risk scoring, the materiality gate and grouping, the gold-census harness, and the full
@@ -381,9 +381,15 @@ Requirements: [uv](https://docs.astral.sh/uv/) and Python 3.11.
 ```bash
 git clone https://github.com/AlfredHong2006/MarketSentinel.git
 cd MarketSentinel
-uv sync --dev
+uv sync --all-extras --dev
 cp .env.example .env          # Windows: Copy-Item .env.example .env
 ```
+
+`--all-extras` matters: PyTorch/transformers (FinBERT) and Streamlit live in the `ml` and
+`dashboard` extras rather than in the base dependencies, so that the public read-only deployment
+— a GET-only API that never scores sentiment and never imports the Streamlit client — installs
+neither PyTorch nor the ~3 GB of CUDA wheels it pulls in on Linux. A plain `uv sync` gives you
+the API only.
 
 Then start the API and dashboard — on Windows, one script runs both:
 
