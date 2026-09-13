@@ -5,6 +5,9 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 
 **Evidence-grounded company intelligence from financial news, corporate events, and market data.**
+**[Live Demo](https://marketsentinel-lqvo.onrender.com/?symbol=NVDA)** · **[GitHub Repository](https://github.com/AlfredHong2006/MarketSentinel)**
+
+> The public demo is read-only. NVDA and PFE have prepared coverage; other S&P 500 / FTSE 100 companies may have partial or no stored coverage.
 
 Point MarketSentinel at any S&P 500 or FTSE 100 company and it answers the question a tone score
 cannot: *what actually happened to this business, and how well is it evidenced?* Hundreds of
