@@ -16,9 +16,11 @@ from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import (
     AnalysisResult,
+    ArticleAnalysisRequestView,
     ArticleAnalysisResponse,
     CapabilitiesView,
     CompanyOverview,
+    CoverageRequestView,
     RelevantNewsView,
     StoredArticleAnalysisView,
     UniverseResult,
@@ -39,6 +41,15 @@ from marketsentinel.event_analysis import (
     UnavailableArticleAnalysisProvider,
 )
 from marketsentinel.forecasting.baseline import BaselineForecaster
+from marketsentinel.public_requests import (
+    DirectoryRequestSink,
+    PublicRequestError,
+    PublicRequestService,
+    R2RequestSink,
+    RequestLimits,
+    RequestSink,
+    RequestSinkError,
+)
 from marketsentinel.sentiment.finbert import FinBertAnalyzer
 from marketsentinel.service import ArticleAnalysisRunner, MarketAnalysisService
 from marketsentinel.sources.historical import (
@@ -79,6 +90,39 @@ class Services:
     # The per-article analysis endpoint's runner. build_services supplies the ledger-aware runner,
     # so neither private spending endpoint is a second, unrecorded way to pay for an article.
     article_events: ArticleAnalysisRunner
+    # Shared public requests ("start coverage", "analyse this article"). None when no request
+    # store is configured, in which case the request endpoints do not exist. Never spends: it
+    # only records a request for the private scheduled worker to pick up.
+    requests: PublicRequestService | None = None
+
+
+def build_request_sink(settings: Settings) -> RequestSink | None:
+    """The durable request store, or ``None`` when the deployment has not configured one."""
+
+    if settings.public_requests_bucket:
+        missing = [
+            name
+            for name in (
+                "public_requests_endpoint_url",
+                "public_requests_access_key_id",
+                "public_requests_secret_access_key",
+            )
+            if not getattr(settings, name)
+        ]
+        if missing:
+            raise RuntimeError(
+                "public_requests_bucket is set but these settings are missing: "
+                + ", ".join(missing)
+            )
+        return R2RequestSink(
+            bucket=settings.public_requests_bucket,
+            endpoint_url=str(settings.public_requests_endpoint_url),
+            access_key_id=str(settings.public_requests_access_key_id),
+            secret_access_key=str(settings.public_requests_secret_access_key),
+        )
+    if settings.public_requests_directory is not None:
+        return DirectoryRequestSink(settings.public_requests_directory)
+    return None
 
 
 def build_services(settings: Settings) -> Services:
@@ -172,11 +216,29 @@ def build_services(settings: Settings) -> Services:
         analysis_auto_candidates=settings.analysis_auto_candidates,
         analysis_auto_max_new_per_run=settings.analysis_auto_max_new_per_run,
     )
+    sink = build_request_sink(settings)
+    requests = (
+        PublicRequestService(
+            sink=sink,
+            repository=repository,
+            constituents=constituents,
+            compatibility=compatibility,
+            limits=RequestLimits(
+                rate_limit_per_minute=settings.public_request_rate_limit_per_minute,
+                max_pending_coverage=settings.public_max_pending_coverage_requests,
+                max_pending_articles=settings.public_max_pending_article_requests,
+                max_covered_companies=settings.public_max_covered_companies,
+            ),
+        )
+        if sink is not None
+        else None
+    )
     return Services(
         repository=repository,
         constituents=constituents,
         analysis=analysis,
         article_events=manual_runner,
+        requests=requests,
     )
 
 
@@ -187,6 +249,11 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         services.repository.initialize()
+        # The public host's disk is ephemeral, so the pending-request mirror is rebuilt from the
+        # durable store on every start. Best-effort: a listing failure only means a repeated
+        # request rewrites an identical key.
+        if services.requests is not None:
+            services.requests.rehydrate()
         yield
 
     app = FastAPI(
@@ -251,14 +318,27 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         may be read.
         """
 
-        return CapabilitiesView(
+        view = CapabilitiesView(
             mode="public" if settings.public_mode else "private",
             default_symbol=settings.public_default_symbol.strip().upper(),
             prepared_companies=prepared_symbols,
             coverage=services.repository.stored_article_counts(),
             supports_refresh=not settings.public_mode,
             supports_article_analysis=not settings.public_mode,
+            covered_companies=[
+                item.ticker for item in services.repository.list_company_coverage() if item.active
+            ],
         )
+        if services.requests is not None:
+            pending = services.requests.pending()
+            view = view.model_copy(
+                update={
+                    "supports_coverage_requests": True,
+                    "pending_coverage_requests": list(pending.coverage),
+                    "pending_article_requests": list(pending.articles),
+                }
+            )
+        return view
 
     @app.get("/api/v1/constituents/search", response_model=UniverseResult)
     def search_constituents(
@@ -360,6 +440,60 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
 
         refuse_when_public()
         return services.article_events.analyze_article(request.article_id)
+
+    # Shared public requests. Unlike the two spending endpoints above, these exist in public mode:
+    # they spend nothing and generate nothing. They record one small, anonymous, idempotent
+    # request in the durable request store, and the private scheduled worker -- the only holder
+    # of an LLM credential -- admits it under its own hard caps on a later run. Without a
+    # configured store the surface does not exist (404), matching how public mode hides the
+    # spending endpoints rather than advertising a disabled capability.
+    def request_service() -> PublicRequestService:
+        if services.requests is None:
+            raise HTTPException(status_code=404, detail="Not Found")
+        return services.requests
+
+    def translate_request_failure(exc: Exception) -> HTTPException:
+        if isinstance(exc, ConstituentNotFoundError):
+            return HTTPException(status_code=404, detail=str(exc))
+        if isinstance(exc, PublicRequestError):
+            return HTTPException(status_code=exc.status_code, detail=str(exc))
+        if isinstance(exc, RequestSinkError):
+            return HTTPException(
+                status_code=503, detail="The request store is unavailable. Try again later."
+            )
+        LOGGER.exception("Unexpected public request failure")
+        return HTTPException(status_code=500, detail="Unexpected request failure")
+
+    @app.post(
+        "/api/v1/companies/{symbol}/coverage-requests",
+        response_model=CoverageRequestView,
+        status_code=202,
+    )
+    def request_coverage(symbol: str = Path(min_length=1, max_length=20)) -> CoverageRequestView:
+        """Ask for shared, continuous coverage of one supported company."""
+
+        service = request_service()
+        try:
+            return service.request_coverage(symbol.strip().upper())
+        except Exception as exc:
+            raise translate_request_failure(exc) from exc
+
+    @app.post(
+        "/api/v1/companies/{symbol}/articles/{article_id}/analysis-requests",
+        response_model=ArticleAnalysisRequestView,
+        status_code=202,
+    )
+    def request_article_analysis(
+        symbol: str = Path(min_length=1, max_length=20),
+        article_id: str = Path(min_length=1, max_length=128),
+    ) -> ArticleAnalysisRequestView:
+        """Ask for the analysis of one stored, not-yet-analysed article."""
+
+        service = request_service()
+        try:
+            return service.request_article_analysis(symbol.strip().upper(), article_id)
+        except Exception as exc:
+            raise translate_request_failure(exc) from exc
 
     # Mounted last, deliberately. Starlette matches routes in registration order, so every route
     # above -- /health, /docs, and all of /api/v1 -- still wins before the catch-all reaches the

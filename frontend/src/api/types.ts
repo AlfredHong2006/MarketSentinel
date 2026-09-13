@@ -354,6 +354,27 @@ export interface CapabilitiesView {
   coverage: Record<string, number>;
   supports_refresh: boolean;
   supports_article_analysis: boolean;
+  // Shared public requests. `supports_coverage_requests` is true only when the deployment has
+  // a request store; the pending lists are the one global queue everyone sees, and
+  // `covered_companies` is every ticker under continuous coverage in the server's ledger.
+  supports_coverage_requests: boolean;
+  covered_companies: string[];
+  pending_coverage_requests: string[];
+  pending_article_requests: string[];
+}
+
+/** Outcome of asking for shared coverage of one company. Never an analysis result. */
+export interface CoverageRequestView {
+  symbol: string;
+  state: "queued" | "already_queued" | "covered";
+  message: string;
+}
+
+/** Outcome of asking for the analysis of one stored article. Never an analysis result. */
+export interface ArticleAnalysisRequestView {
+  article_id: string;
+  state: "queued" | "already_queued" | "analysed";
+  message: string;
 }
 
 export type DataSource = "stored" | "refreshed";

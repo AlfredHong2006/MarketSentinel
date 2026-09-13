@@ -51,6 +51,8 @@ src/marketsentinel/
   backfill_service.py / historical_backfill.py    manual one-shot historical backfill
   analysis_ledger.py          job ledger runner: leases, retries, tokens, skip rule, ordering
   coverage_cycle.py           continuous coverage: per-provider watermarks → reconcile → analyse
+  public_requests.py          shared public "start coverage" / "analyse" requests: R2 drop-box,
+                              public-side caps, worker-side capped admission
   aggregation/, sentiment/, forecasting/          supporting infrastructure
 scripts/                      manual CLIs: backfill, coverage cycle, materiality evaluation,
                               audit, smoke

@@ -12,6 +12,16 @@ limited work stays pending for the next cycle.
 
 ``--mode status`` prints the ledger and watermark state without fetching or analysing.
 
+``--mode requests`` admits shared public requests (see marketsentinel/public_requests.py) from a
+directory the workflow synced from the request bucket: it activates requested companies (spends
+nothing) and analyses requested articles through the explicit-request ledger runner (real,
+capped spend), then writes the exact keys it consumed to ``--consumed-keys`` so the workflow
+deletes those and only those. ``--mode list-active`` prints every actively covered ticker.
+
+``--all-active`` (cycle only) replaces ``--ticker`` with every active ticker in the ledger,
+ordered never-cycled first then least recently attempted, so ``--max-tickers`` makes a capped
+run round-robin. ``--max-new-total`` bounds paid attempts across all tickers in one invocation.
+
 Synchronous and one-shot: no scheduler, queue, or background worker. Schedule it externally (for
 example Windows Task Scheduler) if it should repeat.
 
@@ -34,6 +44,7 @@ Usage:
 import argparse
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.analysis_ledger import LedgeredArticleAnalysisRunner
@@ -53,6 +64,12 @@ from marketsentinel.event_analysis import (
     ArticleEventAnalysisService,
     OpenAIArticleIntelligenceProvider,
     UnavailableArticleAnalysisProvider,
+)
+from marketsentinel.public_requests import (
+    DirectoryRequestSink,
+    TickerCycleOrder,
+    admit_public_requests,
+    order_tickers_for_cycle,
 )
 from marketsentinel.sentiment.finbert import FinBertAnalyzer
 from marketsentinel.sources.historical import GdeltHistoricalNewsProvider
@@ -142,15 +159,43 @@ def build_coverage_service(settings: Settings, *, offline: bool) -> CoverageCycl
     )
 
 
+def active_tickers_in_cycle_order(service: CoverageCycleService) -> list[str]:
+    """Every active ticker, never-cycled first, then least recently attempted by any provider."""
+
+    entries = []
+    for coverage in service.repository.list_company_coverage():
+        if not coverage.active:
+            continue
+        attempts = [
+            watermark.last_attempt_at
+            for watermark in service.repository.list_ingestion_watermarks(coverage.ticker)
+        ]
+        entries.append(
+            TickerCycleOrder(
+                ticker=coverage.ticker, oldest_attempt_at=min(attempts) if attempts else None
+            )
+        )
+    return order_tickers_for_cycle(entries)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--ticker",
         action="append",
-        required=True,
+        default=[],
         help="Ticker to cover; repeat for several (for example --ticker NVDA --ticker PFE).",
     )
-    parser.add_argument("--mode", choices=["cycle", "activate", "status"], default="cycle")
+    parser.add_argument(
+        "--all-active",
+        action="store_true",
+        help="Cycle every actively covered ticker instead of naming them (cycle mode only).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["cycle", "activate", "status", "requests", "list-active"],
+        default="cycle",
+    )
     parser.add_argument(
         "--max-new",
         type=int,
@@ -159,27 +204,126 @@ def build_parser() -> argparse.ArgumentParser:
         "analyses never count. Pending work beyond the cap waits for the next cycle.",
     )
     parser.add_argument(
+        "--max-new-total",
+        type=int,
+        default=None,
+        help="Hard cap on paid analysis attempts across every ticker in this invocation. "
+        "Unset means only the per-ticker --max-new applies.",
+    )
+    parser.add_argument(
+        "--max-tickers",
+        type=int,
+        default=None,
+        help="Cycle at most this many tickers this invocation (with --all-active this is "
+        "round-robin: the tickers left out come first next time).",
+    )
+    parser.add_argument(
         "--no-ingest", action="store_true", help="Skip news fetching in a cycle (no network)."
     )
     parser.add_argument(
         "--no-analyze", action="store_true", help="Skip the paid analysis pass in a cycle."
     )
+    parser.add_argument(
+        "--requests-dir",
+        type=Path,
+        default=None,
+        help="Directory of synced public request objects (requests mode).",
+    )
+    parser.add_argument(
+        "--consumed-keys",
+        type=Path,
+        default=None,
+        help="Where to write the consumed request keys, one per line (requests mode).",
+    )
+    parser.add_argument(
+        "--max-new-tickers",
+        type=int,
+        default=3,
+        help="Cap on companies newly activated from public requests in one run (default: 3).",
+    )
+    parser.add_argument(
+        "--max-article-requests",
+        type=int,
+        default=20,
+        help="Cap on public article analysis requests processed in one run (default: 20).",
+    )
     return parser
+
+
+def validate_arguments(parser: argparse.ArgumentParser, arguments: argparse.Namespace) -> None:
+    for name in ("max_new", "max_new_total", "max_tickers", "max_new_tickers"):
+        value = getattr(arguments, name)
+        if value is not None and value < 0:
+            parser.error(f"--{name.replace('_', '-')} must not be negative")
+    if arguments.max_article_requests < 0:
+        parser.error("--max-article-requests must not be negative")
+    if arguments.mode != "cycle" and (arguments.no_ingest or arguments.no_analyze):
+        parser.error("--no-ingest and --no-analyze only apply to --mode cycle")
+    if arguments.all_active and arguments.mode != "cycle":
+        parser.error("--all-active only applies to --mode cycle")
+    if arguments.mode == "requests":
+        if arguments.requests_dir is None or arguments.consumed_keys is None:
+            parser.error("--mode requests needs --requests-dir and --consumed-keys")
+    elif arguments.mode != "list-active" and not arguments.ticker and not arguments.all_active:
+        parser.error("name at least one --ticker (or use --all-active with --mode cycle)")
+
+
+def run_requests_mode(service: CoverageCycleService, arguments: argparse.Namespace) -> int:
+    # Only an explicit request may reopen a terminal job, exactly like the private per-article
+    # endpoint; the automatic cycle never does. Same repository, provider, and contract.
+    runner = LedgeredArticleAnalysisRunner(
+        service.repository,
+        service.runner.analysis_service,
+        service.runner.compatibility,
+        allow_terminal_retry=True,
+        owner_prefix="public-request",
+    )
+    report = admit_public_requests(
+        sink=DirectoryRequestSink(arguments.requests_dir),
+        coverage=service,
+        runner=runner,
+        repository=service.repository,
+        now=datetime.now(UTC),
+        max_new_tickers=arguments.max_new_tickers,
+        max_article_requests=arguments.max_article_requests,
+    )
+    print(report.render())
+    arguments.consumed_keys.parent.mkdir(parents=True, exist_ok=True)
+    arguments.consumed_keys.write_text(
+        "".join(f"{key}\n" for key in report.consumed_keys), encoding="utf-8"
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
-    if arguments.max_new < 0:
-        parser.error("--max-new must not be negative")
-    if arguments.mode != "cycle" and (arguments.no_ingest or arguments.no_analyze):
-        parser.error("--no-ingest and --no-analyze only apply to --mode cycle")
-    tickers = list(dict.fromkeys(ticker.strip().upper() for ticker in arguments.ticker))
+    validate_arguments(parser, arguments)
 
     service = build_coverage_service(get_settings(), offline=arguments.mode != "cycle")
+    if arguments.mode == "list-active":
+        print(",".join(active_tickers_in_cycle_order(service)))
+        return 0
+    if arguments.mode == "requests":
+        return run_requests_mode(service, arguments)
+
+    if arguments.all_active:
+        tickers = active_tickers_in_cycle_order(service)
+    else:
+        tickers = list(dict.fromkeys(ticker.strip().upper() for ticker in arguments.ticker))
+    if arguments.max_tickers is not None:
+        skipped = tickers[arguments.max_tickers :]
+        tickers = tickers[: arguments.max_tickers]
+        if skipped:
+            print(f"ticker cap reached; left for a later run: {', '.join(skipped)}")
+
+    remaining_total = arguments.max_new_total
     exit_code = 0
     for ticker in tickers:
         now = datetime.now(UTC)
+        budget = arguments.max_new
+        if remaining_total is not None:
+            budget = min(budget, remaining_total)
         try:
             if arguments.mode == "activate":
                 report = service.activate(ticker, now=now)
@@ -189,10 +333,12 @@ def main(argv: list[str] | None = None) -> int:
                 report = service.run(
                     ticker,
                     now=now,
-                    max_new_analyses=arguments.max_new,
+                    max_new_analyses=budget,
                     ingest=not arguments.no_ingest,
                     analyze=not arguments.no_analyze,
                 )
+                if remaining_total is not None:
+                    remaining_total = max(0, remaining_total - report.analysis.paid_attempts)
         except CoverageNotActiveError as error:
             print(f"{ticker}: {error}", file=sys.stderr)
             exit_code = 2

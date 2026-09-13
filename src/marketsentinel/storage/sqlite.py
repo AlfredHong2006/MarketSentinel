@@ -619,6 +619,22 @@ class SQLiteRepository:
             live_window_days=int(row["live_window_days"]),
         )
 
+    def list_company_coverage(self) -> list["CompanyCoverage"]:
+        """Every coverage row, ordered by ticker. A read: feeds the capabilities endpoint's
+        covered-company list and the worker's all-active cycle ordering."""
+
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute("SELECT * FROM company_coverage ORDER BY ticker").fetchall()
+        return [
+            CompanyCoverage(
+                ticker=row["ticker"],
+                active=bool(row["active"]),
+                ledger_started_at=datetime.fromisoformat(row["ledger_started_at"]),
+                live_window_days=int(row["live_window_days"]),
+            )
+            for row in rows
+        ]
+
     def get_ingestion_watermark(self, ticker: str, provider: str) -> "IngestionWatermark | None":
         with closing(self._connect()) as connection, connection:
             row = connection.execute(

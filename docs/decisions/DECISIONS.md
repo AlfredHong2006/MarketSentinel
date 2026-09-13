@@ -133,6 +133,29 @@ A provider-cap hit (`partial`) must never advance a watermark past articles it d
 
 Each windowed request is allowed up to Google's own observed per-request ceiling (100 entries, confirmed against the live endpoint and unaffected by the date range asked for), not the smaller interactive-refresh budget: that budget was sized for one flat multi-day request and would otherwise re-impose the same cap on every single day. Google's `after:`/`before:` operators do not accept a time component (confirmed against the live endpoint: a time-bounded query returns nothing), so no window can be split finer than one calendar day. A day genuinely exceeding Google's own ceiling is a hard limit of this data source and still correctly reports `partial`.
 
+## 2026-09-13 — Shared public requests for coverage and analysis
+
+MarketSentinel is a shared public intelligence system across the supported S&P 500 + FTSE 100
+universe: no accounts, everyone sees the same data, and any supported company can become covered.
+
+A public user may *request* shared coverage of a company or the analysis of a stored, unanalysed
+article. A request is global, anonymous, and idempotent; once processed, the result is published
+for everyone through the ordinary snapshot.
+
+The public deployment never spends and never generates. It records a request as one small object
+in a dedicated R2 bucket -- the only durable state, because the public host's disk is ephemeral --
+using a credential scoped to that bucket alone. The private scheduled worker remains the single
+writer and the only holder of an LLM credential.
+
+Spend is bounded on the worker by fixed per-run caps (companies newly activated, article requests
+processed, paid attempts across all tickers, tickers cycled), all workflow inputs with defaults.
+Public-side caps (pending queues, covered-company ceiling, requests per minute) bound *asking*,
+never spend. A request that a capped run does not reach stays queued; consumed requests are
+deleted only after the private checkpoint.
+
+Deferred deliberately: accounts, watchlists, per-user state, queue position or ETA, notifications,
+failed-analysis status in the UI, and any queue service or worker beyond GitHub Actions and R2.
+
 ## 2026-09-13 — Scheduled coverage and public snapshot publication
 
 Continuous coverage (the analysis job ledger) needed a scheduler and a way to get its results to

@@ -12,20 +12,34 @@ function toDay(iso: string): string {
   return iso.slice(0, 10);
 }
 
+/** What a not-yet-analysed row may offer: nothing, an "Analyse" request, or its queued state. */
+export interface ArticleRequestControls {
+  /** Whether this deployment accepts shared analysis requests at all. */
+  supported: boolean;
+  /** Article ids with a queued shared request -- the global queue, plus this reader's own. */
+  queued: ReadonlySet<string>;
+  /** Article ids whose request is in flight right now. */
+  submitting: ReadonlySet<string>;
+  onRequest: (articleId: string) => void;
+}
+
 /**
- * The read-only Relevant News browser: every stored, sentiment-scored article for this company.
- * GET /api/v1/companies/{symbol}/articles only -- there is no "analyse this article" action here,
- * on this surface or anywhere in this client. Filtering is client-side over the already-fetched,
- * bounded article list; nothing here re-derives a materiality or ranking verdict.
+ * The Relevant News browser: every stored, sentiment-scored article for this company, read via
+ * GET /api/v1/companies/{symbol}/articles. Filtering is client-side over the already-fetched,
+ * bounded article list; nothing here re-derives a materiality or ranking verdict. The only
+ * action a not-analysed row can offer is a shared *request* (POST .../analysis-requests): it
+ * spends nothing here, and the private scheduled worker decides what is analysed on a later run.
  */
 export function RelevantNewsPane({
   relevantNews,
   selectedArticleId,
   onSelect,
+  requests,
 }: {
   relevantNews: RelevantNewsView;
   selectedArticleId: string | null;
   onSelect: (articleId: string) => void;
+  requests: ArticleRequestControls;
 }) {
   const articles = relevantNews.articles;
   const sources = useMemo(
@@ -144,6 +158,7 @@ export function RelevantNewsPane({
               article={article}
               isSelected={article.article_id === selectedArticleId}
               onSelect={onSelect}
+              requests={requests}
             />
           ))}
         </ul>
@@ -155,19 +170,25 @@ export function RelevantNewsPane({
 /**
  * An analysed row opens MarketSentinel's own stored analysis in the detail pane; the original
  * publisher article is a separate, explicit external link. A row with no compatible stored
- * analysis stays read-only — there is no action offered to create one.
+ * analysis is not selectable; where the deployment supports it, it offers a shared request
+ * instead, and shows "Queued" once one exists.
  */
 function ArticleRow({
   article,
   isSelected,
   onSelect,
+  requests,
 }: {
   article: ArticleRowView;
   isSelected: boolean;
   onSelect: (articleId: string) => void;
+  requests: ArticleRequestControls;
 }) {
   const analysed = article.has_compatible_analysis;
   const open = () => analysed && onSelect(article.article_id);
+  const queued = requests.queued.has(article.article_id);
+  const submitting = requests.submitting.has(article.article_id);
+  const canRequest = requests.supported && !analysed && !article.is_demo && !queued;
 
   return (
     <li
@@ -198,7 +219,26 @@ function ArticleRow({
         {article.is_demo && " · demo data"}
       </span>
       <Tag tone={article.label}>{sentimentLabel(article.label)}</Tag>
-      <span className="ms-chip">{analysed ? "Analysed" : "Not analysed"}</span>
+      {analysed ? (
+        <span className="ms-chip">Analysed</span>
+      ) : queued ? (
+        <span className="ms-chip">Queued</span>
+      ) : canRequest ? (
+        <button
+          type="button"
+          className="ms-btn ms-btn-secondary ms-articles-action"
+          disabled={submitting}
+          title="Request a shared analysis of this article on the next scheduled run"
+          onClick={(clickEvent) => {
+            clickEvent.stopPropagation();
+            requests.onRequest(article.article_id);
+          }}
+        >
+          {submitting ? "Requesting…" : "Analyse"}
+        </button>
+      ) : (
+        <span className="ms-chip">Not analysed</span>
+      )}
       <a
         className="ms-articles-original"
         href={article.url}

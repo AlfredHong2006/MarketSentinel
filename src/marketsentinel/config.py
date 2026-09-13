@@ -58,6 +58,29 @@ class Settings(BaseSettings):
     public_snapshot_manifest_url: str | None = None
     public_snapshot_fetch_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
 
+    # Shared public requests (public_requests.py): "start coverage" for a company and "analyse"
+    # for a stored article. The public host records a request as one small object in a dedicated
+    # S3-compatible (Cloudflare R2) bucket; the private scheduled worker reads and consumes them.
+    # All unset by default, so a local/private run exposes no request endpoint at all. The
+    # credential should be scoped to this one bucket -- it must never be able to touch the
+    # private corpus or the published snapshot. ``public_requests_directory`` is the local
+    # alternative (a directory in the same key layout) for development and tests; the bucket
+    # wins when both are set.
+    public_requests_bucket: str | None = None
+    public_requests_endpoint_url: str | None = None
+    public_requests_access_key_id: str | None = None
+    public_requests_secret_access_key: str | None = None
+    public_requests_directory: Path | None = None
+
+    # Caps on *asking*. Spend is bounded separately on the worker (run_coverage_cycle.py caps);
+    # these keep strangers from filling the request store or the coverage ledger. Requests are
+    # idempotent per company / per article, so the distinct total is bounded by the universe plus
+    # the stored corpus regardless of these numbers.
+    public_request_rate_limit_per_minute: int = Field(default=30, ge=1, le=1000)
+    public_max_pending_coverage_requests: int = Field(default=20, ge=0, le=500)
+    public_max_pending_article_requests: int = Field(default=100, ge=0, le=5000)
+    public_max_covered_companies: int = Field(default=40, ge=1, le=1000)
+
     # Browser origins allowed to call the API. The Streamlit dashboard's port is joined by the
     # Vite dev and preview ports so a future React client needs no code change to talk to a local
     # API. Configurable rather than hardcoded because a deployed client is served from elsewhere.

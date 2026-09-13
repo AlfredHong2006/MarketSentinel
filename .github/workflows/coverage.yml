@@ -18,11 +18,23 @@ on:
   workflow_dispatch:
     inputs:
       tickers:
-        description: "Comma-separated tickers to cover"
+        description: "Comma-separated tickers always kept under coverage (activated every run)"
         default: "NVDA,PFE"
       max_new:
         description: "Max new analyses per ticker this run"
         default: "25"
+      max_new_total:
+        description: "Hard cap on paid analyses across all tickers this run"
+        default: "40"
+      max_tickers:
+        description: "Max tickers cycled this run (round-robin across runs)"
+        default: "12"
+      max_new_tickers:
+        description: "Max companies newly activated from public requests this run"
+        default: "3"
+      max_article_requests:
+        description: "Max public article analysis requests processed this run"
+        default: "20"
 
 # A second overlapping run would race the same private SQLite database and the same R2 objects.
 # cancel-in-progress stays false so a run already in flight finishes rather than being cut off
@@ -34,9 +46,19 @@ concurrency:
 permissions:
   contents: read
 
+# Every spend-relevant number is a dispatch input with a default, so the worst case per run is
+# fixed here and changeable without touching Python: at most MAX_NEW_TOTAL cycle analyses plus
+# MAX_ARTICLE_REQUESTS explicit article analyses, whatever the public request queue holds.
 env:
   TICKERS: ${{ github.event.inputs.tickers || 'NVDA,PFE' }}
   MAX_NEW: ${{ github.event.inputs.max_new || '25' }}
+  MAX_NEW_TOTAL: ${{ github.event.inputs.max_new_total || '40' }}
+  MAX_TICKERS: ${{ github.event.inputs.max_tickers || '12' }}
+  MAX_NEW_TICKERS: ${{ github.event.inputs.max_new_tickers || '3' }}
+  MAX_ARTICLE_REQUESTS: ${{ github.event.inputs.max_article_requests || '20' }}
+  # Mapped to env because the secrets context is not available in a step-level `if`. Empty
+  # (unset secret) means no request bucket is configured and every request step is skipped.
+  R2_REQUESTS_BUCKET: ${{ secrets.R2_REQUESTS_BUCKET }}
 
 jobs:
   coverage:
@@ -105,14 +127,56 @@ jobs:
           for t in "${TICKER_ARR[@]}"; do ARGS+=(--ticker "$t"); done
           uv run python scripts/run_coverage_cycle.py --mode activate "${ARGS[@]}"
 
+      # Shared public requests (marketsentinel/public_requests.py). The public deployment can only
+      # *write* small request objects into this dedicated bucket; this is the only place they are
+      # read. Synced to a directory first, so the admission step below needs no cloud credential.
+      # A missing or empty bucket is not an error -- there is simply nothing queued. Skipped
+      # entirely when no request bucket is configured.
+      - name: Sync public requests from R2
+        if: ${{ env.R2_REQUESTS_BUCKET != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          mkdir -p requests
+          aws s3 sync "s3://${{ env.R2_REQUESTS_BUCKET }}/" requests/ \
+            --endpoint-url "$ENDPOINT" --exclude "*" --include "coverage/*.json" \
+            --include "articles/*.json"
+          echo "synced $(find requests -name '*.json' | wc -l) request object(s)"
+
+      # Admits queued requests under hard caps: at most MAX_NEW_TICKERS companies activated
+      # (spends nothing -- the cycle below pays under its own caps) and at most
+      # MAX_ARTICLE_REQUESTS explicit article analyses (real, capped spend, through the same
+      # ledger the private endpoint uses). Writes the exact keys it consumed to
+      # requests-consumed.txt; anything it did not reach stays in the bucket for a later run.
+      - name: Admit public requests
+        if: ${{ env.R2_REQUESTS_BUCKET != '' }}
+        env:
+          MARKETSENTINEL_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          uv run python scripts/run_coverage_cycle.py --mode requests \
+            --requests-dir requests --consumed-keys requests-consumed.txt \
+            --max-new-tickers "$MAX_NEW_TICKERS" --max-article-requests "$MAX_ARTICLE_REQUESTS"
+
+      # Every actively covered ticker (the always-on TICKERS plus everything admitted from public
+      # requests), never-cycled first then least recently attempted, so MAX_TICKERS makes a capped
+      # run round-robin across runs. MAX_NEW_TOTAL is the hard ceiling on paid cycle analyses in
+      # this run regardless of how many companies are covered.
       - name: Run bounded coverage cycle
         env:
           MARKETSENTINEL_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          IFS=',' read -ra TICKER_ARR <<< "$TICKERS"
-          ARGS=()
-          for t in "${TICKER_ARR[@]}"; do ARGS+=(--ticker "$t"); done
-          uv run python scripts/run_coverage_cycle.py "${ARGS[@]}" --max-new "$MAX_NEW"
+          uv run python scripts/run_coverage_cycle.py --all-active \
+            --max-new "$MAX_NEW" --max-new-total "$MAX_NEW_TOTAL" --max-tickers "$MAX_TICKERS"
+
+      - name: List covered tickers
+        id: covered
+        run: |
+          COVERED=$(uv run python scripts/run_coverage_cycle.py --mode list-active)
+          echo "covered=$COVERED" >> "$GITHUB_OUTPUT"
+          echo "covered tickers: $COVERED"
 
       # Gate: a database that fails its own consistency check must never be checkpointed to R2,
       # built into a public snapshot, or reach the public deployment. A non-zero exit here stops
@@ -166,6 +230,26 @@ jobs:
           retry aws s3 cp data/constituents_cache.json "$BUCKET/state/constituents_cache.json" \
             --endpoint-url "$ENDPOINT"
 
+      # Only after the private checkpoint: a consumed request whose result was not durably saved
+      # must stay queued so the next run redoes it (idempotently -- activation is idempotent and
+      # a stored analysis is reused, never re-paid). Deletes exactly the keys the admission step
+      # consumed, never the whole prefix, so requests that arrived during this run survive. A
+      # single failed delete is not fatal: that request is merely admitted again next run.
+      - name: Delete consumed public requests from R2
+        if: ${{ env.R2_REQUESTS_BUCKET != '' && hashFiles('requests-consumed.txt') != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET="s3://${{ env.R2_REQUESTS_BUCKET }}"
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            aws s3 rm "$BUCKET/$key" --endpoint-url "$ENDPOINT" \
+              || echo "::warning::could not delete consumed request $key; it will be re-admitted"
+          done < requests-consumed.txt
+
       # Gated the same way: publish_public_snapshot.py refuses (exit 1) and writes neither
       # latest.json nor version.txt if the sanitized snapshot fails its own integrity check or the
       # secret/personal-data scan, so a bad build can never be uploaded.
@@ -176,7 +260,7 @@ jobs:
             --constituent-cache data/constituents_cache.json \
             --output-dir dist/public-snapshot \
             --public-base-url "${{ vars.R2_PUBLIC_BASE_URL }}" \
-            --tickers "$TICKERS"
+            --tickers "${{ steps.covered.outputs.covered }}"
 
       # The versioned, immutable snapshot files upload first; latest.json -- the only object a
       # reader treats as mutable -- uploads last, and only if those succeeded. A reader can then

@@ -639,6 +639,13 @@
   white-space: nowrap;
 }
 
+/* The "Analyse" request button sits in the chip column and must not widen it. */
+.ms-articles-action {
+  height: 20px;
+  padding: 0 var(--s-3);
+  white-space: nowrap;
+}
+
 .ms-articles-title {
   display: block;
   overflow: hidden;
@@ -1235,6 +1242,13 @@
   margin: 0;
   font: var(--fw-medium) var(--fs-hero-sm) / var(--lh-title) var(--font-editorial);
   color: var(--text-hero);
+}
+
+/* The shared-request control on the zero-coverage page: one button or one "Queued" chip. */
+.ms-state-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
 }
 
 /* ---------- responsive behaviour ----------

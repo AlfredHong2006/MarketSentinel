@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiNetworkError,
   ApiNotFoundError,
+  ApiRefusedError,
   ApiServerError,
   fetchArticleAnalysis,
   fetchCompanyOverview,
   fetchRelevantNews,
+  requestArticleAnalysis,
+  requestCoverage,
 } from "./api/client";
 import type { CapabilitiesView, CompanyOverview, RelevantNewsView } from "./api/types";
 import type { ArticleAnalysisState } from "./components/DetailPane";
@@ -35,14 +38,47 @@ type RelevantNewsState =
   | { status: "error"; message: string }
   | { status: "ready"; data: RelevantNewsView };
 
-// The zero-coverage explanation is deployment-state copy, like the loading and error views this
-// client already owns — not an intelligence conclusion. It is deliberately mode-specific: the
+/** The reader's own shared-request activity on this page: one company, any number of articles. */
+interface RequestActivity {
+  coverageSubmitting: boolean;
+  coverageNote: string | null;
+  articlesSubmitting: Set<string>;
+  articleNote: string | null;
+}
+
+const IDLE_ACTIVITY: RequestActivity = {
+  coverageSubmitting: false,
+  coverageNote: null,
+  articlesSubmitting: new Set(),
+  articleNote: null,
+};
+
+// The zero-coverage explanations are deployment-state copy, like the loading and error views this
+// client already owns — not an intelligence conclusion. They are deliberately mode-specific: the
 // read-only claim is only true of a public deployment, so a private run keeps the server's own
 // empty message instead.
 const PUBLIC_NO_COVERAGE_MESSAGE =
   "No stored public coverage is available for this company yet. MarketSentinel supports this " +
   "company, but the public deployment is read-only and does not run new ingestion or AI " +
   "analysis. Try NVIDIA or Pfizer for prepared coverage.";
+const REQUESTABLE_MESSAGE =
+  "MarketSentinel supports this company but has not covered it yet. Starting coverage is " +
+  "shared: the scheduled worker ingests its recent news and analyses material articles on its " +
+  "next run (roughly every 6 hours), and everyone then sees the same result.";
+const QUEUED_MESSAGE =
+  "Coverage is queued for the next scheduled run (roughly every 6 hours). Results appear here " +
+  "for everyone once they are published; nothing further is needed.";
+const ACTIVE_AWAITING_MESSAGE =
+  "Shared coverage is active for this company. Its first results appear after the next " +
+  "scheduled run publishes.";
+
+function describeRequestFailure(error: unknown): string {
+  if (error instanceof ApiRefusedError) return error.message;
+  if (error instanceof ApiNotFoundError) return error.message;
+  if (error instanceof ApiServerError) return error.message;
+  if (error instanceof ApiNetworkError) return error.message;
+  return "The request could not be sent.";
+}
 
 export function CompanyOverviewPage({
   symbol,
@@ -60,6 +96,69 @@ export function CompanyOverviewPage({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [requestId, setRequestId] = useState(0);
   const rails = useResizableRails();
+
+  // The shared queue everyone sees comes from capabilities; the reader's own successful requests
+  // are added locally so the page reflects them at once, without a second capabilities read.
+  const [queuedCoverage, setQueuedCoverage] = useState<Set<string>>(new Set());
+  const [queuedArticles, setQueuedArticles] = useState<Set<string>>(new Set());
+  const [activity, setActivity] = useState<RequestActivity>(IDLE_ACTIVITY);
+  useEffect(() => {
+    if (!capabilities) return;
+    setQueuedCoverage((own) => new Set([...capabilities.pending_coverage_requests, ...own]));
+    setQueuedArticles((own) => new Set([...capabilities.pending_article_requests, ...own]));
+  }, [capabilities]);
+  useEffect(() => setActivity(IDLE_ACTIVITY), [symbol]);
+
+  const supportsRequests = capabilities?.supports_coverage_requests === true;
+  const coverageActive = capabilities?.covered_companies.includes(symbol) === true;
+  const coverageQueued = queuedCoverage.has(symbol);
+
+  const startCoverage = useCallback(() => {
+    setActivity((current) => ({ ...current, coverageSubmitting: true, coverageNote: null }));
+    requestCoverage(symbol)
+      .then((result) => {
+        if (result.state !== "covered") {
+          setQueuedCoverage((own) => new Set([...own, result.symbol]));
+        }
+        setActivity((current) => ({
+          ...current,
+          coverageSubmitting: false,
+          coverageNote: result.message,
+        }));
+      })
+      .catch((error: unknown) => {
+        setActivity((current) => ({
+          ...current,
+          coverageSubmitting: false,
+          coverageNote: describeRequestFailure(error),
+        }));
+      });
+  }, [symbol]);
+
+  const requestAnalysis = useCallback(
+    (articleId: string) => {
+      setActivity((current) => ({
+        ...current,
+        articlesSubmitting: new Set([...current.articlesSubmitting, articleId]),
+        articleNote: null,
+      }));
+      const settle = (note: string) =>
+        setActivity((current) => {
+          const remaining = new Set(current.articlesSubmitting);
+          remaining.delete(articleId);
+          return { ...current, articlesSubmitting: remaining, articleNote: note };
+        });
+      requestArticleAnalysis(symbol, articleId)
+        .then((result) => {
+          if (result.state !== "analysed") {
+            setQueuedArticles((own) => new Set([...own, result.article_id]));
+          }
+          settle(result.message);
+        })
+        .catch((error: unknown) => settle(describeRequestFailure(error)));
+    },
+    [symbol],
+  );
 
   // Applied as the same custom properties the stylesheet already uses for the two rail widths,
   // so the centre workspace reflows through the existing flex rules.
@@ -196,18 +295,45 @@ export function CompanyOverviewPage({
     overview.top_risks.rows.length > 0;
 
   if (!hasAnyCoverage) {
+    // Four honest states, in precedence order: coverage already active but unpublished, a
+    // queued shared request, a request the reader can make, or the plain read-only explanation.
+    const empty = coverageActive
+      ? { title: `Coverage active for ${symbol}`, message: ACTIVE_AWAITING_MESSAGE }
+      : coverageQueued
+        ? { title: `Coverage requested for ${symbol}`, message: QUEUED_MESSAGE }
+        : supportsRequests
+          ? { title: `No coverage yet for ${symbol}`, message: REQUESTABLE_MESSAGE }
+          : {
+              title: `No coverage yet for ${symbol}`,
+              message:
+                capabilities?.mode === "public"
+                  ? PUBLIC_NO_COVERAGE_MESSAGE
+                  : overview.key_developments.empty_message,
+            };
+    const offerStart = supportsRequests && !coverageActive && !coverageQueued;
     return (
       <div className={shellClass} style={shellStyle}>
         <AppHeader articlesIndexed={overview.coverage.articles} dataSource={overview.data_source} />
         <div className="ms-body-row">
           {rail}
           <EmptyOverviewView
-            symbol={symbol}
-            message={
-              capabilities?.mode === "public"
-                ? PUBLIC_NO_COVERAGE_MESSAGE
-                : overview.key_developments.empty_message
+            title={empty.title}
+            message={empty.message}
+            action={
+              offerStart ? (
+                <button
+                  type="button"
+                  className="ms-btn ms-btn-primary"
+                  disabled={activity.coverageSubmitting}
+                  onClick={startCoverage}
+                >
+                  {activity.coverageSubmitting ? "Requesting…" : "Start coverage"}
+                </button>
+              ) : coverageQueued ? (
+                <span className="ms-chip">Queued</span>
+              ) : undefined
             }
+            note={activity.coverageNote}
           />
         </div>
       </div>
@@ -286,7 +412,18 @@ export function CompanyOverviewPage({
               relevantNews={relevantNews.data}
               selectedArticleId={selection?.kind === "article" ? selection.articleId : null}
               onSelect={(id) => setSelection({ kind: "article", articleId: id })}
+              requests={{
+                supported: supportsRequests,
+                queued: queuedArticles,
+                submitting: activity.articlesSubmitting,
+                onRequest: requestAnalysis,
+              }}
             />
+          )}
+          {activity.articleNote && (
+            <p className="ms-empty-note" role="status">
+              {activity.articleNote}
+            </p>
           )}
           {relevantNews.status === "error" && (
             <p className="ms-empty-note">Relevant news could not be read: {relevantNews.message}</p>

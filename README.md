@@ -493,10 +493,35 @@ receives one. Required GitHub Actions secrets/variables:
 | `R2_PUBLIC_BUCKET` | secret | Holds the public snapshot objects and `latest.json` |
 | `R2_PUBLIC_BASE_URL` | variable | Public HTTPS base URL the public bucket is served from (not secret) |
 | `RENDER_API_KEY`, `RENDER_SERVICE_ID` | secrets | Restart the public service after a successful publish |
+| `R2_REQUESTS_BUCKET` | secret | Optional. The dedicated bucket public users' coverage/analysis requests land in; unset skips every request step |
 
 On the Render service itself, set `MARKETSENTINEL_PUBLIC_SNAPSHOT_MANIFEST_URL` to
 `<R2_PUBLIC_BASE_URL>/latest.json` so each startup/restart fetches the latest published snapshot;
 leaving it unset keeps the image's baked-in `deploy/public-snapshot.db` exactly as before.
+
+### Shared public requests (optional)
+
+Any supported company can become covered, and any stored unanalysed article can be analysed, on a
+public user's request -- shared and anonymous, processed by the scheduled workflow under hard
+per-run caps, published for everyone (see
+[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md#shared-public-requests)).
+To enable it:
+
+1. Create one **dedicated** R2 bucket for requests (never the private or public snapshot bucket)
+   and an R2 API token with *Object Read & Write* scoped to that bucket only.
+2. On the Render service set `MARKETSENTINEL_PUBLIC_REQUESTS_BUCKET`,
+   `MARKETSENTINEL_PUBLIC_REQUESTS_ENDPOINT_URL` (`https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com`),
+   `MARKETSENTINEL_PUBLIC_REQUESTS_ACCESS_KEY_ID`, and
+   `MARKETSENTINEL_PUBLIC_REQUESTS_SECRET_ACCESS_KEY` from that token. The API then exposes the
+   two request endpoints and the client shows *Start coverage* / *Analyse*.
+3. Add the `R2_REQUESTS_BUCKET` secret to GitHub Actions (the workflow's existing R2 credentials
+   must be able to read and delete in it).
+
+Per-run worker caps (`max_new_tickers` 3, `max_article_requests` 20, `max_new_total` 40,
+`max_tickers` 12) and public-side caps (`MARKETSENTINEL_PUBLIC_MAX_PENDING_COVERAGE_REQUESTS` 20,
+`..._MAX_PENDING_ARTICLE_REQUESTS` 100, `..._MAX_COVERED_COMPANIES` 40,
+`..._REQUEST_RATE_LIMIT_PER_MINUTE` 30) are all configuration; the worst-case spend per run is
+`max_new_total + max_article_requests` analyses however many requests are queued.
 
 ### Bootstrap: seed R2 before the first scheduled run
 

@@ -1,6 +1,8 @@
 import type {
+  ArticleAnalysisRequestView,
   CapabilitiesView,
   CompanyOverview,
+  CoverageRequestView,
   RelevantNewsView,
   StoredArticleAnalysisView,
   UniverseResult,
@@ -11,17 +13,25 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000
 export class ApiNotFoundError extends Error {}
 export class ApiServerError extends Error {}
 export class ApiNetworkError extends Error {}
+/** 409 or 429: the request was understood but refused by a cap, a limit, or its current state. */
+export class ApiRefusedError extends Error {}
 
 /**
- * Every call in this module is a GET. This app has no write client at all: it never triggers
- * ingestion, sentiment scoring, a coverage refresh, or a paid per-article analysis. The two
- * endpoints that spend money (POST /api/v1/analyze, POST /api/v1/articles/analyze) have no
- * counterpart here, and a public deployment additionally refuses them at the API boundary.
+ * Reads are GETs. The only writes this client makes are the two *request* POSTs at the bottom of
+ * this module, which record a shared, anonymous request for the private scheduled worker and
+ * spend nothing themselves. The endpoints that spend money directly (POST /api/v1/analyze,
+ * POST /api/v1/articles/analyze) still have no counterpart here, and a public deployment refuses
+ * them at the API boundary regardless.
  */
-async function getJson<T>(path: string, notFoundMessage: string, signal?: AbortSignal): Promise<T> {
+async function requestJson<T>(
+  method: "GET" | "POST",
+  path: string,
+  notFoundMessage: string,
+  signal?: AbortSignal,
+): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { method: "GET", signal });
+    response = await fetch(`${API_BASE_URL}${path}`, { method, signal });
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === "AbortError") {
       throw cause;
@@ -36,6 +46,13 @@ async function getJson<T>(path: string, notFoundMessage: string, signal?: AbortS
     );
   }
 
+  if (response.status === 409 || response.status === 429) {
+    const body = await safeJson(response);
+    throw new ApiRefusedError(
+      typeof body?.detail === "string" ? body.detail : "The request was not accepted.",
+    );
+  }
+
   if (!response.ok) {
     const body = await safeJson(response);
     throw new ApiServerError(
@@ -46,6 +63,10 @@ async function getJson<T>(path: string, notFoundMessage: string, signal?: AbortS
   }
 
   return (await response.json()) as T;
+}
+
+function getJson<T>(path: string, notFoundMessage: string, signal?: AbortSignal): Promise<T> {
+  return requestJson<T>("GET", path, notFoundMessage, signal);
 }
 
 /**
@@ -119,6 +140,34 @@ export function searchConstituents(
     `/api/v1/constituents/search?${params}`,
     "Constituent search was not found.",
     signal,
+  );
+}
+
+/**
+ * Asks for shared coverage of one company. Matches POST
+ * /api/v1/companies/{symbol}/coverage-requests. Records a request only: the private scheduled
+ * worker starts coverage on a later run, and the result is then visible to everyone.
+ */
+export function requestCoverage(symbol: string): Promise<CoverageRequestView> {
+  return requestJson<CoverageRequestView>(
+    "POST",
+    `/api/v1/companies/${encodeURIComponent(symbol)}/coverage-requests`,
+    "Coverage requests are not available on this deployment.",
+  );
+}
+
+/**
+ * Asks for the analysis of one stored article. Matches POST
+ * /api/v1/companies/{symbol}/articles/{article_id}/analysis-requests. Likewise a request only.
+ */
+export function requestArticleAnalysis(
+  symbol: string,
+  articleId: string,
+): Promise<ArticleAnalysisRequestView> {
+  return requestJson<ArticleAnalysisRequestView>(
+    "POST",
+    `/api/v1/companies/${encodeURIComponent(symbol)}/articles/${encodeURIComponent(articleId)}/analysis-requests`,
+    "Analysis requests are not available on this deployment.",
   );
 }
 

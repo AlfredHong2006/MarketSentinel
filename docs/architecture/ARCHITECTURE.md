@@ -542,6 +542,47 @@ the function never raises, and the Dockerfile sequences the two commands with `;
 uvicorn starts regardless. A "publish" therefore ends in a **Render restart, not a redeploy**: the
 container image never changes between coverage runs, only the snapshot it fetches on the way up.
 
+## Shared public requests
+
+[public_requests.py](../../src/marketsentinel/public_requests.py). The public deployment is a
+read-only window and holds no LLM credential, yet any supported company must be able to *become*
+covered and any stored, unanalysed article must be requestable -- by anyone, for everyone. The
+shape is a **request drop-box**, not a queue service:
+
+- **The public API records a request as one small JSON object** in a dedicated S3-compatible
+  (Cloudflare R2) bucket -- `coverage/<TICKER>.json` or `articles/<TICKER>/<article_id>.json` --
+  via `POST /api/v1/companies/{symbol}/coverage-requests` and
+  `POST /api/v1/companies/{symbol}/articles/{article_id}/analysis-requests` (both `202`). Keys are
+  idempotent, so a repeated request overwrites itself and the number of distinct requests is
+  bounded by the universe plus the stored corpus. Nothing about the requester is stored. The
+  bucket is the only durable state: the public host's disk is ephemeral (reset on every restart,
+  and every publish restarts it), so the API keeps only an in-memory mirror of what is pending,
+  rebuilt from the bucket at startup, and reports it through `/api/v1/capabilities`
+  (`supports_coverage_requests`, `covered_companies`, `pending_coverage_requests`,
+  `pending_article_requests`). The credential on the public host is scoped to this one bucket; it
+  can never reach the private corpus or the published snapshot. Without a configured store the
+  endpoints do not exist (`404`), like the spending endpoints in public mode.
+- **Asking is capped; spending is capped elsewhere.** The API validates the ticker against the
+  constituent universe and the article against the stored corpus (non-demo, no current-contract
+  analysis), and refuses with `429` beyond the pending-coverage cap, the pending-article cap, the
+  covered-plus-pending company ceiling, or the process-wide requests-per-minute limit (all
+  `MARKETSENTINEL_PUBLIC_*` settings). None of these is what bounds spend.
+- **The worker admits under hard per-run caps.** The scheduled workflow syncs the bucket into a
+  directory, then `scripts/run_coverage_cycle.py --mode requests` activates at most
+  `--max-new-tickers` requested companies (idempotent, spends nothing) and runs at most
+  `--max-article-requests` article requests through the explicit-request ledger runner (the same
+  `allow_terminal_retry` path as the private per-article endpoint, so a stored analysis is
+  reused rather than re-paid). It writes the exact keys it consumed; after the private
+  checkpoint the workflow deletes those keys and no others, so everything it did not reach --
+  and everything that arrived during the run -- stays queued. The cycle then runs
+  `--all-active` (every ticker in `company_coverage`), never-cycled first then least recently
+  attempted, under `--max-tickers` (round-robin across runs) and `--max-new-total` (a hard
+  ceiling on paid attempts in one invocation regardless of how many companies are covered).
+- **Results reach everyone the existing way.** A processed coverage request is simply an active
+  row in `company_coverage` plus stored articles and analyses in the next published snapshot; a
+  processed article request is a stored analysis. No request table, no schema change, and the
+  derived layers stay recomputed on read.
+
 ## Frozen fixtures vs the live database
 
 Two different things, deliberately not reconciled:

@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "beautifulsoup4>=4.13",
+    "boto3>=1.43.93",
     "fastapi>=0.116",
     "feedparser>=6.0",
     "httpx>=0.28",

@@ -706,6 +706,34 @@ class CapabilitiesView(BaseModel):
     coverage: dict[str, int] = Field(default_factory=dict)
     supports_refresh: bool
     supports_article_analysis: bool
+    # Shared public requests (public_requests.py). ``supports_coverage_requests`` is true only
+    # when a request store is configured; the two pending lists are the global queue everyone
+    # sees, and ``covered_companies`` is every ticker under continuous coverage in the ledger --
+    # so a client can tell "start coverage", "queued", and "covered" apart without guessing.
+    supports_coverage_requests: bool = False
+    covered_companies: list[str] = Field(default_factory=list)
+    pending_coverage_requests: list[str] = Field(default_factory=list)
+    pending_article_requests: list[str] = Field(default_factory=list)
+
+
+class CoverageRequestView(BaseModel):
+    """The outcome of asking for shared coverage of one company.
+
+    ``queued`` recorded a new request; ``already_queued`` and ``covered`` are honest no-ops.
+    Nothing here is an analysis result: the request is processed later by the private worker.
+    """
+
+    symbol: str
+    state: Literal["queued", "already_queued", "covered"]
+    message: str
+
+
+class ArticleAnalysisRequestView(BaseModel):
+    """The outcome of asking for the analysis of one stored article, likewise never a result."""
+
+    article_id: str
+    state: Literal["queued", "already_queued", "analysed"]
+    message: str
 
 
 class RelevantNewsView(BaseModel):

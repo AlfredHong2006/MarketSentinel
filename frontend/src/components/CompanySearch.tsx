@@ -20,6 +20,8 @@ function coverageLabel(symbol: string, capabilities: CapabilitiesView | null): s
     return `Prepared coverage · ${count} articles`;
   }
   if (count > 0) return `${count} stored articles`;
+  if (capabilities.covered_companies.includes(symbol)) return "Coverage active · awaiting results";
+  if (capabilities.pending_coverage_requests.includes(symbol)) return "Coverage requested";
   return "No stored coverage";
 }
 
