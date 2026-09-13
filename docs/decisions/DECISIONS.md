@@ -126,3 +126,9 @@ Private `/api/v1/analyze` and the per-article analysis endpoint spend only throu
 Activation spends nothing: existing current-contract analyses become `analyzed`, older unanalysed history becomes `baseline`.
 
 The ledger is operational state only. Materiality, grouping, ranking, and risks remain deterministic and recomputed on read.
+
+A provider-cap hit (`partial`) must never advance a watermark past articles it did not return; this is verified against a real smoke-test corpus, not only synthetic fixtures.
+
+`google_news_rss` is windowed into day-sized, date-bounded requests before its result cap is evaluated, so a high-volume ticker converges to `ok` instead of hitting the cap every cycle. This only reduces how often `partial` occurs; the underlying not-advance-on-partial rule above is unchanged, so a single day too dense for the cap still leaves the watermark in place rather than guessing.
+
+Each windowed request is allowed up to Google's own observed per-request ceiling (100 entries, confirmed against the live endpoint and unaffected by the date range asked for), not the smaller interactive-refresh budget: that budget was sized for one flat multi-day request and would otherwise re-impose the same cap on every single day. Google's `after:`/`before:` operators do not accept a time component (confirmed against the live endpoint: a time-bounded query returns nothing), so no window can be split finer than one calendar day. A day genuinely exceeding Google's own ceiling is a hard limit of this data source and still correctly reports `partial`.

@@ -19,7 +19,7 @@ ranking, and risks are untouched and stay recomputed on read.
 """
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -30,7 +30,13 @@ from marketsentinel.analysis_ledger import (
     deterministic_skip_reason,
     processing_order,
 )
-from marketsentinel.domain import Article, Constituent, NewsFetchResult
+from marketsentinel.domain import (
+    Article,
+    Constituent,
+    IngestionFunnel,
+    NewsFetchResult,
+    SourceHealth,
+)
 from marketsentinel.errors import CoverageNotActiveError
 from marketsentinel.event_analysis import EVIDENCE_WINDOW_DAYS_AFTER
 from marketsentinel.normalization import deduplicate_with_diagnostics, deduplication_reason
@@ -49,6 +55,27 @@ from marketsentinel.storage.sqlite import (
 # their stated publication time; the overlap collects them, and deduplication makes the repeated
 # part of the window free.
 DEFAULT_OVERLAP = timedelta(hours=48)
+
+# RecentProviderSource's own window-splitting step. A provider such as Google News RSS enforces
+# its own result cap per request, with no cursor to page past it; asking it for one day at a time
+# instead of the whole lookback keeps each request's own candidate pool well under that cap for a
+# normal news day, so the *combined* fetch converges instead of hitting the cap on every cycle.
+#
+# Google's date search operators (``after:``/``before:``) are day-granularity only: appending a
+# time component to either makes Google return zero results rather than a finer slice (checked
+# directly against the live endpoint), so a window cannot usefully be split any narrower than one
+# day through this mechanism.
+DEFAULT_RECENT_WINDOW = timedelta(days=1)
+
+# Google's own per-request result ceiling for this search endpoint: checked directly against the
+# live endpoint, a one-day query and a seven-day query for the same terms both returned exactly
+# 100 entries, so this is a hard server-side cap on one request, not a symptom of a narrow date
+# range. A day-sized window's own request should be allowed up to this ceiling -- an interactive
+# per-refresh budget sized for a flat multi-day request would otherwise needlessly truncate a
+# single dense day a second time, below what Google already handed back for that one request.
+# Undocumented and could change without notice; nothing here depends on it being exactly right,
+# only on it being close, since a day genuinely denser than this still correctly stays `partial`.
+GOOGLE_NEWS_RSS_RESULT_CAP = 100
 
 
 class ConstituentResolver(Protocol):
@@ -82,16 +109,89 @@ class HistoricalProviderSource:
 
 @dataclass(frozen=True)
 class RecentProviderSource:
-    """A recent-news provider such as Google News RSS, which always reads up to now."""
+    """A recent-news provider such as Google News RSS, windowed against its own result cap.
+
+    The provider enforces a cap per request with no cursor to page past it, so one flat request
+    over a wide, high-volume span hits that cap every cycle and never converges (Google returns
+    its own top matches for the query, not a complete list). Splitting ``[since, until]`` into
+    ``window``-sized, non-overlapping, date-bounded requests gives each slice its own share of the
+    cap instead: a slice still hitting its own cap is rare (it means that one slice alone was too
+    dense), and only then does the combined result stay ``partial``.
+
+    Each window's own request is allowed up to ``GOOGLE_NEWS_RSS_RESULT_CAP`` articles even when
+    ``max_articles`` (an interactive-refresh budget shared with other callers) is smaller: that
+    budget was sized for one flat request over the whole lookback, and reusing it unchanged per
+    day would silently re-impose the same cap this class exists to get past. ``max_articles``
+    still raises the per-window request further for a caller that explicitly wants more.
+    """
 
     name: str
     provider: NewsProvider
     max_lookback: timedelta
     max_articles: int
+    window: timedelta = DEFAULT_RECENT_WINDOW
 
     def fetch(self, constituent: Constituent, since: datetime, until: datetime) -> NewsFetchResult:
-        del until
-        return self.provider.fetch(constituent, since, self.max_articles)
+        window_cap = max(self.max_articles, GOOGLE_NEWS_RSS_RESULT_CAP)
+        return _merge_fetch_results(
+            self.provider.fetch(constituent, chunk_since, window_cap, until=chunk_until)
+            for chunk_since, chunk_until in _fetch_windows(since, until, self.window)
+        )
+
+
+def _fetch_windows(
+    since: datetime, until: datetime, step: timedelta
+) -> list[tuple[datetime, datetime]]:
+    """Split ``[since, until]`` into contiguous, non-overlapping ``step``-sized windows.
+
+    Pure. Oldest window first. A span shorter than ``step`` yields exactly one window; a span of
+    zero length (``since >= until``) yields none.
+    """
+
+    windows: list[tuple[datetime, datetime]] = []
+    cursor = until
+    while cursor > since:
+        start = max(since, cursor - step)
+        windows.append((start, cursor))
+        cursor = start
+    return list(reversed(windows))
+
+
+def _merge_fetch_results(results: Iterable[NewsFetchResult]) -> NewsFetchResult:
+    """Combine independently windowed fetches into the one result ``fetch_outcome`` classifies.
+
+    Pure. Any window's provider failure or cap hit carries through to the combined result exactly
+    as it would from a single flat fetch, so the watermark-advancement contract is unchanged: the
+    caller cannot tell a windowed fetch from an unwindowed one from the result alone.
+    """
+
+    results = list(results)
+    if not results:
+        return NewsFetchResult(
+            articles=[],
+            health=SourceHealth(provider="", status="healthy"),
+            funnel=IngestionFunnel(),
+        )
+    articles = [article for result in results for article in result.articles]
+    funnel = IngestionFunnel()
+    for result in results:
+        funnel = funnel.merged(result.funnel)
+    unavailable = any(result.health.status == "unavailable" for result in results)
+    degraded = any(result.health.status == "degraded" for result in results)
+    status = "unavailable" if unavailable else "degraded" if degraded else "healthy"
+    messages = dict.fromkeys(result.health.message for result in results if result.health.message)
+    return NewsFetchResult(
+        articles=articles,
+        health=SourceHealth(
+            provider=results[0].health.provider,
+            status=status,
+            records_received=sum(result.health.records_received for result in results),
+            valid_records=sum(result.health.valid_records for result in results),
+            latency_ms=sum(result.health.latency_ms or 0 for result in results),
+            message="; ".join(messages) or None,
+        ),
+        funnel=funnel,
+    )
 
 
 def fetch_window(

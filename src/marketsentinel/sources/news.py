@@ -39,6 +39,8 @@ class NewsProvider(Protocol):
         constituent: Constituent,
         since: datetime,
         max_articles: int,
+        *,
+        until: datetime | None = None,
     ) -> NewsFetchResult: ...
 
 
@@ -76,10 +78,31 @@ class GoogleNewsRssProvider:
         constituent: Constituent,
         since: datetime,
         max_articles: int,
+        *,
+        until: datetime | None = None,
     ) -> NewsFetchResult:
+        """Fetch articles published in ``[since, now]``, or in ``[since, until]`` when bounded.
+
+        ``until`` is optional and keyword-only so every existing caller (the live news path,
+        candidate selection, demo/backfill) is unaffected: omitting it keeps the original
+        "since, relative to now" query exactly as before. Passing it switches to Google's
+        absolute-date search operators, which lets a caller (continuous coverage) split a wide
+        span into narrower windows -- each with its own share of Google's own result cap -- instead
+        of one flat query being capped as a whole.
+        """
+
         started = time.perf_counter()
-        lookback_days = max(1, (utc_now() - ensure_utc(since)).days + 1)
-        query = f'"{constituent.name}" OR "{constituent.symbol} stock" when:{lookback_days}d'
+        normalized_since = ensure_utc(since)
+        normalized_until = ensure_utc(until) if until is not None else None
+        if normalized_until is None:
+            lookback_days = max(1, (utc_now() - normalized_since).days + 1)
+            query = f'"{constituent.name}" OR "{constituent.symbol} stock" when:{lookback_days}d'
+        else:
+            query = (
+                f'("{constituent.name}" OR "{constituent.symbol} stock") '
+                f"after:{normalized_since.date().isoformat()} "
+                f"before:{(normalized_until + timedelta(days=1)).date().isoformat()}"
+            )
         try:
             response = self._request(query)
         except httpx.HTTPError as exc:
@@ -107,7 +130,10 @@ class GoogleNewsRssProvider:
             source = str(entry.get("source", {}).get("title", "Unknown source")).strip()
             if source != "Unknown source" and title.endswith(f" - {source}"):
                 title = title[: -(len(source) + 3)].strip()
-            if published is None or published < ensure_utc(since):
+            if published is None or published < normalized_since:
+                invalid_dates += 1
+                continue
+            if normalized_until is not None and published > normalized_until:
                 invalid_dates += 1
                 continue
             if not url:

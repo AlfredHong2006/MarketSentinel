@@ -419,15 +419,31 @@ terminal job; automatic work never does.
 **One cycle per ticker.**
 
 1. *Ingest* — each provider (`gdelt`, `google_news_rss`) fetches independently from its own
-   watermark minus a 48-hour overlap, clamped to its lookback (a clamp is reported as a gap). New
-   articles are deduplicated against stored rows, upserted, FinBERT-scored, and daily sentiment is
-   recomputed, all *before* any watermark moves. Only an `ok` or `empty` fetch advances a
-   watermark. A `failed` fetch, and a `partial` fetch that hit the provider's article cap, leave it
-   in place: the articles a capped fetch returned are stored, and the next cycle retries the
-   unresolved window from the previous watermark instead of skipping the older articles the cap
-   cut off. `consecutive_failures` counts consecutive `failed` *and* `partial` fetches and resets on
-   `ok`/`empty`, so a window a provider cannot cover within its cap stays visible rather than
-   silently retried forever. Watermarks never move backwards.
+   watermark minus a 48-hour overlap, clamped to its lookback (a clamp is reported as a gap).
+   `google_news_rss` (`RecentProviderSource`) additionally splits that span into day-sized,
+   date-bounded requests (`_fetch_windows`) and merges the results (`_merge_fetch_results`) before
+   the rest of ingest sees them: Google's RSS search enforces its own result cap per request with
+   no cursor to page past it, so one flat request over a high-volume week hits that cap every
+   cycle, while day-sized requests each stay comfortably under it for a normal news day. Google's
+   date operators (`after:`/`before:`) are day-granularity only -- a time component makes Google
+   return nothing, checked directly against the live endpoint -- so a window cannot be split any
+   finer than one day this way. Each window's own request is allowed up to
+   `GOOGLE_NEWS_RSS_RESULT_CAP` (100, Google's own observed per-request ceiling regardless of the
+   date range asked for) rather than the smaller interactive-refresh `max_articles` budget, which
+   was sized for one flat request over the whole span and would otherwise silently re-impose the
+   same cap per day. A merged result carries through any one window's failure or cap hit exactly
+   as an unwindowed fetch would, so the caller cannot tell the two apart, and a single day genuinely
+   denser than Google's own ceiling still correctly stays `partial` -- windowing raises how much a
+   dense day can converge, it does not remove the underlying per-request ceiling. New articles are
+   deduplicated against stored
+   rows, upserted, FinBERT-scored, and daily sentiment is recomputed, all *before* any watermark
+   moves. Only an `ok` or `empty` fetch advances a watermark. A `failed` fetch, and a `partial`
+   fetch that hit the provider's article cap (now only when even a single day is too dense to
+   fit), leave it in place: the articles a capped fetch returned are stored, and the next cycle
+   retries the unresolved window from the previous watermark instead of skipping the older
+   articles the cap cut off. `consecutive_failures` counts consecutive `failed` *and* `partial`
+   fetches and resets on `ok`/`empty`, so a window a provider cannot cover within its cap stays
+   visible rather than silently retried forever. Watermarks never move backwards.
 2. *Reconcile* — every stored article without a job gets exactly one: `analyzed/preexisting`,
    `skipped/<rule>`, `baseline`, or `pending/eligible`. This also covers articles stored by
    `/analyze` or backfill, and a crash between storing and enqueueing.
