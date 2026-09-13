@@ -13,6 +13,7 @@ from marketsentinel.config import Settings
 from marketsentinel.constituents import CacheOnlyConstituentResolver
 from scripts.backfill_historical_intelligence import (
     build_backfill_service,
+    concurrency_warning,
     horizon_days_for,
     parse_as_of,
 )
@@ -95,3 +96,13 @@ def test_ordinary_modes_keep_the_fetching_constituent_service(writable_tmp_path)
     assert not isinstance(
         service.article_analysis_runner.constituents, CacheOnlyConstituentResolver
     )
+
+
+def test_backfill_warns_that_it_must_not_run_concurrently_with_continuous_coverage() -> None:
+    idle = concurrency_warning("NVDA", under_continuous_coverage=False)
+    covered = concurrency_warning("NVDA", under_continuous_coverage=True)
+
+    assert "NVDA" in idle and "ledger lease" in idle and "run_coverage_cycle" in idle
+    assert "continuous coverage" not in idle.split("paid for twice.")[1]
+    assert covered.startswith(idle)
+    assert "is under continuous coverage" in covered

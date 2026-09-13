@@ -24,6 +24,32 @@ class ArticleAnalysisCompatibility:
             and self.accepts_for_display(analysis)
         )
 
+    @property
+    def contract_key(self) -> str:
+        """Stable identity of the analysis contract, deliberately without evidence.
+
+        Keys the analysis job ledger: one article is analysed once per contract. A model, prompt,
+        or schema change yields a different key and therefore a fresh, explicit set of jobs.
+        """
+
+        return (
+            f"m={self.model_version};a={self.stage_a_prompt_version};"
+            f"b={self.stage_b_prompt_version};c={self.stage_c_prompt_version};"
+            f"s={self.schema_version}"
+        )
+
+    def accepts_for_contract(self, analysis: ArticleAnalysis) -> bool:
+        """Whether a stored result completes an article's analysis job under this contract.
+
+        Display compatibility plus a matching model version, *without* the evidence fingerprint.
+        This is a spending rule, not a cache rule: it lets the job ledger avoid paying again when
+        only the evidence pool has grown since the analysis was produced. It never replaces
+        ``accepts_for_cache``, so an explicit evidence refresh still regenerates, and the ledger
+        records separately whether the stored evidence is still current.
+        """
+
+        return analysis.model_version == self.model_version and self.accepts_for_display(analysis)
+
     def accepts_for_display(self, analysis: ArticleAnalysis) -> bool:
         """Whether the running application can safely interpret this typed payload."""
 

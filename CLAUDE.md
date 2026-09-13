@@ -49,8 +49,11 @@ src/marketsentinel/
   dashboard_*.py              pure presentation preparation per dashboard section
 
   backfill_service.py / historical_backfill.py    manual one-shot historical backfill
+  analysis_ledger.py          job ledger runner: leases, retries, tokens, skip rule, ordering
+  coverage_cycle.py           continuous coverage: per-provider watermarks → reconcile → analyse
   aggregation/, sentiment/, forecasting/          supporting infrastructure
-scripts/                      manual CLIs: backfill, materiality evaluation, audit, smoke
+scripts/                      manual CLIs: backfill, coverage cycle, materiality evaluation,
+                              audit, smoke
 tests/fixtures/               frozen labelled gold sets
 ```
 

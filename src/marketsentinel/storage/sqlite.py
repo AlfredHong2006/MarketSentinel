@@ -2,8 +2,9 @@
 
 import logging
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from contextlib import closing
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.domain import Article, ArticleAnalysis, DailySentiment, ScoredArticle
 from marketsentinel.normalization import normalize_text, normalize_url
+from marketsentinel.timeutils import ensure_utc
 
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -79,8 +81,70 @@ CREATE TABLE IF NOT EXISTS article_intelligence_analyses (
 CREATE INDEX IF NOT EXISTS idx_article_intelligence_analyses_lookup
     ON article_intelligence_analyses (article_fingerprint, model_version, cache_version, schema_version);
 
-PRAGMA user_version = 4;
+-- Version 5: the coverage ledger. Operational state only -- no materiality verdict, group, rank,
+-- or risk score is ever stored here; those stay recomputed from stored analyses.
+CREATE TABLE IF NOT EXISTS company_coverage (
+    ticker TEXT PRIMARY KEY,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    ledger_started_at TEXT NOT NULL,
+    live_window_days INTEGER NOT NULL CHECK (live_window_days > 0),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ingestion_watermarks (
+    ticker TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    ingested_through TEXT,
+    last_window_start TEXT,
+    last_attempt_at TEXT NOT NULL,
+    last_success_at TEXT,
+    last_status TEXT NOT NULL CHECK (last_status IN ('ok', 'partial', 'empty', 'failed')),
+    last_message TEXT,
+    last_articles INTEGER NOT NULL DEFAULT 0,
+    last_request_limited INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (ticker, provider)
+);
+
+CREATE TABLE IF NOT EXISTS article_analysis_jobs (
+    article_fingerprint TEXT NOT NULL REFERENCES articles(fingerprint) ON DELETE CASCADE,
+    analysis_contract TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    published_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'leased', 'retry_wait', 'analyzed', 'skipped', 'failed', 'baseline')
+    ),
+    reason TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    last_failure_category TEXT,
+    last_failure_at TEXT,
+    next_attempt_at TEXT,
+    lease_owner TEXT,
+    lease_expires_at TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    analysis_evidence_fingerprint TEXT,
+    analysis_created_at TEXT,
+    evidence_checked_at TEXT,
+    evidence_current INTEGER CHECK (evidence_current IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    terminal_at TEXT,
+    PRIMARY KEY (article_fingerprint, analysis_contract)
+);
+
+CREATE INDEX IF NOT EXISTS idx_article_analysis_jobs_ticker_state
+    ON article_analysis_jobs (ticker, analysis_contract, state);
+
+PRAGMA user_version = 5;
 """
+
+# Job states. Terminal states are never left by an ordinary transition; the single exception is
+# that a stored current-contract analysis always completes a job as ``analyzed``, because the
+# stored analysis is the ground truth the ledger describes.
+JOB_ACTIVE_STATES = ("pending", "leased", "retry_wait")
+JOB_TERMINAL_STATES = ("analyzed", "skipped", "failed", "baseline")
 
 _DAILY_SENTIMENT_MIGRATIONS = {
     "trend_3": "REAL NOT NULL DEFAULT 0",
@@ -499,6 +563,664 @@ class SQLiteRepository:
             for row in rows
         ]
         return list(reversed(values))
+
+    # -- Coverage ledger ----------------------------------------------------------------------
+
+    def activate_company_coverage(
+        self, ticker: str, *, started_at: datetime, live_window_days: int
+    ) -> "CompanyCoverage":
+        """Register a ticker for continuous coverage. Idempotent: a re-activation keeps the
+        original ``ledger_started_at`` and live window, so the baseline boundary never moves."""
+
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO company_coverage (
+                    ticker, active, ledger_started_at, live_window_days, updated_at
+                ) VALUES (?, 1, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET active = 1, updated_at = excluded.updated_at
+                """,
+                (ticker, _timestamp(started_at), live_window_days, _timestamp(started_at)),
+            )
+        coverage = self.get_company_coverage(ticker)
+        assert coverage is not None
+        return coverage
+
+    def get_company_coverage(self, ticker: str) -> "CompanyCoverage | None":
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                "SELECT * FROM company_coverage WHERE ticker = ?", (ticker,)
+            ).fetchone()
+        if row is None:
+            return None
+        return CompanyCoverage(
+            ticker=row["ticker"],
+            active=bool(row["active"]),
+            ledger_started_at=datetime.fromisoformat(row["ledger_started_at"]),
+            live_window_days=int(row["live_window_days"]),
+        )
+
+    def get_ingestion_watermark(self, ticker: str, provider: str) -> "IngestionWatermark | None":
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                "SELECT * FROM ingestion_watermarks WHERE ticker = ? AND provider = ?",
+                (ticker, provider),
+            ).fetchone()
+        return _row_to_watermark(row) if row is not None else None
+
+    def list_ingestion_watermarks(self, ticker: str) -> list["IngestionWatermark"]:
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                "SELECT * FROM ingestion_watermarks WHERE ticker = ? ORDER BY provider", (ticker,)
+            ).fetchall()
+        return [_row_to_watermark(row) for row in rows]
+
+    def record_ingestion_attempt(
+        self,
+        *,
+        ticker: str,
+        provider: str,
+        window_start: datetime,
+        attempted_at: datetime,
+        status: str,
+        message: str | None,
+        articles: int,
+        request_limited: int,
+        ingested_through: datetime | None,
+    ) -> None:
+        """Record one provider fetch for one ticker.
+
+        ``ingested_through`` is supplied only when the fetch completed; ``None`` leaves the
+        existing watermark in place. The watermark never moves backwards.
+
+        ``consecutive_failures`` counts consecutive *problem* fetches -- ``failed`` and
+        ``partial`` alike, since neither advances the watermark -- and resets on ``ok`` or
+        ``empty``. ``last_success_at`` records only completed fetches.
+        """
+
+        problem = status in ("failed", "partial")
+        through = _timestamp(ingested_through) if ingested_through is not None else None
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO ingestion_watermarks (
+                    ticker, provider, ingested_through, last_window_start, last_attempt_at,
+                    last_success_at, last_status, last_message, last_articles,
+                    last_request_limited, consecutive_failures
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker, provider) DO UPDATE SET
+                    ingested_through = CASE
+                        WHEN excluded.ingested_through IS NULL
+                            THEN ingestion_watermarks.ingested_through
+                        WHEN ingestion_watermarks.ingested_through IS NULL
+                            THEN excluded.ingested_through
+                        ELSE MAX(ingestion_watermarks.ingested_through, excluded.ingested_through)
+                    END,
+                    last_window_start = excluded.last_window_start,
+                    last_attempt_at = excluded.last_attempt_at,
+                    last_success_at = COALESCE(
+                        excluded.last_success_at, ingestion_watermarks.last_success_at
+                    ),
+                    last_status = excluded.last_status,
+                    last_message = excluded.last_message,
+                    last_articles = excluded.last_articles,
+                    last_request_limited = excluded.last_request_limited,
+                    consecutive_failures = CASE
+                        WHEN excluded.last_status IN ('failed', 'partial')
+                            THEN ingestion_watermarks.consecutive_failures + 1
+                        ELSE 0
+                    END
+                """,
+                (
+                    ticker,
+                    provider,
+                    through,
+                    _timestamp(window_start),
+                    _timestamp(attempted_at),
+                    _timestamp(attempted_at) if ingested_through is not None else None,
+                    status,
+                    message,
+                    articles,
+                    request_limited,
+                    1 if problem else 0,
+                ),
+            )
+
+    def insert_analysis_jobs(self, jobs: Sequence["NewAnalysisJob"]) -> int:
+        """Create job rows; an existing (article, contract) row is never replaced.
+
+        Returns how many rows were actually inserted, so a repeated reconcile reports zero.
+        """
+
+        if not jobs:
+            return 0
+        rows = [
+            (
+                job.article_fingerprint,
+                job.analysis_contract,
+                job.ticker,
+                _timestamp(job.published_at),
+                job.state,
+                job.reason,
+                job.analysis_evidence_fingerprint,
+                _timestamp(job.analysis_created_at) if job.analysis_created_at else None,
+                _timestamp(job.created_at),
+                _timestamp(job.created_at),
+                _timestamp(job.created_at) if job.state in JOB_TERMINAL_STATES else None,
+            )
+            for job in jobs
+        ]
+        with closing(self._connect()) as connection, connection:
+            before = connection.total_changes
+            connection.executemany(
+                """
+                INSERT INTO article_analysis_jobs (
+                    article_fingerprint, analysis_contract, ticker, published_at, state, reason,
+                    analysis_evidence_fingerprint, analysis_created_at, created_at, updated_at,
+                    terminal_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(article_fingerprint, analysis_contract) DO NOTHING
+                """,
+                rows,
+            )
+            return connection.total_changes - before
+
+    def articles_without_analysis_job(self, ticker: str, analysis_contract: str) -> list[Article]:
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT a.* FROM articles AS a
+                LEFT JOIN article_analysis_jobs AS j
+                  ON j.article_fingerprint = a.fingerprint AND j.analysis_contract = ?
+                WHERE a.ticker = ? AND j.article_fingerprint IS NULL
+                ORDER BY a.published_at DESC, a.fingerprint
+                """,
+                (analysis_contract, ticker),
+            ).fetchall()
+        return [_row_to_article(row) for row in rows]
+
+    def get_analysis_job(
+        self, article_fingerprint: str, analysis_contract: str
+    ) -> "AnalysisJob | None":
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                "SELECT * FROM article_analysis_jobs "
+                "WHERE article_fingerprint = ? AND analysis_contract = ?",
+                (article_fingerprint, analysis_contract),
+            ).fetchone()
+        return _row_to_job(row) if row is not None else None
+
+    def list_analysis_jobs(
+        self,
+        ticker: str,
+        analysis_contract: str,
+        states: Sequence[str] | None = None,
+    ) -> list["AnalysisJob"]:
+        query = "SELECT * FROM article_analysis_jobs WHERE ticker = ? AND analysis_contract = ?"
+        parameters: list[object] = [ticker, analysis_contract]
+        if states:
+            query += f" AND state IN ({','.join('?' for _ in states)})"
+            parameters.extend(states)
+        query += " ORDER BY published_at DESC, article_fingerprint"
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [_row_to_job(row) for row in rows]
+
+    def list_due_analysis_jobs(
+        self, ticker: str, analysis_contract: str, now: datetime
+    ) -> list["AnalysisJob"]:
+        """Jobs an automatic pass may claim now: pending, due retries, and expired leases."""
+
+        stamp = _timestamp(now)
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM article_analysis_jobs
+                WHERE ticker = ? AND analysis_contract = ?
+                  AND (
+                    state = 'pending'
+                    OR (state = 'retry_wait' AND next_attempt_at <= ?)
+                    OR (state = 'leased' AND lease_expires_at <= ?)
+                  )
+                ORDER BY published_at DESC, article_fingerprint
+                """,
+                (ticker, analysis_contract, stamp, stamp),
+            ).fetchall()
+        return [_row_to_job(row) for row in rows]
+
+    def analysis_job_summary(self, ticker: str, analysis_contract: str) -> "AnalysisJobSummary":
+        with closing(self._connect()) as connection, connection:
+            state_rows = connection.execute(
+                "SELECT state, COUNT(*) FROM article_analysis_jobs "
+                "WHERE ticker = ? AND analysis_contract = ? GROUP BY state",
+                (ticker, analysis_contract),
+            ).fetchall()
+            totals = connection.execute(
+                """
+                SELECT COALESCE(SUM(attempts), 0), COALESCE(SUM(failure_count), 0),
+                       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                       COALESCE(SUM(CASE WHEN evidence_current = 0 THEN 1 ELSE 0 END), 0)
+                FROM article_analysis_jobs WHERE ticker = ? AND analysis_contract = ?
+                """,
+                (ticker, analysis_contract),
+            ).fetchone()
+            untracked = connection.execute(
+                """
+                SELECT COUNT(*) FROM articles AS a
+                LEFT JOIN article_analysis_jobs AS j
+                  ON j.article_fingerprint = a.fingerprint AND j.analysis_contract = ?
+                WHERE a.ticker = ? AND j.article_fingerprint IS NULL
+                """,
+                (analysis_contract, ticker),
+            ).fetchone()
+        return AnalysisJobSummary(
+            states={str(row[0]): int(row[1]) for row in state_rows},
+            attempts=int(totals[0]),
+            failures=int(totals[1]),
+            input_tokens=int(totals[2]),
+            output_tokens=int(totals[3]),
+            evidence_changed=int(totals[4]),
+            articles_without_job=int(untracked[0]),
+        )
+
+    def contract_analyses(
+        self, ticker: str, compatibility: ArticleAnalysisCompatibility
+    ) -> dict[str, ArticleAnalysis]:
+        """Newest stored analysis per article that completes a job under ``compatibility``."""
+
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT analyses.article_fingerprint, analyses.analysis_json
+                FROM article_intelligence_analyses AS analyses
+                JOIN articles AS a ON a.fingerprint = analyses.article_fingerprint
+                WHERE a.ticker = ? AND analyses.model_version = ?
+                  AND analyses.schema_version = ?
+                ORDER BY analyses.created_at DESC, analyses.rowid DESC
+                """,
+                (ticker, compatibility.model_version, compatibility.schema_version),
+            ).fetchall()
+        return _newest_contract_analyses(rows, compatibility)
+
+    def latest_contract_analysis(
+        self, article_fingerprint: str, compatibility: ArticleAnalysisCompatibility
+    ) -> ArticleAnalysis | None:
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT article_fingerprint, analysis_json FROM article_intelligence_analyses
+                WHERE article_fingerprint = ? AND model_version = ? AND schema_version = ?
+                ORDER BY created_at DESC, rowid DESC
+                """,
+                (article_fingerprint, compatibility.model_version, compatibility.schema_version),
+            ).fetchall()
+        return _newest_contract_analyses(rows, compatibility).get(article_fingerprint)
+
+    def claim_analysis_job(
+        self,
+        article_fingerprint: str,
+        analysis_contract: str,
+        *,
+        owner: str,
+        now: datetime,
+        lease_expires_at: datetime,
+        allow_terminal_retry: bool = False,
+    ) -> "AnalysisJob | None":
+        """Atomically lease one job, or return ``None`` when it is not claimable.
+
+        A single compare-and-set UPDATE, so two processes can never both hold a job. Reclaiming
+        an expired lease counts the abandoned attempt, because a paid call may have happened.
+        ``allow_terminal_retry`` is only for an explicit per-article operator request.
+        """
+
+        claimable = (
+            "state = 'pending' OR (state = 'retry_wait' AND next_attempt_at <= :now) "
+            "OR (state = 'leased' AND lease_expires_at <= :now)"
+        )
+        if allow_terminal_retry:
+            claimable += " OR state IN ('retry_wait', 'failed', 'skipped', 'baseline')"
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE article_analysis_jobs SET
+                    attempts = attempts + CASE WHEN state = 'leased' THEN 1 ELSE 0 END,
+                    failure_count = failure_count + CASE WHEN state = 'leased' THEN 1 ELSE 0 END,
+                    last_failure_category = CASE
+                        WHEN state = 'leased' THEN 'lease_expired' ELSE last_failure_category
+                    END,
+                    last_failure_at = CASE
+                        WHEN state = 'leased' THEN :now ELSE last_failure_at
+                    END,
+                    state = 'leased',
+                    lease_owner = :owner,
+                    lease_expires_at = :lease,
+                    next_attempt_at = NULL,
+                    terminal_at = NULL,
+                    updated_at = :now
+                WHERE article_fingerprint = :fingerprint AND analysis_contract = :contract
+                  AND ({claimable})
+                """,
+                {
+                    "now": _timestamp(now),
+                    "owner": owner,
+                    "lease": _timestamp(lease_expires_at),
+                    "fingerprint": article_fingerprint,
+                    "contract": analysis_contract,
+                },
+            )
+            if cursor.rowcount != 1:
+                return None
+            row = connection.execute(
+                "SELECT * FROM article_analysis_jobs "
+                "WHERE article_fingerprint = ? AND analysis_contract = ?",
+                (article_fingerprint, analysis_contract),
+            ).fetchone()
+        return _row_to_job(row)
+
+    def finish_analysis_job(
+        self,
+        article_fingerprint: str,
+        analysis_contract: str,
+        *,
+        owner: str,
+        now: datetime,
+        state: str,
+        reason: str | None,
+        paid_attempt: bool,
+        input_tokens: int,
+        output_tokens: int,
+        failure_category: str | None = None,
+        next_attempt_at: datetime | None = None,
+        analysis: ArticleAnalysis | None = None,
+    ) -> bool:
+        """Record one attempt's outcome and release the lease.
+
+        Attempts, tokens, and failures are added unconditionally, because the spend happened
+        whether or not this process still holds the lease. The state transition itself is a
+        compare-and-set on the lease owner, so a process whose lease was reclaimed cannot
+        overwrite the new holder's state. Returns whether the transition applied.
+        """
+
+        stamp = _timestamp(now)
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE article_analysis_jobs SET
+                    attempts = attempts + ?,
+                    input_tokens = input_tokens + ?,
+                    output_tokens = output_tokens + ?,
+                    failure_count = failure_count + ?,
+                    last_failure_category = COALESCE(?, last_failure_category),
+                    last_failure_at = CASE WHEN ? IS NULL THEN last_failure_at ELSE ? END,
+                    updated_at = ?
+                WHERE article_fingerprint = ? AND analysis_contract = ?
+                """,
+                (
+                    1 if paid_attempt else 0,
+                    input_tokens,
+                    output_tokens,
+                    1 if failure_category else 0,
+                    failure_category,
+                    failure_category,
+                    stamp,
+                    stamp,
+                    article_fingerprint,
+                    analysis_contract,
+                ),
+            )
+            cursor = connection.execute(
+                """
+                UPDATE article_analysis_jobs SET
+                    state = ?,
+                    reason = ?,
+                    next_attempt_at = ?,
+                    lease_owner = NULL,
+                    lease_expires_at = NULL,
+                    analysis_evidence_fingerprint = COALESCE(?, analysis_evidence_fingerprint),
+                    analysis_created_at = COALESCE(?, analysis_created_at),
+                    evidence_checked_at = CASE
+                        WHEN ? IS NULL THEN evidence_checked_at ELSE NULL
+                    END,
+                    evidence_current = CASE WHEN ? IS NULL THEN evidence_current ELSE NULL END,
+                    terminal_at = ?,
+                    updated_at = ?
+                WHERE article_fingerprint = ? AND analysis_contract = ?
+                  AND state = 'leased' AND lease_owner = ?
+                """,
+                (
+                    state,
+                    reason,
+                    _timestamp(next_attempt_at) if next_attempt_at is not None else None,
+                    analysis.evidence_fingerprint if analysis else None,
+                    _timestamp(analysis.analysis_created_at) if analysis else None,
+                    analysis.evidence_fingerprint if analysis else None,
+                    analysis.evidence_fingerprint if analysis else None,
+                    stamp if state in JOB_TERMINAL_STATES else None,
+                    stamp,
+                    article_fingerprint,
+                    analysis_contract,
+                    owner,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def complete_analysis_job_from_existing(
+        self,
+        article_fingerprint: str,
+        analysis_contract: str,
+        *,
+        analysis: ArticleAnalysis,
+        now: datetime,
+    ) -> bool:
+        """Mark a job ``analyzed`` because a current-contract analysis is already stored.
+
+        Costs nothing. A job actively leased by another process is left alone: that process is
+        the one producing the analysis and will record its own attempt and tokens.
+        """
+
+        stamp = _timestamp(now)
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                """
+                UPDATE article_analysis_jobs SET
+                    state = 'analyzed',
+                    reason = 'preexisting',
+                    next_attempt_at = NULL,
+                    lease_owner = NULL,
+                    lease_expires_at = NULL,
+                    analysis_evidence_fingerprint = ?,
+                    analysis_created_at = ?,
+                    evidence_checked_at = NULL,
+                    evidence_current = NULL,
+                    terminal_at = ?,
+                    updated_at = ?
+                WHERE article_fingerprint = ? AND analysis_contract = ?
+                  AND state != 'analyzed'
+                  AND NOT (state = 'leased' AND lease_expires_at > ?)
+                """,
+                (
+                    analysis.evidence_fingerprint,
+                    _timestamp(analysis.analysis_created_at),
+                    stamp,
+                    stamp,
+                    article_fingerprint,
+                    analysis_contract,
+                    stamp,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def record_evidence_check(
+        self,
+        article_fingerprint: str,
+        analysis_contract: str,
+        *,
+        analysis: ArticleAnalysis,
+        current: bool,
+        now: datetime,
+    ) -> None:
+        """Record whether an analysed job's newest stored analysis still has current evidence."""
+
+        stamp = _timestamp(now)
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                UPDATE article_analysis_jobs SET
+                    analysis_evidence_fingerprint = ?,
+                    analysis_created_at = ?,
+                    evidence_checked_at = ?,
+                    evidence_current = ?,
+                    updated_at = ?
+                WHERE article_fingerprint = ? AND analysis_contract = ? AND state = 'analyzed'
+                """,
+                (
+                    analysis.evidence_fingerprint,
+                    _timestamp(analysis.analysis_created_at),
+                    stamp,
+                    1 if current else 0,
+                    stamp,
+                    article_fingerprint,
+                    analysis_contract,
+                ),
+            )
+
+
+@dataclass(frozen=True)
+class CompanyCoverage:
+    ticker: str
+    active: bool
+    ledger_started_at: datetime
+    live_window_days: int
+
+
+@dataclass(frozen=True)
+class IngestionWatermark:
+    ticker: str
+    provider: str
+    ingested_through: datetime | None
+    last_window_start: datetime | None
+    last_attempt_at: datetime
+    last_success_at: datetime | None
+    last_status: str
+    last_message: str | None
+    last_articles: int
+    last_request_limited: int
+    consecutive_failures: int
+
+
+@dataclass(frozen=True)
+class NewAnalysisJob:
+    article_fingerprint: str
+    analysis_contract: str
+    ticker: str
+    published_at: datetime
+    state: str
+    reason: str | None
+    created_at: datetime
+    analysis_evidence_fingerprint: str | None = None
+    analysis_created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class AnalysisJob:
+    article_fingerprint: str
+    analysis_contract: str
+    ticker: str
+    published_at: datetime
+    state: str
+    reason: str | None
+    attempts: int
+    failure_count: int
+    last_failure_category: str | None
+    next_attempt_at: datetime | None
+    lease_owner: str | None
+    lease_expires_at: datetime | None
+    input_tokens: int
+    output_tokens: int
+    analysis_evidence_fingerprint: str | None
+    analysis_created_at: datetime | None
+    evidence_checked_at: datetime | None
+    evidence_current: bool | None
+    terminal_at: datetime | None
+
+
+@dataclass(frozen=True)
+class AnalysisJobSummary:
+    states: dict[str, int]
+    attempts: int
+    failures: int
+    input_tokens: int
+    output_tokens: int
+    evidence_changed: int
+    articles_without_job: int
+
+
+def _timestamp(value: datetime) -> str:
+    """One fixed-width UTC form, so ledger timestamps compare correctly as text in SQL."""
+
+    return ensure_utc(value).isoformat(timespec="microseconds")
+
+
+def _optional_datetime(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value is not None else None
+
+
+def _row_to_watermark(row: sqlite3.Row) -> IngestionWatermark:
+    return IngestionWatermark(
+        ticker=row["ticker"],
+        provider=row["provider"],
+        ingested_through=_optional_datetime(row["ingested_through"]),
+        last_window_start=_optional_datetime(row["last_window_start"]),
+        last_attempt_at=datetime.fromisoformat(row["last_attempt_at"]),
+        last_success_at=_optional_datetime(row["last_success_at"]),
+        last_status=row["last_status"],
+        last_message=row["last_message"],
+        last_articles=int(row["last_articles"]),
+        last_request_limited=int(row["last_request_limited"]),
+        consecutive_failures=int(row["consecutive_failures"]),
+    )
+
+
+def _row_to_job(row: sqlite3.Row) -> AnalysisJob:
+    evidence_current = row["evidence_current"]
+    return AnalysisJob(
+        article_fingerprint=row["article_fingerprint"],
+        analysis_contract=row["analysis_contract"],
+        ticker=row["ticker"],
+        published_at=datetime.fromisoformat(row["published_at"]),
+        state=row["state"],
+        reason=row["reason"],
+        attempts=int(row["attempts"]),
+        failure_count=int(row["failure_count"]),
+        last_failure_category=row["last_failure_category"],
+        next_attempt_at=_optional_datetime(row["next_attempt_at"]),
+        lease_owner=row["lease_owner"],
+        lease_expires_at=_optional_datetime(row["lease_expires_at"]),
+        input_tokens=int(row["input_tokens"]),
+        output_tokens=int(row["output_tokens"]),
+        analysis_evidence_fingerprint=row["analysis_evidence_fingerprint"],
+        analysis_created_at=_optional_datetime(row["analysis_created_at"]),
+        evidence_checked_at=_optional_datetime(row["evidence_checked_at"]),
+        evidence_current=None if evidence_current is None else bool(evidence_current),
+        terminal_at=_optional_datetime(row["terminal_at"]),
+    )
+
+
+def _newest_contract_analyses(
+    rows: Iterable[sqlite3.Row], compatibility: ArticleAnalysisCompatibility
+) -> dict[str, ArticleAnalysis]:
+    newest: dict[str, ArticleAnalysis] = {}
+    for row in rows:
+        article_id = str(row["article_fingerprint"])
+        if article_id in newest:
+            continue
+        try:
+            analysis = ArticleAnalysis.model_validate_json(row["analysis_json"])
+        except ValidationError:
+            continue
+        if compatibility.accepts_for_contract(analysis):
+            newest[article_id] = analysis
+    return newest
 
 
 def _row_to_scored_article(row: sqlite3.Row) -> ScoredArticle:

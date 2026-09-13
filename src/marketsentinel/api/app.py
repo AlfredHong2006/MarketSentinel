@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
+from marketsentinel.analysis_ledger import LedgeredArticleAnalysisRunner
 from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import WikipediaConstituentService
 from marketsentinel.domain import (
@@ -39,7 +40,7 @@ from marketsentinel.event_analysis import (
 )
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.sentiment.finbert import FinBertAnalyzer
-from marketsentinel.service import MarketAnalysisService
+from marketsentinel.service import ArticleAnalysisRunner, MarketAnalysisService
 from marketsentinel.sources.historical import (
     GdeltHistoricalNewsProvider,
     GoogleNewsHistoricalProvider,
@@ -75,7 +76,9 @@ class Services:
     repository: SQLiteRepository
     constituents: WikipediaConstituentService
     analysis: MarketAnalysisService
-    article_events: ArticleEventAnalysisService
+    # The per-article analysis endpoint's runner. build_services supplies the ledger-aware runner,
+    # so neither private spending endpoint is a second, unrecorded way to pay for an article.
+    article_events: ArticleAnalysisRunner
 
 
 def build_services(settings: Settings) -> Services:
@@ -125,6 +128,27 @@ def build_services(settings: Settings) -> Services:
         constituents=constituents,
         evidence_limit=settings.article_analysis_evidence_limit,
     )
+    compatibility = ArticleAnalysisCompatibility(
+        model_version=settings.llm_model,
+        stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
+        stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
+        stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
+        schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
+    )
+    # Both private spending paths go through the analysis job ledger: it leases a job before a
+    # paid call, records attempts/failures/tokens, and reuses a stored current-contract analysis
+    # rather than paying again when only the evidence pool has grown. The automatic refresh never
+    # reopens a terminal job; an explicit per-article request may retry one.
+    automatic_runner = LedgeredArticleAnalysisRunner(
+        repository, article_events, compatibility, owner_prefix="api-refresh"
+    )
+    manual_runner = LedgeredArticleAnalysisRunner(
+        repository,
+        article_events,
+        compatibility,
+        allow_terminal_retry=True,
+        owner_prefix="api-article",
+    )
     analysis = MarketAnalysisService(
         constituents=constituents,
         news=news,
@@ -143,14 +167,8 @@ def build_services(settings: Settings) -> Services:
         historical_news_days=settings.historical_news_days,
         historical_news_max_articles=settings.historical_news_max_articles,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
-        article_analysis_compatibility=ArticleAnalysisCompatibility(
-            model_version=settings.llm_model,
-            stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
-            stage_b_prompt_version=STAGE_B_PROMPT_VERSION,
-            stage_c_prompt_version=STAGE_C_PROMPT_VERSION,
-            schema_version=ARTICLE_ANALYSIS_SCHEMA_VERSION,
-        ),
-        article_analysis_runner=article_events if settings.llm_api_key else None,
+        article_analysis_compatibility=compatibility,
+        article_analysis_runner=automatic_runner if settings.llm_api_key else None,
         analysis_auto_candidates=settings.analysis_auto_candidates,
         analysis_auto_max_new_per_run=settings.analysis_auto_max_new_per_run,
     )
@@ -158,7 +176,7 @@ def build_services(settings: Settings) -> Services:
         repository=repository,
         constituents=constituents,
         analysis=analysis,
-        article_events=article_events,
+        article_events=manual_runner,
     )
 
 

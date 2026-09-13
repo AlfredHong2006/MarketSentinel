@@ -481,6 +481,10 @@ class ArticleAnalysisResponse(BaseModel):
     status: Literal["cached", "generated", "unavailable", "failed", "not_found"]
     analysis: ArticleAnalysis | None = None
     message: str | None = None
+    # Machine-readable reason for a non-success status (for example ``timeout`` or
+    # ``semantic_validation``), so a retry policy can tell transient from permanent failures.
+    # Never carries provider payloads or secrets.
+    failure_category: str | None = None
 
 
 AnalysisResult.model_rebuild()

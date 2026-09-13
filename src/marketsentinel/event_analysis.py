@@ -447,12 +447,14 @@ class ArticleEventAnalysisService:
                 article_id=article_id,
                 status="not_found",
                 message="The requested stored article was not found.",
+                failure_category="not_found",
             )
         if article.is_demo:
             return ArticleAnalysisResponse(
                 article_id=article_id,
                 status="failed",
                 message="Article event analysis is limited to genuine stored source records, not demo data.",
+                failure_category="demo",
             )
         try:
             context = self._build_context(article)
@@ -495,17 +497,19 @@ class ArticleEventAnalysisService:
             )
         except ArticleAnalysisUnavailableError as exc:
             return ArticleAnalysisResponse(
-                article_id=article_id, status="unavailable", message=str(exc)
+                article_id=article_id,
+                status="unavailable",
+                message=str(exc),
+                failure_category="unavailable",
             )
         except (ArticleAnalysisProviderError, ArticleAnalysisValidationError) as exc:
-            LOGGER.warning(
-                "Article intelligence failed safely: category=%s",
-                getattr(exc, "category", "provider"),
-            )
+            category = getattr(exc, "category", "provider")
+            LOGGER.warning("Article intelligence failed safely: category=%s", category)
             return ArticleAnalysisResponse(
                 article_id=article_id,
                 status="failed",
                 message="Article analysis could not be safely generated. Please try again later.",
+                failure_category=category,
             )
         except Exception:
             LOGGER.exception("Article intelligence failed safely: category=unexpected")
@@ -513,9 +517,26 @@ class ArticleEventAnalysisService:
                 article_id=article_id,
                 status="failed",
                 message="Article analysis could not be safely generated. Please try again later.",
+                failure_category="unexpected",
             )
         self.repository.store_article_analysis(analysis, cache_version)
         return ArticleAnalysisResponse(article_id=article_id, status="generated", analysis=analysis)
+
+    def current_evidence_fingerprint(self, article_id: str) -> str | None:
+        """The evidence fingerprint a fresh analysis of this article would carry right now.
+
+        Deterministic and free: it ranks the same stored evidence pool ``analyze_article`` would
+        supply, and makes no provider call. The job ledger compares it with a stored analysis's
+        fingerprint to record whether that analysis's evidence is still current.
+        """
+
+        article = self.repository.get_article(article_id)
+        if article is None or article.is_demo:
+            return None
+        evidence = _rank_evidence(
+            article, _evidence_candidates(self.repository, article), self.evidence_limit
+        )
+        return _evidence_fingerprint(article, evidence)
 
     def _build_context(self, article: Article) -> "_AnalysisContext":
         constituent = self.constituents.resolve(article.ticker)

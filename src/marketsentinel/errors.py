@@ -13,6 +13,10 @@ class ProviderError(MarketSentinelError):
     """Raised when an external data provider cannot return valid data."""
 
 
+class CoverageNotActiveError(MarketSentinelError):
+    """Raised when a coverage cycle is requested for a ticker that was never activated."""
+
+
 class SentimentModelError(MarketSentinelError):
     """Raised when FinBERT cannot be loaded or used."""
 

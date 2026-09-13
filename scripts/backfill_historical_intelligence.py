@@ -8,12 +8,18 @@ synchronous, one-shot script: no scheduler, queue, or background worker.
 Read the printed report before assuming a run covered what you expected -- a partial/failed
 month is reported explicitly per bucket, never silently presented as complete.
 
+WARNING -- do not run this concurrently with scripts/run_coverage_cycle.py (or a private
+POST /api/v1/analyze) for the same ticker. Every mode here calls the analysis service directly and
+takes no analysis-job ledger lease, so a concurrent coverage cycle can pay for the same article
+twice. Run backfill and repair modes only while continuous coverage for that ticker is idle.
+
 Usage:
     python scripts/backfill_historical_intelligence.py --ticker NVDA --months 12
     python scripts/backfill_historical_intelligence.py --ticker NVDA --mode reanalyze-stale
 """
 
 import argparse
+import sys
 from datetime import UTC, datetime
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
@@ -71,6 +77,22 @@ def _parse_as_of(parser: argparse.ArgumentParser, value: str | None) -> datetime
         return parse_as_of(value)
     except ValueError as error:
         parser.error(str(error))
+
+
+def concurrency_warning(ticker: str, *, under_continuous_coverage: bool) -> str:
+    """The runtime warning printed before any backfill or repair mode does work."""
+
+    warning = (
+        f"WARNING: historical backfill/repair for {ticker} takes no analysis-job ledger lease. "
+        "Do not run it while a coverage cycle (scripts/run_coverage_cycle.py) or a private "
+        "/api/v1/analyze refresh is running for the same ticker, or one article can be paid "
+        "for twice."
+    )
+    if under_continuous_coverage:
+        warning += (
+            f" {ticker} is under continuous coverage: make sure no coverage cycle is running now."
+        )
+    return warning
 
 
 def build_backfill_service(
@@ -215,6 +237,14 @@ def main() -> None:
         max_new_analyses=arguments.max_new_analyses,
         offline=arguments.mode == "fill-selection-gaps",
         priority_bonus_limit=arguments.priority_bonus,
+    )
+    coverage = service.repository.get_company_coverage(arguments.ticker.strip().upper())
+    print(
+        concurrency_warning(
+            arguments.ticker,
+            under_continuous_coverage=coverage is not None and coverage.active,
+        ),
+        file=sys.stderr,
     )
     now = datetime.now(UTC)
 

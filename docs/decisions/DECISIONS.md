@@ -106,3 +106,23 @@ AI coding agents perform no Git writes.
 Read-only Git inspection is allowed.
 
 The product owner personally performs commits, pushes, merges and all other repository-history changes.
+
+## 2026-09-13 — Continuous coverage and the analysis job ledger
+
+For actively covered companies, the goal is eventual analysis of every relevant unique article, each paid for once.
+
+Every stored article of an active company carries exactly one ledger state per analysis contract (model + prompt versions + schema version): `pending`, `leased`, `retry_wait`, `analyzed`, `skipped`, `failed`, or `baseline`.
+
+New articles become eligible in the same coverage cycle that ingests them. There are no closed-day buckets and no settle delay.
+
+Only deterministic per-article irrelevance rules may terminate an article as `skipped`. Candidate selection may order work but must never permanently mark an otherwise relevant article as not selected. Budget-limited work stays `pending`.
+
+Ingestion watermarks are stored per (ticker, provider), advance independently, never move backwards, and keep an overlap window for late arrivals.
+
+A stored current-contract analysis is reused despite evidence drift; the ledger records whether its evidence is still current, and regeneration stays the explicit `refresh-evidence` mode.
+
+Private `/api/v1/analyze` and the per-article analysis endpoint spend only through the ledger. Backfill and repair modes remain explicit operator paths outside it.
+
+Activation spends nothing: existing current-contract analyses become `analyzed`, older unanalysed history becomes `baseline`.
+
+The ledger is operational state only. Materiality, grouping, ranking, and risks remain deterministic and recomputed on read.

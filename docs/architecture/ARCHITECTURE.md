@@ -143,11 +143,19 @@ a claim is true.
 failures. Cached hits are free and never count against the budget. Setting the cap to `0` is a kill
 switch that leaves the manual per-article endpoint working.
 
+Both private spending endpoints call their runner through the analysis job ledger (see
+[Continuous coverage](#continuous-coverage-the-analysis-job-ledger)): `build_services` wires a
+`LedgeredArticleAnalysisRunner` in front of `ArticleEventAnalysisService`, so `/analyze` and the
+per-article endpoint lease a job before paying, record the attempt, and reuse a stored
+current-contract analysis instead of paying again when only the evidence pool has grown.
+
 ### 4. Persistence and versioning
 
 [storage/sqlite.py](../../src/marketsentinel/storage/sqlite.py) is the only persistence layer.
-Tables: `articles`, `sentiments`, `daily_sentiment`, `article_intelligence_analyses`
-(`PRAGMA user_version = 4`, WAL, additive column migrations applied at `initialize()`).
+Tables: `articles`, `sentiments`, `daily_sentiment`, `article_intelligence_analyses`, plus the
+operational coverage ledger `company_coverage`, `ingestion_watermarks`, `article_analysis_jobs`
+(`PRAGMA user_version = 5`, WAL, additive tables and column migrations applied at `initialize()`).
+The ledger holds operational state only — never a materiality verdict, group, rank, or risk.
 
 An analysis row is keyed by `(article_fingerprint, model_version, cache_version, schema_version)`
 and inserted `ON CONFLICT DO NOTHING` — **append-only; a prior version's payload is never
@@ -360,6 +368,101 @@ budget, and never alters the live `/analyze` funnel, its caps, or the compatibil
 produces more data for that unchanged machinery to read. Modes: `backfill`, `reanalyze-stale`,
 `refresh-evidence`, `fill-selection-gaps`. A partial or failed month is reported per bucket, never
 presented as complete.
+
+Backfill and its repair modes call `ArticleEventAnalysisService` directly, not through the job
+ledger. They are explicit operator actions with their own budgets; `refresh-evidence` in particular
+must still regenerate an analysis whose evidence changed. Articles they store are picked up by the
+next coverage cycle's reconcile step like any other stored article.
+
+**Historical backfill/repair and continuous coverage must not run concurrently for the same
+ticker.** The legacy backfill path takes no ledger lease, so a backfill or repair run overlapping a
+coverage cycle (or a private `/api/v1/analyze` refresh) can pay for the same article twice. The
+ledger's pre-call check for a stored analysis narrows but does not close that window. Both CLIs
+state this in their help, and the backfill CLI prints it as a runtime warning — emphasised when the
+ticker is under continuous coverage. Wrapping backfill in the ledger was deliberately not done, to
+avoid silently changing its explicit refresh and reanalysis semantics.
+
+## Continuous coverage: the analysis job ledger
+
+[coverage_cycle.py](../../src/marketsentinel/coverage_cycle.py) and
+[analysis_ledger.py](../../src/marketsentinel/analysis_ledger.py), driven by
+[scripts/run_coverage_cycle.py](../../scripts/run_coverage_cycle.py). Synchronous and one-shot, like
+backfill: no scheduler, queue, or daemon — repetition is scheduled externally. Its goal is that
+every relevant unique article of an actively covered company is eventually analysed once, and that
+every stored article carries one explicit, inspectable state.
+
+**Keys.**
+
+| Purpose | Key |
+| --- | --- |
+| Job | `(article_fingerprint, analysis_contract)`; the contract is `ArticleAnalysisCompatibility.contract_key` = model + A/B/C prompt versions + schema version, deliberately *without* the evidence fingerprint |
+| Watermark | `(ticker, provider)` → `ingested_through` |
+| Coverage | `ticker` → `active`, `ledger_started_at`, `live_window_days` |
+
+**Job states.** `pending`, `leased`, `retry_wait` are active; `analyzed`, `skipped`, `failed`,
+`baseline` are terminal and never left by an ordinary transition. The one exception: a stored
+current-contract analysis always completes a job as `analyzed`, because the stored analysis is what
+the ledger describes. An explicit per-article request (`POST /api/v1/articles/analyze`) may retry a
+terminal job; automatic work never does.
+
+- `skipped` comes **only** from per-article irrelevance rules the selector already applies — demo,
+  low relevance, third-party holding, price prediction, market-reaction-only, routine 10b5-1 sale.
+  `deterministic_skip_reason` obtains them by running the unchanged selector over the single
+  article, where no relative cap can bind.
+- Publisher cap, official-company cap, near-title, and limit are relative to other articles, so they
+  only set **processing order** (`processing_order`: the selector's ranked admits first, then the
+  rest newest first). Budget-limited work stays `pending`; nothing relevant becomes terminal because
+  of a budget.
+- `baseline` marks stored history older than `ledger_started_at − live_window_days` without a
+  current-contract analysis. Activation creates it and spends nothing.
+
+**One cycle per ticker.**
+
+1. *Ingest* — each provider (`gdelt`, `google_news_rss`) fetches independently from its own
+   watermark minus a 48-hour overlap, clamped to its lookback (a clamp is reported as a gap). New
+   articles are deduplicated against stored rows, upserted, FinBERT-scored, and daily sentiment is
+   recomputed, all *before* any watermark moves. Only an `ok` or `empty` fetch advances a
+   watermark. A `failed` fetch, and a `partial` fetch that hit the provider's article cap, leave it
+   in place: the articles a capped fetch returned are stored, and the next cycle retries the
+   unresolved window from the previous watermark instead of skipping the older articles the cap
+   cut off. `consecutive_failures` counts consecutive `failed` *and* `partial` fetches and resets on
+   `ok`/`empty`, so a window a provider cannot cover within its cap stays visible rather than
+   silently retried forever. Watermarks never move backwards.
+2. *Reconcile* — every stored article without a job gets exactly one: `analyzed/preexisting`,
+   `skipped/<rule>`, `baseline`, or `pending/eligible`. This also covers articles stored by
+   `/analyze` or backfill, and a crash between storing and enqueueing.
+3. *Analyse* — claimable jobs (pending, due retries, expired leases) run through the runner in
+   processing order under `--max-new` paid attempts and the existing two-consecutive-failure
+   breaker. An unconfigured provider stops the pass without consuming an attempt.
+4. *Check evidence* — for analysed jobs never checked, or recent enough that their evidence window
+   may still be filling, compare the newest stored analysis's evidence fingerprint with the one a
+   fresh analysis would receive (`current_evidence_fingerprint`, no provider call) and record
+   `evidence_current`. A changed pool is reported; regenerating it stays the explicit
+   `refresh-evidence` backfill mode.
+
+**Idempotency and retries.** Job creation is `INSERT … ON CONFLICT DO NOTHING`. A job is leased by a
+single compare-and-set UPDATE (10-minute lease) before any paid call; reclaiming an expired lease
+counts the abandoned attempt as `lease_expired`. The runner first checks for a stored
+current-contract analysis, so a crash after the analysis was stored recovers without paying.
+Attempts, failures, and summed per-stage token usage are added unconditionally when an attempt
+finishes; the state change is conditional on still holding the lease. Failure categories come from
+`ArticleAnalysisResponse.failure_category`: `timeout`, `transport_error`, `http_error`, and
+`lease_expired` retry at 15 min / 1 h / 4 h up to 4 attempts; `pydantic_validation`,
+`semantic_validation`, and `unexpected` retry once; anything else fails permanently; `demo` is
+`skipped`.
+
+**Contract-version bumps.** Changing the model, a prompt version, or the schema version creates a
+new `analysis_contract`; old-contract job rows stay as history. The next reconcile applies the same
+rules under the new contract, with the ticker's *original* horizon
+(`ledger_started_at − live_window_days`): articles published on or after it become `pending` and
+are re-analysed by later cycles (real spend), while older stored history becomes `baseline` and is
+**not** enqueued automatically. Re-analysing that pre-activation history still requires an explicit
+backfill mode such as `reanalyze-stale` (or a deliberate requeue).
+
+**Evidence reuse.** `accepts_for_contract` is display compatibility plus model version, without the
+evidence fingerprint. It is a *spending* rule used only by the ledger; `accepts_for_cache` and
+`accepts_for_display` are unchanged, and the display path still shows the newest compatible
+analysis.
 
 ## Frozen fixtures vs the live database
 
