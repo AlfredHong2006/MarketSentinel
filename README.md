@@ -539,14 +539,11 @@ seeding; the first successful run publishes its first `latest.json` from scratch
 
 ## Roadmap
 
-1. Label a second ticker in a different sector and report the gate's **out-of-sample** precision
-   and recall — the single most valuable next result.
-2. Carry an issuer/subject distinction through extraction, closing four of the five documented
-   false positives.
+1. Label a second ticker in a different sector and report out-of-sample precision and recall.
+2. Carry issuer/subject distinction through extraction, addressing the dominant documented false-positive class.
 3. Add a licensed historical-news provider behind the existing adapter interface.
-4. ~~Scheduled ingestion so SQLite accumulates observations without manual searches.~~ Done: see
-   [Scheduled coverage and public snapshot publication](#scheduled-coverage-and-public-snapshot-publication).
-5. Docker packaging and a deployed demo.
+4. ~~Scheduled continuous coverage and sanitized public snapshot publication.~~ Done.
+5. ~~Docker packaging and deployed public demo.~~ Done.
 
 ## License
 
