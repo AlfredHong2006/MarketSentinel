@@ -84,6 +84,9 @@ jobs:
             exit 1
           fi
 
+          # Local copy of the pre-cycle state, uploaded as the rolling backup at checkpoint time.
+          cp data/marketsentinel.db data/marketsentinel.db.bak
+
           aws s3 cp "$BUCKET/state/constituents_cache.json" data/constituents_cache.json \
             --endpoint-url "$ENDPOINT" \
             || echo "no prior constituent cache in R2 -- will warm it from Wikipedia"
@@ -148,11 +151,12 @@ jobs:
           }
 
           # One rolling backup generation of the previous private state, mirroring the local
-          # data/*.bak convention. Best-effort only: the download step already fails the job
-          # closed when state/marketsentinel.db does not exist, so a genuinely first run never
-          # reaches here, but a transient failure of this particular copy should not block the
-          # checkpoint that matters.
-          retry aws s3 cp "$BUCKET/state/marketsentinel.db" "$BUCKET/state/marketsentinel.db.bak" \
+          # data/*.bak convention. Uploaded from the local pre-cycle copy made in the download step
+          # rather than an R2 server-side object copy. Best-effort only: the download step already
+          # fails the job closed when state/marketsentinel.db does not exist, so a genuinely first
+          # run never reaches here, but a transient failure of this particular upload should not
+          # block the checkpoint that matters.
+          retry aws s3 cp data/marketsentinel.db.bak "$BUCKET/state/marketsentinel.db.bak" \
             --endpoint-url "$ENDPOINT" || true
 
           # These two must succeed. This is the durable save of the analyses this run just paid

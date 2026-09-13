@@ -199,3 +199,75 @@ def test_asset_http_error_leaves_baked_in_snapshot_untouched(
 
     assert outcome.applied is False
     assert settings.database_path.read_bytes() == before_db
+
+
+# Regression: the live publish writes root-relative asset URLs (e.g.
+# "/snapshots/<version>/public-snapshot.db"). Passed to httpx verbatim they raised
+# UnsupportedProtocol on Render; they must resolve against the manifest URL instead.
+@pytest.mark.parametrize(
+    ("database_url", "cache_url", "expected_database_url", "expected_cache_url"),
+    [
+        pytest.param(
+            "/snapshots/v1/public-snapshot.db",
+            "/snapshots/v1/constituents_cache.json",
+            DATABASE_URL,
+            CACHE_URL,
+            id="root-relative",
+        ),
+        pytest.param(
+            "https://cdn.example.test/snapshots/v1/public-snapshot.db",
+            "https://cdn.example.test/snapshots/v1/constituents_cache.json",
+            "https://cdn.example.test/snapshots/v1/public-snapshot.db",
+            "https://cdn.example.test/snapshots/v1/constituents_cache.json",
+            id="absolute-other-host",
+        ),
+    ],
+)
+def test_asset_urls_resolve_against_manifest_url(
+    writable_tmp_path, database_url, cache_url, expected_database_url, expected_cache_url
+) -> None:
+    settings = _settings(writable_tmp_path, manifest_url=MANIFEST_URL)
+    db_bytes = _valid_database_bytes(writable_tmp_path)
+    cache_bytes = json.dumps({"source": "published"}).encode("utf-8")
+    manifest = _manifest(db_bytes, cache_bytes)
+    manifest["database"]["url"] = database_url
+    manifest["constituents_cache"]["url"] = cache_url
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if str(request.url) == MANIFEST_URL:
+            return httpx.Response(200, json=manifest)
+        if str(request.url) == expected_database_url:
+            return httpx.Response(200, content=db_bytes)
+        if str(request.url) == expected_cache_url:
+            return httpx.Response(200, content=cache_bytes)
+        return httpx.Response(404)
+
+    with _client(handler) as client:
+        outcome = fetch_public_snapshot(settings, client=client)
+
+    assert outcome.applied is True, outcome.reason
+    assert requested == [MANIFEST_URL, expected_database_url, expected_cache_url]
+    assert settings.database_path.read_bytes() == db_bytes
+    assert json.loads(settings.constituent_cache_path.read_text()) == {"source": "published"}
+
+
+def test_root_relative_asset_with_wrong_sha256_is_still_rejected(writable_tmp_path) -> None:
+    settings = _settings(writable_tmp_path, manifest_url=MANIFEST_URL)
+    before_db = settings.database_path.read_bytes()
+    before_cache = settings.constituent_cache_path.read_bytes()
+    db_bytes = _valid_database_bytes(writable_tmp_path)
+    cache_bytes = b'{"source": "published"}'
+    manifest = _manifest(db_bytes, cache_bytes)
+    manifest["database"]["url"] = "/snapshots/v1/public-snapshot.db"
+    manifest["constituents_cache"]["url"] = "/snapshots/v1/constituents_cache.json"
+    manifest["database"]["sha256"] = "0" * 64  # deliberately wrong
+
+    with _client(_served(manifest, db_bytes, cache_bytes)) as client:
+        outcome = fetch_public_snapshot(settings, client=client)
+
+    assert outcome.applied is False
+    assert f"sha256 mismatch for {DATABASE_URL}" in outcome.reason
+    assert settings.database_path.read_bytes() == before_db
+    assert settings.constituent_cache_path.read_bytes() == before_cache

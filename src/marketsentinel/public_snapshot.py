@@ -23,6 +23,9 @@ Manifest shape (published by ``scripts/publish_public_snapshot.py``)::
       "constituents_cache": {"url": "...", "sha256": "...", "size_bytes": 456}
     }
 
+Asset ``url`` values may be absolute or relative (e.g. root-relative
+``/snapshots/<version>/public-snapshot.db``); relative ones resolve against the manifest URL.
+
 Invoked as ``python -m marketsentinel.public_snapshot`` from the Docker image's CMD, before
 uvicorn starts.
 """
@@ -89,7 +92,8 @@ def fetch_public_snapshot(
         timeout=settings.public_snapshot_fetch_timeout_seconds, follow_redirects=True
     )
     try:
-        manifest = _load_manifest(http, settings.public_snapshot_manifest_url)
+        manifest_url = settings.public_snapshot_manifest_url
+        manifest = _load_manifest(http, manifest_url)
         if manifest.schema_user_version != SCHEMA_USER_VERSION:
             return FetchOutcome(
                 applied=False,
@@ -100,8 +104,10 @@ def fetch_public_snapshot(
                 version=manifest.version,
             )
 
-        db_bytes = _download_verified(http, manifest.database)
-        cache_bytes = _download_verified(http, manifest.constituents_cache)
+        db_bytes = _download_verified(http, manifest.database, manifest_url=manifest_url)
+        cache_bytes = _download_verified(
+            http, manifest.constituents_cache, manifest_url=manifest_url
+        )
         cache_text = cache_bytes.decode("utf-8")
         json.loads(cache_text)  # must be well-formed JSON before it replaces anything
 
@@ -143,13 +149,16 @@ def _load_manifest(http: httpx.Client, url: str) -> SnapshotManifest:
     return SnapshotManifest.model_validate(response.json())
 
 
-def _download_verified(http: httpx.Client, asset: SnapshotAsset) -> bytes:
-    response = http.get(asset.url)
+def _download_verified(http: httpx.Client, asset: SnapshotAsset, *, manifest_url: str) -> bytes:
+    # RFC 3986 resolution: a relative asset URL is resolved against the manifest URL, while an
+    # absolute one is returned unchanged.
+    url = httpx.URL(manifest_url).join(asset.url)
+    response = http.get(url)
     response.raise_for_status()
     content = response.content
     digest = hashlib.sha256(content).hexdigest()
     if digest != asset.sha256:
-        raise ValueError(f"sha256 mismatch for {asset.url}: expected {asset.sha256}, got {digest}")
+        raise ValueError(f"sha256 mismatch for {url}: expected {asset.sha256}, got {digest}")
     return content
 
 
