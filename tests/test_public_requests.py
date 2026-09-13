@@ -187,6 +187,146 @@ def test_r2_sink_failures_are_reported_as_sink_errors() -> None:
         sink.list_keys()
 
 
+ACCESS_KEY_ID = "R2KEYID0123456789abcdef"
+SECRET_ACCESS_KEY = "r2secretvalue0123456789abcdefghijklmnop"
+
+
+class RaisingS3:
+    """A client whose every call raises ``error``, standing in for a real provider failure."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def put_object(self, **kwargs):
+        raise self.error
+
+    def get_paginator(self, name):
+        raise self.error
+
+
+def _failing_sink(error: Exception, *, access_key_id: str = ACCESS_KEY_ID) -> R2RequestSink:
+    return R2RequestSink(
+        bucket="marketsentinel-requests",
+        endpoint_url="https://acct.r2.cloudflarestorage.com",
+        access_key_id=access_key_id,
+        secret_access_key=SECRET_ACCESS_KEY,
+        client=RaisingS3(error),
+    )
+
+
+def _logged(caplog) -> str:
+    return "\n".join(record.getMessage() for record in caplog.records)
+
+
+def test_a_provider_error_is_logged_with_safe_details_and_no_credentials(caplog) -> None:
+    from botocore.exceptions import ClientError
+
+    # A real S3/R2 signature failure body carries the key id and the string to sign; neither may
+    # reach the log, while the code, message, status and request id must.
+    error = ClientError(
+        {
+            "Error": {
+                "Code": "SignatureDoesNotMatch",
+                "Message": "The request signature we calculated does not match",
+                "AWSAccessKeyId": ACCESS_KEY_ID,
+                "StringToSign": "AWS4-HMAC-SHA256\n20260913T120000Z\nsecret-derived",
+                "CanonicalRequest": "PUT\n/marketsentinel-requests/coverage/AMZN.json",
+            },
+            "ResponseMetadata": {"HTTPStatusCode": 403, "RequestId": "req-123"},
+        },
+        "PutObject",
+    )
+    sink = _failing_sink(error)
+
+    with (
+        caplog.at_level("ERROR", logger="marketsentinel.public_requests"),
+        pytest.raises(RequestSinkError, match="could not record the request"),
+    ):
+        sink.put(coverage_request_key("AMZN"), {"kind": "coverage"})
+
+    text = _logged(caplog)
+    assert caplog.records[0].levelname == "ERROR"
+    assert "R2 put_object failed" in text
+    assert "type=botocore.exceptions.ClientError" in text
+    assert "code='SignatureDoesNotMatch'" in text
+    assert "http_status=403" in text
+    assert "request_id='req-123'" in text
+    assert "bucket='marketsentinel-requests'" in text
+    assert "key='coverage/AMZN.json'" in text
+    assert "endpoint='https://acct.r2.cloudflarestorage.com'" in text
+    assert "Traceback" in text
+    for forbidden in (ACCESS_KEY_ID, SECRET_ACCESS_KEY, "StringToSign", "secret-derived"):
+        assert forbidden not in text
+
+
+def test_an_http_client_error_quoting_the_authorization_header_is_redacted(caplog) -> None:
+    """A key id with a trailing newline makes the HTTP client quote the SigV4 header."""
+
+    from botocore.exceptions import HTTPClientError
+
+    header = (
+        # The repr form the HTTP client actually quotes: an escaped "\n" after the key id.
+        f"AWS4-HMAC-SHA256 Credential={ACCESS_KEY_ID}\\n/20260913/auto/s3/aws4_request, "
+        "SignedHeaders=content-type;host, Signature=0123456789abcdef0123456789abcdef"
+    )
+    error = HTTPClientError(error=ValueError(f"Invalid header value b'{header}'"))
+    sink = _failing_sink(error, access_key_id=f"{ACCESS_KEY_ID}\n")
+
+    with (
+        caplog.at_level("ERROR", logger="marketsentinel.public_requests"),
+        pytest.raises(RequestSinkError),
+    ):
+        sink.put(coverage_request_key("AMZN"), {"kind": "coverage"})
+
+    text = _logged(caplog)
+    assert "type=botocore.exceptions.HTTPClientError" in text
+    assert "Invalid header value" in text
+    assert "Credential=[redacted]" in text
+    assert "Signature=[redacted]" in text
+    assert "access_key_id=True" in text
+    assert "secret=False" in text
+    for forbidden in (ACCESS_KEY_ID, SECRET_ACCESS_KEY, "0123456789abcdef0123456789abcdef"):
+        assert forbidden not in text
+
+
+def test_a_listing_failure_is_logged_without_a_key(caplog) -> None:
+    from botocore.exceptions import EndpointConnectionError
+
+    sink = _failing_sink(
+        EndpointConnectionError(endpoint_url="https://acct.r2.cloudflarestorage.com")
+    )
+
+    with (
+        caplog.at_level("ERROR", logger="marketsentinel.public_requests"),
+        pytest.raises(RequestSinkError, match="could not list"),
+    ):
+        sink.list_keys()
+
+    text = _logged(caplog)
+    assert "R2 list_objects_v2 failed" in text
+    assert "type=botocore.exceptions.EndpointConnectionError" in text
+    assert "key=None" in text
+    assert ACCESS_KEY_ID not in text and SECRET_ACCESS_KEY not in text
+
+
+def test_the_public_response_stays_generic_when_the_store_fails(writable_tmp_path, caplog) -> None:
+    from botocore.exceptions import ClientError
+
+    repository = seed_repository(writable_tmp_path)
+    error = ClientError(
+        {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "PutObject"
+    )
+    with (
+        caplog.at_level("ERROR", logger="marketsentinel.public_requests"),
+        TestClient(_app(repository, _service(repository, _failing_sink(error)))) as client,
+    ):
+        response = client.post("/api/v1/companies/HIDDEN1/coverage-requests")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "The request store is unavailable. Try again later."}
+    assert "code='AccessDenied'" in _logged(caplog)
+
+
 def test_build_request_sink_reflects_configuration(writable_tmp_path) -> None:
     assert build_request_sink(Settings(_env_file=None)) is None
     directory = build_request_sink(

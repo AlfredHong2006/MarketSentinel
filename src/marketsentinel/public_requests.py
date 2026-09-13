@@ -38,6 +38,7 @@ import json
 import logging
 import re
 import threading
+import traceback
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -68,6 +69,13 @@ _ARTICLE_ID = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
 _MAX_LISTED_KEYS = 2000
 
 RATE_WINDOW = timedelta(minutes=1)
+
+# Redaction for request-store failure logs. A SigV4 Authorization header can reach an exception's
+# text: a credential containing a newline makes the HTTP client reject the header and quote it
+# (verified offline against botocore), so the key id and signature would otherwise be logged.
+_CREDENTIAL_PATTERN = re.compile(r"(Credential=)[^,\s'\"]*")
+_SIGNATURE_PATTERN = re.compile(r"(Signature=)[0-9A-Za-z]+")
+_REDACTED = "[redacted]"
 
 
 # --------------------------------------------------------------------------------------------
@@ -209,6 +217,7 @@ class R2RequestSink:
                 ContentType="application/json",
             )
         except Exception as exc:  # boto3 raises many concrete types; none is recoverable here
+            self._log_failure("put_object", exc, key=key)
             raise RequestSinkError("could not record the request in the request store") from exc
 
     def list_keys(self) -> list[str]:
@@ -222,8 +231,71 @@ class R2RequestSink:
                         if len(keys) >= _MAX_LISTED_KEYS:
                             return keys
         except Exception as exc:
+            self._log_failure("list_objects_v2", exc)
             raise RequestSinkError("could not list the request store") from exc
         return keys
+
+    def _log_failure(self, operation: str, exc: BaseException, *, key: str | None = None) -> None:
+        """Log the real cause of a store failure without any credential material.
+
+        Logged: the exception type, the provider's error code, message, HTTP status and request
+        id, the bucket, key and endpoint (none is a credential), whether any configured value has
+        surrounding whitespace (settings are not stripped, and whitespace breaks signing or
+        endpoint parsing), and the traceback with the access key id, the secret, and any SigV4
+        ``Credential=`` / ``Signature=`` value redacted. Never logged: the provider's full error
+        body, which for a signature failure also carries ``AWSAccessKeyId``, ``StringToSign``
+        and ``CanonicalRequest``. Logged at ERROR with an explicitly redacted traceback rather
+        than ``LOGGER.exception``, whose raw traceback could quote an Authorization header.
+        """
+
+        LOGGER.error(
+            "public requests: R2 %s failed: %s bucket=%r key=%r endpoint=%r "
+            "whitespace(endpoint=%s, access_key_id=%s, secret=%s, bucket=%s)\n%s",
+            operation,
+            self._redact(_safe_error_details(exc)),
+            self.bucket,
+            key,
+            self._endpoint_url,
+            _has_surrounding_whitespace(self._endpoint_url),
+            _has_surrounding_whitespace(self._access_key_id),
+            _has_surrounding_whitespace(self._secret_access_key),
+            _has_surrounding_whitespace(self.bucket),
+            self._redact("".join(traceback.format_exception(exc)).rstrip()),
+        )
+
+    def _redact(self, text: str) -> str:
+        for secret in (self._secret_access_key, self._access_key_id):
+            for variant in {secret, secret.strip()}:
+                if variant:
+                    text = text.replace(variant, _REDACTED)
+        text = _CREDENTIAL_PATTERN.sub(rf"\g<1>{_REDACTED}", text)
+        return _SIGNATURE_PATTERN.sub(rf"\g<1>{_REDACTED}", text)
+
+
+def _has_surrounding_whitespace(value: str | None) -> bool:
+    return bool(value) and value != value.strip()
+
+
+def _safe_error_details(exc: BaseException) -> str:
+    """Exception type plus an allowlist of provider error fields (botocore ``ClientError``)."""
+
+    parts = [f"type={type(exc).__module__}.{type(exc).__qualname__}"]
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        error = response.get("Error") if isinstance(response.get("Error"), dict) else {}
+        metadata = response.get("ResponseMetadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        for label, value in (
+            ("code", error.get("Code")),
+            ("message", error.get("Message")),
+            ("http_status", metadata.get("HTTPStatusCode")),
+            ("request_id", metadata.get("RequestId")),
+        ):
+            if value not in (None, ""):
+                parts.append(f"{label}={value!r}")
+    else:
+        parts.append(f"detail={str(exc)[:500]!r}")
+    return " ".join(parts)
 
 
 # --------------------------------------------------------------------------------------------
