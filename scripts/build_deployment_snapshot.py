@@ -32,6 +32,7 @@ import shutil
 import sqlite3
 import sys
 from collections import Counter
+from contextlib import closing
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -76,29 +77,36 @@ def _read_only(path: Path) -> sqlite3.Connection:
     return connection
 
 
-def build_snapshot() -> None:
-    if not LIVE_DATABASE.is_file():
-        raise SystemExit(f"live database not found at {LIVE_DATABASE}")
-    if not LIVE_CACHE.is_file():
-        raise SystemExit(f"constituent cache not found at {LIVE_CACHE}")
+def build_snapshot(
+    *,
+    live_database: Path = LIVE_DATABASE,
+    live_cache: Path = LIVE_CACHE,
+    snapshot_database: Path = SNAPSHOT_DATABASE,
+    snapshot_cache: Path = SNAPSHOT_CACHE,
+) -> None:
+    if not live_database.is_file():
+        raise SystemExit(f"live database not found at {live_database}")
+    if not live_cache.is_file():
+        raise SystemExit(f"constituent cache not found at {live_cache}")
 
-    DEPLOY_DIR.mkdir(parents=True, exist_ok=True)
+    snapshot_database.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_cache.parent.mkdir(parents=True, exist_ok=True)
     # VACUUM INTO refuses to overwrite, so a rebuild must clear the previous snapshot first.
-    SNAPSHOT_DATABASE.unlink(missing_ok=True)
-    with _read_only(LIVE_DATABASE) as connection:
-        connection.execute("VACUUM INTO ?", (SNAPSHOT_DATABASE.as_posix(),))
+    snapshot_database.unlink(missing_ok=True)
+    with closing(_read_only(live_database)) as connection:
+        connection.execute("VACUUM INTO ?", (snapshot_database.as_posix(),))
 
-    shutil.copy2(LIVE_CACHE, SNAPSHOT_CACHE)
+    shutil.copy2(live_cache, snapshot_cache)
 
-    live_mb = LIVE_DATABASE.stat().st_size / 1_048_576
-    snapshot_mb = SNAPSHOT_DATABASE.stat().st_size / 1_048_576
-    print(f"database : {LIVE_DATABASE} ({live_mb:.2f} MB)")
-    print(f"        -> {SNAPSHOT_DATABASE} ({snapshot_mb:.2f} MB, VACUUM INTO)")
-    print(f"cache    : {LIVE_CACHE} -> {SNAPSHOT_CACHE}")
+    live_mb = live_database.stat().st_size / 1_048_576
+    snapshot_mb = snapshot_database.stat().st_size / 1_048_576
+    print(f"database : {live_database} ({live_mb:.2f} MB)")
+    print(f"        -> {snapshot_database} ({snapshot_mb:.2f} MB, VACUUM INTO)")
+    print(f"cache    : {live_cache} -> {snapshot_cache}")
 
 
-def describe_snapshot() -> None:
-    with _read_only(SNAPSHOT_DATABASE) as connection:
+def describe_snapshot(snapshot_database: Path = SNAPSHOT_DATABASE) -> None:
+    with closing(_read_only(snapshot_database)) as connection:
         tables = [
             row[0]
             for row in connection.execute(
@@ -127,7 +135,10 @@ def describe_snapshot() -> None:
             )
 
 
-def scan_artifacts() -> bool:
+def scan_artifacts(
+    snapshot_database: Path = SNAPSHOT_DATABASE,
+    snapshot_cache: Path = SNAPSHOT_CACHE,
+) -> bool:
     """Report any credential or personal-data shape found in either artifact."""
 
     findings: dict[str, list[str]] = {name: [] for name in SECRET_PATTERNS}
@@ -141,7 +152,7 @@ def scan_artifacts() -> bool:
                 if len(findings[name]) < 5:
                     findings[name].append(f"{origin}: {match[:100]}")
 
-    with _read_only(SNAPSHOT_DATABASE) as connection:
+    with closing(_read_only(snapshot_database)) as connection:
         tables = [
             row[0]
             for row in connection.execute(
@@ -155,7 +166,7 @@ def scan_artifacts() -> bool:
                     if isinstance(value, str):
                         inspect(f"{table}.{column}", value)
 
-    cache_text = SNAPSHOT_CACHE.read_text(encoding="utf-8")
+    cache_text = snapshot_cache.read_text(encoding="utf-8")
     inspect("constituents_cache.json", cache_text)
     cache_payload = json.loads(cache_text)
     constituents = cache_payload.get("constituents", [])

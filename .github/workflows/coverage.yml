@@ -1,0 +1,204 @@
+name: Scheduled Coverage
+
+# Continuous coverage for the prepared tickers, run privately here (OpenAI credentials live only
+# in this workflow, never on the public Render service) then published as a sanitized public
+# snapshot to Cloudflare R2. See docs/architecture/ARCHITECTURE.md#continuous-coverage and
+# docs/decisions/DECISIONS.md for the ledger semantics this drives, and the "Scheduled coverage
+# and public snapshot publication" decision for why this workflow is shaped the way it is.
+#
+# No automated Git writes: this workflow never commits or pushes. The only durable state it
+# produces lives in Cloudflare R2 (private operational database, public snapshot) and, on success,
+# a Render service restart so the public deployment picks the new snapshot up.
+
+on:
+  schedule:
+    # Every 6 hours. Change the cron expression to change cadence; nothing else in this workflow
+    # depends on the specific schedule.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Comma-separated tickers to cover"
+        default: "NVDA,PFE"
+      max_new:
+        description: "Max new analyses per ticker this run"
+        default: "25"
+
+# A second overlapping run would race the same private SQLite database and the same R2 objects.
+# cancel-in-progress stays false so a run already in flight finishes rather than being cut off
+# mid-write; the next scheduled trigger simply queues behind it.
+concurrency:
+  group: scheduled-coverage
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TICKERS: ${{ github.event.inputs.tickers || 'NVDA,PFE' }}
+  MAX_NEW: ${{ github.event.inputs.max_new || '25' }}
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # --all-extras: the coverage cycle scores sentiment with FinBERT (the `ml` extra), which the
+      # lean public-deployment install intentionally excludes.
+      - name: Install Python 3.11 and dependencies
+        run: uv sync --locked --all-extras --dev
+
+      # Fails closed on a missing private database: this is the accumulated, already-paid-for
+      # analysis corpus, so a run must never silently start over from empty (that would both lose
+      # history and re-pay for analyses the ledger already has). The constituent cache is
+      # different -- free, public, reference-only data with no cost or paid state attached to it
+      # -- so it alone keeps a soft fallback below.
+      - name: Download private state from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          mkdir -p data
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET="s3://${{ secrets.R2_PRIVATE_BUCKET }}"
+
+          if ! aws s3 cp "$BUCKET/state/marketsentinel.db" data/marketsentinel.db \
+              --endpoint-url "$ENDPOINT"; then
+            echo "::error::No private operational database found at $BUCKET/state/marketsentinel.db." \
+              "Refusing to bootstrap an empty database -- that would silently discard the existing" \
+              "analysis corpus and cause re-paying for analyses already on record. Seed R2 manually" \
+              "once before the first scheduled run: upload the current data/marketsentinel.db and" \
+              "data/constituents_cache.json to state/marketsentinel.db and" \
+              "state/constituents_cache.json in the private bucket (see README.md), then re-run."
+            exit 1
+          fi
+
+          aws s3 cp "$BUCKET/state/constituents_cache.json" data/constituents_cache.json \
+            --endpoint-url "$ENDPOINT" \
+            || echo "no prior constituent cache in R2 -- will warm it from Wikipedia"
+
+      - name: Warm constituent cache if missing
+        run: |
+          IFS=',' read -ra TICKER_ARR <<< "$TICKERS"
+          uv run python scripts/warm_constituent_cache.py "${TICKER_ARR[@]}"
+
+      # activate_company_coverage is idempotent (see storage/sqlite.py): safe to call every run,
+      # and it keeps the ticker's original ledger_started_at rather than resetting it.
+      - name: Activate coverage
+        run: |
+          IFS=',' read -ra TICKER_ARR <<< "$TICKERS"
+          ARGS=()
+          for t in "${TICKER_ARR[@]}"; do ARGS+=(--ticker "$t"); done
+          uv run python scripts/run_coverage_cycle.py --mode activate "${ARGS[@]}"
+
+      - name: Run bounded coverage cycle
+        env:
+          MARKETSENTINEL_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          IFS=',' read -ra TICKER_ARR <<< "$TICKERS"
+          ARGS=()
+          for t in "${TICKER_ARR[@]}"; do ARGS+=(--ticker "$t"); done
+          uv run python scripts/run_coverage_cycle.py "${ARGS[@]}" --max-new "$MAX_NEW"
+
+      # Gate: a database that fails its own consistency check must never be checkpointed to R2,
+      # built into a public snapshot, or reach the public deployment. A non-zero exit here stops
+      # the job -- every step below is skipped automatically.
+      - name: Validate private database integrity
+        run: uv run python scripts/check_database_integrity.py data/marketsentinel.db
+
+      # Checkpoint immediately after a validated coverage cycle, before any public snapshot work.
+      # This run's paid Stage A/B/C analyses exist only on the ephemeral runner's disk until this
+      # step durably persists them to R2; if public snapshot build/scan/publish failed *before*
+      # this checkpoint, the next run would re-download the pre-cycle database from R2 and could
+      # pay for the same analyses again. Retried, and gated: a checkpoint failure after retries
+      # stops the job here, so public snapshot build/scan/publish and the Render restart below
+      # never run against work that was not actually saved.
+      - name: Checkpoint private state to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET="s3://${{ secrets.R2_PRIVATE_BUCKET }}"
+
+          retry() {
+            local attempt=1 max_attempts=5 delay=5
+            until "$@"; do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "::error::command failed after $max_attempts attempts: $*"
+                return 1
+              fi
+              echo "attempt $attempt/$max_attempts failed, retrying in ${delay}s: $*"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+
+          # One rolling backup generation of the previous private state, mirroring the local
+          # data/*.bak convention. Best-effort only: the download step already fails the job
+          # closed when state/marketsentinel.db does not exist, so a genuinely first run never
+          # reaches here, but a transient failure of this particular copy should not block the
+          # checkpoint that matters.
+          retry aws s3 cp "$BUCKET/state/marketsentinel.db" "$BUCKET/state/marketsentinel.db.bak" \
+            --endpoint-url "$ENDPOINT" || true
+
+          # These two must succeed. This is the durable save of the analyses this run just paid
+          # for -- everything after this step depends on it having actually happened.
+          retry aws s3 cp data/marketsentinel.db "$BUCKET/state/marketsentinel.db" \
+            --endpoint-url "$ENDPOINT"
+          retry aws s3 cp data/constituents_cache.json "$BUCKET/state/constituents_cache.json" \
+            --endpoint-url "$ENDPOINT"
+
+      # Gated the same way: publish_public_snapshot.py refuses (exit 1) and writes neither
+      # latest.json nor version.txt if the sanitized snapshot fails its own integrity check or the
+      # secret/personal-data scan, so a bad build can never be uploaded.
+      - name: Build sanitized public snapshot
+        run: |
+          uv run python scripts/publish_public_snapshot.py \
+            --database data/marketsentinel.db \
+            --constituent-cache data/constituents_cache.json \
+            --output-dir dist/public-snapshot \
+            --public-base-url "${{ vars.R2_PUBLIC_BASE_URL }}" \
+            --tickers "$TICKERS"
+
+      # The versioned, immutable snapshot files upload first; latest.json -- the only object a
+      # reader treats as mutable -- uploads last, and only if those succeeded. A reader can then
+      # never observe a manifest pointing at an object that is not there yet, and a failure here
+      # leaves the previously published latest.json (and the snapshot it points to) untouched.
+      - name: Publish public snapshot
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET="s3://${{ secrets.R2_PUBLIC_BUCKET }}"
+          VERSION=$(cat dist/public-snapshot/version.txt)
+          aws s3 cp "dist/public-snapshot/$VERSION/public-snapshot.db" \
+            "$BUCKET/snapshots/$VERSION/public-snapshot.db" --endpoint-url "$ENDPOINT"
+          aws s3 cp "dist/public-snapshot/$VERSION/constituents_cache.json" \
+            "$BUCKET/snapshots/$VERSION/constituents_cache.json" --endpoint-url "$ENDPOINT"
+          aws s3 cp dist/public-snapshot/latest.json "$BUCKET/latest.json" \
+            --endpoint-url "$ENDPOINT"
+
+      # Restart, not redeploy: the image is unchanged, only the R2-published snapshot is new.
+      # marketsentinel.public_snapshot runs again on container start and fetches it.
+      - name: Restart Render service
+        run: |
+          curl -sf -X POST \
+            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/restart" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json"

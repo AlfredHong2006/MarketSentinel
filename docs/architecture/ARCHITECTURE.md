@@ -480,6 +480,68 @@ evidence fingerprint. It is a *spending* rule used only by the ledger; `accepts_
 `accepts_for_display` are unchanged, and the display path still shows the newest compatible
 analysis.
 
+## Scheduled coverage and public snapshot publication
+
+[.github/workflows/coverage.yml](../../.github/workflows/coverage.yml) is the scheduler for
+continuous coverage: a cron (default every 6 hours) plus manual dispatch, under a `concurrency`
+group so two runs never race the same private database. It is the only place OpenAI credentials
+exist; the public Render deployment never receives one and performs no analysis.
+
+One run, in order: **download the private operational database from R2, failing the job closed if
+it is missing** (see below -- this is not a best-effort start-from-empty); warm the constituent
+cache from Wikipedia only if it alone is missing
+([scripts/warm_constituent_cache.py](../../scripts/warm_constituent_cache.py), so the offline-only
+`--mode activate` step that follows it can stay offline as designed); activate (idempotent); run a
+bounded `--mode cycle` (`scripts/run_coverage_cycle.py`) under `--max-new`; validate the resulting
+database with `PRAGMA integrity_check`
+([scripts/check_database_integrity.py](../../scripts/check_database_integrity.py)); **checkpoint
+the validated private database back to R2, retried, before any public snapshot work**; only then
+build and scan a sanitized public snapshot; upload it; and only on success, restart the public
+Render service. A failure at any step fails the job and skips everything after it, so the last
+good public snapshot and the last good private state are never replaced by a bad or partial one.
+
+The private checkpoint's position -- immediately after validation, strictly before public snapshot
+build/scan/publish -- is deliberate: the cycle's paid Stage A/B/C analyses exist only on the
+runner's ephemeral disk until that checkpoint durably persists them to R2. Checkpointing before the
+unrelated public-snapshot work means a failure in *that* work can never strand newly paid analyses
+on a runner that is about to be discarded, which would otherwise cost a re-pay on the next run.
+
+**R2 holds two distinct things.** A **private database** (`state/marketsentinel.db`, plus one
+rolling `.bak`), read and written only by this workflow, downloaded at the start of a run and
+checkpointed back right after validation. **Its download fails the job closed if the object is
+missing** -- an empty-database start would silently discard the accumulated, already-paid-for
+corpus, so R2's private bucket must be seeded once, manually, before the first scheduled run (see
+README.md's Bootstrap steps); the workflow's own checkpoint keeps it current after that. The
+constituent cache is exempt from this because it carries no paid state -- free, public data,
+refetchable from Wikipedia -- so it alone keeps the soft fallback above. And a **public snapshot
+bucket**, written as immutable, content-addressed objects (`snapshots/<version>/public-snapshot.db`
+and `.../constituents_cache.json`, `version` a timestamp plus a hash of the built database) plus
+one small mutable `latest.json` manifest carrying each asset's URL, sha256, and size. The versioned
+objects upload first; `latest.json` uploads last, so a reader can never see it point at an object
+that is not there yet.
+[scripts/publish_public_snapshot.py](../../scripts/publish_public_snapshot.py) builds these by
+calling into `scripts/build_deployment_snapshot.py`'s own `build_snapshot` / `describe_snapshot` /
+`scan_artifacts` (now parameterized by path rather than hardcoded to `deploy/`), so a CI-published
+snapshot goes through exactly the same `VACUUM INTO`, integrity check, and credential/
+personal-data scan as the manually committed `deploy/` artifacts -- one implementation of that
+bar, not two. It refuses to write a manifest (exit 1, no `latest.json`, no `version.txt`) if the
+scan finds anything.
+
+**The public deployment fetches its own snapshot at startup.**
+[public_snapshot.py](../../src/marketsentinel/public_snapshot.py), run as
+`python -m marketsentinel.public_snapshot` from the Docker image's `CMD` before uvicorn starts,
+downloads `latest.json`, verifies both assets' sha256, runs SQLite's own `integrity_check` on the
+downloaded database, and checks its `schema_user_version` against `SCHEMA_USER_VERSION`
+(`storage/sqlite.py`) -- only then replacing `database_path` / `constituent_cache_path`, which the
+image already populated at build time from the existing manually-committed
+`deploy/public-snapshot.db`. `MARKETSENTINEL_PUBLIC_SNAPSHOT_MANIFEST_URL` is unset by default, so
+this is a documented no-op and every existing standalone-image behaviour is unchanged. Any failure
+-- unreachable manifest, hash mismatch, corrupt database, schema mismatch, or an unexpected
+exception anywhere in the fetch -- is caught internally and leaves the baked-in snapshot untouched;
+the function never raises, and the Dockerfile sequences the two commands with `;`, never `&&`, so
+uvicorn starts regardless. A "publish" therefore ends in a **Render restart, not a redeploy**: the
+container image never changes between coverage runs, only the snapshot it fetches on the way up.
+
 ## Frozen fixtures vs the live database
 
 Two different things, deliberately not reconciled:

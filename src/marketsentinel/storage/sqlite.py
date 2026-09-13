@@ -15,7 +15,12 @@ from marketsentinel.domain import Article, ArticleAnalysis, DailySentiment, Scor
 from marketsentinel.normalization import normalize_text, normalize_url
 from marketsentinel.timeutils import ensure_utc
 
-_SCHEMA = """
+# Exported so callers that must validate a database file against the schema this code expects --
+# rather than only run it -- never hardcode this number a second time (see public_snapshot.py and
+# scripts/build_deployment_snapshot.py).
+SCHEMA_USER_VERSION = 5
+
+_SCHEMA = f"""
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 
@@ -137,7 +142,7 @@ CREATE TABLE IF NOT EXISTS article_analysis_jobs (
 CREATE INDEX IF NOT EXISTS idx_article_analysis_jobs_ticker_state
     ON article_analysis_jobs (ticker, analysis_contract, state);
 
-PRAGMA user_version = 5;
+PRAGMA user_version = {SCHEMA_USER_VERSION};
 """
 
 # Job states. Terminal states are never left by an ordinary transition; the single exception is
@@ -160,6 +165,20 @@ _ARTICLE_MIGRATIONS = {
 }
 
 LOGGER = logging.getLogger(__name__)
+
+
+def integrity_check(path: Path) -> str:
+    """Return SQLite's own ``PRAGMA integrity_check`` result for a database file, read-only.
+
+    Shared by the deployment snapshot builder and the public deployment's startup snapshot
+    verification, so both trust the same check rather than two hand-rolled copies.
+    """
+
+    connection = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True)
+    try:
+        return connection.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        connection.close()
 
 
 class SQLiteRepository:

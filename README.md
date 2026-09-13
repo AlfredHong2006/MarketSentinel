@@ -440,6 +440,7 @@ Settings use the `MARKETSENTINEL_` prefix and may be placed in `.env`. The ones 
 | `PUBLIC_DEFAULT_SYMBOL` | `NVDA` | Company the public client opens on |
 | `PRICE_CACHE_TTL_SECONDS` | `900` | In-process price cache; `0` disables |
 | `CORS_ALLOW_ORIGINS` | local ports | Set to the real origin for a deployed client |
+| `PUBLIC_SNAPSHOT_MANIFEST_URL` | unset | Public deployment only: fetch the latest published snapshot at startup |
 
 See [.env.example](.env.example) for the full configuration, including FinBERT batch size, news
 lookback windows, and GDELT request pacing. `.env`, SQLite databases, and caches are gitignored.
@@ -472,6 +473,49 @@ outputs · **httpx** / **requests** / **feedparser** · **tenacity** · **uv** (
 
 ---
 
+## Scheduled coverage and public snapshot publication
+
+[`.github/workflows/coverage.yml`](.github/workflows/coverage.yml) runs continuous coverage on a
+schedule (default every 6 hours, `--max-new 25` per ticker) and publishes a sanitized snapshot the
+public deployment fetches at startup -- see
+[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md#scheduled-coverage-and-public-snapshot-publication)
+for the full design. OpenAI credentials live only in that workflow; the public Render service never
+receives one. Required GitHub Actions secrets/variables:
+
+| Name | Kind | Purpose |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | secret | LLM key used only inside the workflow |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | secrets | R2 S3-compatible API credentials |
+| `R2_PRIVATE_BUCKET` | secret | Holds the private operational database |
+| `R2_PUBLIC_BUCKET` | secret | Holds the public snapshot objects and `latest.json` |
+| `R2_PUBLIC_BASE_URL` | variable | Public HTTPS base URL the public bucket is served from (not secret) |
+| `RENDER_API_KEY`, `RENDER_SERVICE_ID` | secrets | Restart the public service after a successful publish |
+
+On the Render service itself, set `MARKETSENTINEL_PUBLIC_SNAPSHOT_MANIFEST_URL` to
+`<R2_PUBLIC_BASE_URL>/latest.json` so each startup/restart fetches the latest published snapshot;
+leaving it unset keeps the image's baked-in `deploy/public-snapshot.db` exactly as before.
+
+### Bootstrap: seed R2 before the first scheduled run
+
+The workflow's private-database download **fails closed**: if `state/marketsentinel.db` is not
+already in the private R2 bucket, the job stops rather than silently starting from empty (which
+would discard the existing corpus and cause the ledger to re-pay for analyses it already has). So
+before the first scheduled or manually dispatched run, seed the private bucket once from the
+existing local state:
+
+```bash
+ENDPOINT="https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com"
+BUCKET="s3://<R2_PRIVATE_BUCKET>"
+
+aws s3 cp data/marketsentinel.db "$BUCKET/state/marketsentinel.db" --endpoint-url "$ENDPOINT"
+aws s3 cp data/constituents_cache.json "$BUCKET/state/constituents_cache.json" --endpoint-url "$ENDPOINT"
+```
+
+That is the complete bootstrap: exactly those two objects, at exactly those two keys, in the
+private bucket. After this one-time seed, every scheduled run downloads, checkpoints, and rotates
+a `.bak` generation on its own -- no further manual step. The public snapshot bucket needs no
+seeding; the first successful run publishes its first `latest.json` from scratch.
+
 ## Limitations
 
 - **The evaluation is in-sample and single-ticker** — 125 labelled NVDA analyses. It pins
@@ -497,7 +541,8 @@ outputs · **httpx** / **requests** / **feedparser** · **tenacity** · **uv** (
 2. Carry an issuer/subject distinction through extraction, closing four of the five documented
    false positives.
 3. Add a licensed historical-news provider behind the existing adapter interface.
-4. Scheduled ingestion so SQLite accumulates observations without manual searches.
+4. ~~Scheduled ingestion so SQLite accumulates observations without manual searches.~~ Done: see
+   [Scheduled coverage and public snapshot publication](#scheduled-coverage-and-public-snapshot-publication).
 5. Docker packaging and a deployed demo.
 
 ## License

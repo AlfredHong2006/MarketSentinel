@@ -101,7 +101,16 @@ EXPOSE 8000
 # the same one. Host 0.0.0.0 rather than 127.0.0.1 because the platform routes in from outside
 # the container.
 #
+# marketsentinel.public_snapshot runs first: with MARKETSENTINEL_PUBLIC_SNAPSHOT_MANIFEST_URL
+# unset (the default) it is a documented no-op, so the image still boots correctly standalone,
+# exactly as it did before this step existed. When the URL is set, it best-effort replaces the
+# baked-in snapshot below with the latest one the scheduled coverage workflow published to R2,
+# verifying a sha256 and SQLite's own integrity_check before touching anything -- any failure
+# there is caught internally and always exits 0, so the `;` here is a belt-and-suspenders
+# guarantee that uvicorn still starts against the baked-in snapshot even if that step's own
+# process fails outright (for example an import error), never a `&&` that could block startup.
+#
 # One worker deliberately. The price cache is a per-process in-memory TTL, so each extra worker
 # multiplies third-party yfinance calls by one more independent cache, and a small free instance's
 # memory is better spent on a single warm process than on several cold ones.
-CMD uvicorn marketsentinel.api.app:app --host 0.0.0.0 --port "${PORT}" --workers 1
+CMD python -m marketsentinel.public_snapshot; exec uvicorn marketsentinel.api.app:app --host 0.0.0.0 --port "${PORT}" --workers 1

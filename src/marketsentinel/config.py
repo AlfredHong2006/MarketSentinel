@@ -49,6 +49,15 @@ class Settings(BaseSettings):
     # cache. It bounds third-party calls per company to roughly one per TTL per process.
     price_cache_ttl_seconds: float = Field(default=900.0, ge=0, le=86_400)
 
+    # Runtime fetch of the published public snapshot (see public_snapshot.py), used only by the
+    # public deployment's container startup. Unset by default, so a local/private run and the
+    # image's baked-in deploy/public-snapshot.db are completely unaffected. When set, startup
+    # verifies the manifest and both artifacts (sha256, SQLite integrity, schema version) before
+    # replacing database_path / constituent_cache_path -- any failure leaves the image's own
+    # baked-in snapshot in place, never a partial or corrupt replacement.
+    public_snapshot_manifest_url: str | None = None
+    public_snapshot_fetch_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
     # Browser origins allowed to call the API. The Streamlit dashboard's port is joined by the
     # Vite dev and preview ports so a future React client needs no code change to talk to a local
     # API. Configurable rather than hardcoded because a deployed client is served from elsewhere.
