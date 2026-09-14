@@ -37,7 +37,7 @@ from marketsentinel.domain import (
     NewsFetchResult,
     SourceHealth,
 )
-from marketsentinel.errors import CoverageNotActiveError
+from marketsentinel.errors import ConstituentNotFoundError, CoverageNotActiveError
 from marketsentinel.event_analysis import EVIDENCE_WINDOW_DAYS_AFTER
 from marketsentinel.normalization import deduplicate_with_diagnostics, deduplication_reason
 from marketsentinel.sentiment.finbert import SentimentAnalyzer
@@ -289,6 +289,21 @@ class EvidenceCheckReport:
 
 
 @dataclass(frozen=True)
+class CoverageRunResult:
+    """One ticker's outcome from ``run_all``: either a completed report, or why it was skipped.
+
+    A ticker that does not resolve or is not under active coverage is reported here rather than
+    raised, so one bad ticker in a batch never loses the results already computed for the rest --
+    strictly safer than letting the exception propagate mid-batch, which is what calling ``run``
+    for each ticker in a loop would do.
+    """
+
+    ticker: str
+    report: "CoverageReport | None" = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class CoverageReport:
     ticker: str
     mode: str
@@ -357,6 +372,18 @@ class CoverageReport:
         )
         lines.append(f"  invariant: articles without a ledger row = {s.articles_without_job}")
         return "\n".join(lines)
+
+
+@dataclass
+class _TickerQueue:
+    """One ticker's mutable state during ``_analyze_many``'s round-robin allocation."""
+
+    ordered: list[Article] = field(default_factory=list)
+    position: int = 0
+    paid: int = 0
+    consecutive_failures: int = 0
+    stop_reason: str | None = None
+    counts: Counter[str] = field(default_factory=Counter)
 
 
 class CoverageCycleService:
@@ -439,6 +466,80 @@ class CoverageCycleService:
             analysis=analysis,
             evidence=evidence,
         )
+
+    def run_all(
+        self,
+        symbols: Sequence[str],
+        *,
+        now: datetime,
+        max_new_per_ticker: int,
+        max_new_total: int | None = None,
+        ingest: bool = True,
+        analyze: bool = True,
+    ) -> list[CoverageRunResult]:
+        """Cycle many tickers in one pass, allocating a shared ``max_new_total`` fairly.
+
+        Ingest and reconcile run per ticker, in the given order, exactly as ``run`` would for
+        each on its own. The paid analysis pass is then round-robin across every ticker that
+        resolved and is under active coverage (see ``_analyze_many``): every ticker gets a turn
+        before any ticker gets a second one, so a shared budget can no longer be exhausted by
+        whichever tickers happen to sort first, leaving the rest of the batch with nothing. With
+        exactly one symbol this reduces to exactly what ``run`` does -- there is no one else to
+        take a turn, so nothing about a single-ticker call changes.
+
+        A ticker that does not resolve, or is not under active coverage, is reported with an
+        error rather than raised, so one bad ticker in a batch never discards the results already
+        computed for the rest of it.
+        """
+
+        if max_new_per_ticker < 0:
+            raise ValueError("max_new_per_ticker must not be negative")
+        if max_new_total is not None and max_new_total < 0:
+            raise ValueError("max_new_total must not be negative")
+
+        resolved: list[tuple[str, Constituent, CompanyCoverage]] = []
+        outcomes: dict[str, CoverageRunResult] = {}
+        for symbol in symbols:
+            try:
+                constituent = self.constituents.resolve(symbol)
+                coverage = self._active_coverage(constituent)
+            except (ConstituentNotFoundError, CoverageNotActiveError) as error:
+                outcomes[symbol] = CoverageRunResult(ticker=symbol, error=str(error))
+                continue
+            resolved.append((symbol, constituent, coverage))
+
+        ingest_reports = {
+            symbol: self._ingest(constituent, now) if ingest else IngestReport()
+            for symbol, constituent, _ in resolved
+        }
+        reconciles = {
+            symbol: self._reconcile(constituent, coverage, now)
+            for symbol, constituent, coverage in resolved
+        }
+        analyses_by_ticker: dict[str, AnalysisPassReport] = {}
+        if analyze and resolved:
+            analyses_by_ticker = self._analyze_many(
+                [constituent for _, constituent, _ in resolved],
+                now,
+                max_new_per_ticker=max_new_per_ticker,
+                max_new_total=max_new_total,
+            )
+
+        for symbol, constituent, coverage in resolved:
+            evidence = self._check_evidence(constituent, coverage, now)
+            outcomes[symbol] = CoverageRunResult(
+                ticker=symbol,
+                report=self._report(
+                    "cycle",
+                    constituent,
+                    coverage,
+                    ingest=ingest_reports[symbol],
+                    reconcile=reconciles[symbol],
+                    analysis=analyses_by_ticker.get(constituent.symbol, AnalysisPassReport()),
+                    evidence=evidence,
+                ),
+            )
+        return [outcomes[symbol] for symbol in symbols]
 
     def _active_coverage(self, constituent: Constituent) -> CompanyCoverage:
         coverage = self.repository.get_company_coverage(constituent.symbol)
@@ -647,6 +748,132 @@ class CoverageCycleService:
             deferred=deferred,
             stop_reason=stop_reason,
         )
+
+    def _analyze_many(
+        self,
+        constituents: Sequence[Constituent],
+        now: datetime,
+        *,
+        max_new_per_ticker: int,
+        max_new_total: int | None,
+    ) -> dict[str, AnalysisPassReport]:
+        """Fair, deterministic paid-analysis allocation across several tickers in one pass.
+
+        Round-robin by ticker, in the given order: each ticker's turn silently advances past
+        every *free* outcome in its own due-article queue (a reused/cached analysis, a refusal, a
+        deterministic skip -- anything with ``paid_attempt`` false) and stops the instant it
+        makes one genuine paid attempt, so every other still-eligible ticker gets its own paid
+        attempt before this one gets a second. A ticker leaves the rotation once its queue is
+        drained, its own ``max_new_per_ticker`` cap is reached, or two of its own consecutive paid
+        attempts failed -- the same breaker ``_analyze`` applies to a single ticker, now scoped
+        per ticker so one ticker tripping it never affects another's turn. The whole pass stops
+        only when ``max_new_total`` is exhausted or the provider reports itself unavailable
+        (nothing left that anyone could still pay for); every ticker still holding queued work at
+        that point is reported with it in ``deferred`` and a matching ``stop_reason``, exactly as
+        a single-ticker budget cutoff already reports it -- nothing is dropped, only left queued
+        for a later run.
+
+        With exactly one ticker in ``constituents``, there is no one else to take a turn: this
+        reduces to processing that ticker's whole queue in order, identically to ``_analyze``.
+        """
+
+        queues: dict[str, _TickerQueue] = {}
+        order: list[str] = []
+        for constituent in constituents:
+            due = self.repository.list_due_analysis_jobs(constituent.symbol, self.contract, now)
+            ordered: list[Article] = []
+            if due:
+                due_ids = {job.article_fingerprint for job in due}
+                articles = [
+                    article
+                    for article in self.repository.list_articles(constituent.symbol)
+                    if article.fingerprint in due_ids
+                ]
+                ordered = processing_order(articles, now, constituent)
+            queues[constituent.symbol] = _TickerQueue(ordered=ordered)
+            order.append(constituent.symbol)
+
+        remaining_total = max_new_total
+        provider_unavailable = False
+        active = [ticker for ticker in order if queues[ticker].ordered]
+
+        while (
+            active and not provider_unavailable and (remaining_total is None or remaining_total > 0)
+        ):
+            still_active: list[str] = []
+            for ticker in active:
+                if remaining_total is not None and remaining_total <= 0:
+                    break  # global budget exhausted mid-round: no one else gets a turn either
+                queue = queues[ticker]
+                while queue.position < len(queue.ordered):
+                    article = queue.ordered[queue.position]
+                    queue.position += 1
+                    # The runner uses its own clock, so a lease taken late in a long run is fresh.
+                    outcome = self.runner.process(article.fingerprint)
+                    if outcome.stops_run:
+                        # Nothing was spent and the job stayed pending: this article was not
+                        # actually consumed, so undo the optimistic advance and let it still
+                        # count as deferred, exactly as a single-ticker budget cutoff would.
+                        queue.position -= 1
+                        provider_unavailable = True
+                        break
+                    if not outcome.paid_attempt:
+                        if outcome.reused or outcome.response.status == "cached":
+                            queue.counts["reused"] += 1
+                            queue.consecutive_failures = 0
+                        elif outcome.refused:
+                            queue.counts["refused"] += 1
+                        elif outcome.job_state == "skipped":
+                            queue.counts["skipped"] += 1
+                        else:
+                            key = (
+                                "retry_scheduled" if outcome.job_state == "retry_wait" else "failed"
+                            )
+                            queue.counts[key] += 1
+                        continue  # free: keep going within this same turn
+                    queue.paid += 1
+                    if remaining_total is not None:
+                        remaining_total -= 1
+                    if outcome.response.status == "generated":
+                        queue.counts["generated"] += 1
+                        queue.consecutive_failures = 0
+                    else:
+                        key = "retry_scheduled" if outcome.job_state == "retry_wait" else "failed"
+                        queue.counts[key] += 1
+                        queue.consecutive_failures += 1
+                        if queue.consecutive_failures >= 2:
+                            queue.stop_reason = "circuit_breaker"
+                    break  # a paid attempt always yields the turn to the next ticker
+                if provider_unavailable:
+                    break
+                if (
+                    queue.stop_reason is None
+                    and queue.paid < max_new_per_ticker
+                    and queue.position < len(queue.ordered)
+                ):
+                    still_active.append(ticker)
+            active = still_active
+
+        reports: dict[str, AnalysisPassReport] = {}
+        for ticker in order:
+            queue = queues[ticker]
+            deferred = len(queue.ordered) - queue.position
+            stop_reason = queue.stop_reason
+            if deferred > 0 and stop_reason is None:
+                stop_reason = "provider_unavailable" if provider_unavailable else "budget"
+            reports[ticker] = AnalysisPassReport(
+                claimable=len(queue.ordered),
+                paid_attempts=queue.paid,
+                generated=queue.counts["generated"],
+                reused=queue.counts["reused"],
+                retry_scheduled=queue.counts["retry_scheduled"],
+                failed=queue.counts["failed"],
+                skipped=queue.counts["skipped"],
+                refused=queue.counts["refused"],
+                deferred=deferred,
+                stop_reason=stop_reason,
+            )
+        return reports
 
     def _check_evidence(
         self, constituent: Constituent, coverage: CompanyCoverage, now: datetime

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiNetworkError,
   ApiNotFoundError,
@@ -101,6 +101,9 @@ export function CompanyOverviewPage({
   // are added locally so the page reflects them at once, without a second capabilities read.
   const [queuedCoverage, setQueuedCoverage] = useState<Set<string>>(new Set());
   const [queuedArticles, setQueuedArticles] = useState<Set<string>>(new Set());
+  // Companies the server reported as already covered when the reader asked: the capabilities
+  // snapshot this page was loaded with may predate the worker's activation.
+  const [knownActive, setKnownActive] = useState<Set<string>>(new Set());
   const [activity, setActivity] = useState<RequestActivity>(IDLE_ACTIVITY);
   useEffect(() => {
     if (!capabilities) return;
@@ -108,47 +111,55 @@ export function CompanyOverviewPage({
     setQueuedArticles((own) => new Set([...capabilities.pending_article_requests, ...own]));
   }, [capabilities]);
   useEffect(() => setActivity(IDLE_ACTIVITY), [symbol]);
+  // A request outcome belongs to the company it was made for. When the reader has moved to
+  // another company before it settles, the shared queue is still updated (it is global) but the
+  // note and the in-flight flag are not applied to the page now showing.
+  const currentSymbol = useRef(symbol);
+  useEffect(() => {
+    currentSymbol.current = symbol;
+  }, [symbol]);
 
   const supportsRequests = capabilities?.supports_coverage_requests === true;
-  const coverageActive = capabilities?.covered_companies.includes(symbol) === true;
+  const coverageActive =
+    capabilities?.covered_companies.includes(symbol) === true || knownActive.has(symbol);
   const coverageQueued = queuedCoverage.has(symbol);
 
   const startCoverage = useCallback(() => {
+    const requestedFor = symbol;
+    const settle = (note: string) => {
+      if (currentSymbol.current !== requestedFor) return;
+      setActivity((current) => ({ ...current, coverageSubmitting: false, coverageNote: note }));
+    };
     setActivity((current) => ({ ...current, coverageSubmitting: true, coverageNote: null }));
-    requestCoverage(symbol)
+    requestCoverage(requestedFor)
       .then((result) => {
-        if (result.state !== "covered") {
+        if (result.state === "covered") {
+          setKnownActive((own) => new Set([...own, result.symbol]));
+        } else {
           setQueuedCoverage((own) => new Set([...own, result.symbol]));
         }
-        setActivity((current) => ({
-          ...current,
-          coverageSubmitting: false,
-          coverageNote: result.message,
-        }));
+        settle(result.message);
       })
-      .catch((error: unknown) => {
-        setActivity((current) => ({
-          ...current,
-          coverageSubmitting: false,
-          coverageNote: describeRequestFailure(error),
-        }));
-      });
+      .catch((error: unknown) => settle(describeRequestFailure(error)));
   }, [symbol]);
 
   const requestAnalysis = useCallback(
     (articleId: string) => {
+      const requestedFor = symbol;
       setActivity((current) => ({
         ...current,
         articlesSubmitting: new Set([...current.articlesSubmitting, articleId]),
         articleNote: null,
       }));
-      const settle = (note: string) =>
+      const settle = (note: string) => {
+        if (currentSymbol.current !== requestedFor) return;
         setActivity((current) => {
           const remaining = new Set(current.articlesSubmitting);
           remaining.delete(articleId);
           return { ...current, articlesSubmitting: remaining, articleNote: note };
         });
-      requestArticleAnalysis(symbol, articleId)
+      };
+      requestArticleAnalysis(requestedFor, articleId)
         .then((result) => {
           if (result.state !== "analysed") {
             setQueuedArticles((own) => new Set([...own, result.article_id]));

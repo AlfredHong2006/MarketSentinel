@@ -63,7 +63,7 @@ env:
 jobs:
   coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Check out repository
@@ -160,38 +160,21 @@ jobs:
             --requests-dir requests --consumed-keys requests-consumed.txt \
             --max-new-tickers "$MAX_NEW_TICKERS" --max-article-requests "$MAX_ARTICLE_REQUESTS"
 
-      # Every actively covered ticker (the always-on TICKERS plus everything admitted from public
-      # requests), never-cycled first then least recently attempted, so MAX_TICKERS makes a capped
-      # run round-robin across runs. MAX_NEW_TOTAL is the hard ceiling on paid cycle analyses in
-      # this run regardless of how many companies are covered.
-      - name: Run bounded coverage cycle
-        env:
-          MARKETSENTINEL_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: |
-          uv run python scripts/run_coverage_cycle.py --all-active \
-            --max-new "$MAX_NEW" --max-new-total "$MAX_NEW_TOTAL" --max-tickers "$MAX_TICKERS"
-
-      - name: List covered tickers
-        id: covered
-        run: |
-          COVERED=$(uv run python scripts/run_coverage_cycle.py --mode list-active)
-          echo "covered=$COVERED" >> "$GITHUB_OUTPUT"
-          echo "covered tickers: $COVERED"
-
-      # Gate: a database that fails its own consistency check must never be checkpointed to R2,
-      # built into a public snapshot, or reach the public deployment. A non-zero exit here stops
-      # the job -- every step below is skipped automatically.
-      - name: Validate private database integrity
+      # Gate and checkpoint immediately after request admission, before the (usually much larger
+      # and longer) all-active cycle below -- and before that step even exists in the job history
+      # of a run that never reaches it. Admission's paid article-request analyses otherwise exist
+      # only on this ephemeral runner's disk until the *later* checkpoint after the cycle; if the
+      # cycle then died or the job hit its timeout, that paid work would be lost and re-paid for
+      # on the next run's re-admission. Both steps are skipped, exactly like admission itself,
+      # when no request bucket is configured -- there is nothing new to protect yet.
+      - name: Validate private database integrity (after public requests)
+        if: ${{ env.R2_REQUESTS_BUCKET != '' }}
         run: uv run python scripts/check_database_integrity.py data/marketsentinel.db
 
-      # Checkpoint immediately after a validated coverage cycle, before any public snapshot work.
-      # This run's paid Stage A/B/C analyses exist only on the ephemeral runner's disk until this
-      # step durably persists them to R2; if public snapshot build/scan/publish failed *before*
-      # this checkpoint, the next run would re-download the pre-cycle database from R2 and could
-      # pay for the same analyses again. Retried, and gated: a checkpoint failure after retries
-      # stops the job here, so public snapshot build/scan/publish and the Render restart below
-      # never run against work that was not actually saved.
-      - name: Checkpoint private state to R2
+      # A non-zero exit here (after retries) stops the job: the coverage cycle below, and every
+      # step after it, never runs against admitted work that was not actually saved.
+      - name: Checkpoint private state to R2 (after public requests)
+        if: ${{ env.R2_REQUESTS_BUCKET != '' }}
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -215,24 +198,25 @@ jobs:
           }
 
           # One rolling backup generation of the previous private state, mirroring the local
-          # data/*.bak convention. Uploaded from the local pre-cycle copy made in the download step
+          # data/*.bak convention. Uploaded from the local pre-run copy made in the download step
           # rather than an R2 server-side object copy. Best-effort only: the download step already
           # fails the job closed when state/marketsentinel.db does not exist, so a genuinely first
           # run never reaches here, but a transient failure of this particular upload should not
-          # block the checkpoint that matters.
+          # block the checkpoint that matters. Only done here, not in the second checkpoint below
+          # -- this is the one rolling generation of "state before this run touched anything".
           retry aws s3 cp data/marketsentinel.db.bak "$BUCKET/state/marketsentinel.db.bak" \
             --endpoint-url "$ENDPOINT" || true
 
-          # These two must succeed. This is the durable save of the analyses this run just paid
-          # for -- everything after this step depends on it having actually happened.
+          # These two must succeed. This is the durable save of what public-request admission just
+          # paid for -- everything after this step depends on it having actually happened.
           retry aws s3 cp data/marketsentinel.db "$BUCKET/state/marketsentinel.db" \
             --endpoint-url "$ENDPOINT"
           retry aws s3 cp data/constituents_cache.json "$BUCKET/state/constituents_cache.json" \
             --endpoint-url "$ENDPOINT"
 
-      # Only after the private checkpoint: a consumed request whose result was not durably saved
-      # must stay queued so the next run redoes it (idempotently -- activation is idempotent and
-      # a stored analysis is reused, never re-paid). Deletes exactly the keys the admission step
+      # Only after that checkpoint: a consumed request whose result was not durably saved must
+      # stay queued so the next run redoes it (idempotently -- activation is idempotent and a
+      # stored analysis is reused, never re-paid). Deletes exactly the keys the admission step
       # consumed, never the whole prefix, so requests that arrived during this run survive. A
       # single failed delete is not fatal: that request is merely admitted again next run.
       - name: Delete consumed public requests from R2
@@ -249,6 +233,78 @@ jobs:
             aws s3 rm "$BUCKET/$key" --endpoint-url "$ENDPOINT" \
               || echo "::warning::could not delete consumed request $key; it will be re-admitted"
           done < requests-consumed.txt
+
+      # Every actively covered ticker (the always-on TICKERS plus everything admitted from public
+      # requests), never-cycled first then least recently attempted, so MAX_TICKERS makes a capped
+      # run round-robin across runs. MAX_NEW_TOTAL is the hard ceiling on paid cycle analyses in
+      # this run regardless of how many companies are covered.
+      - name: Run bounded coverage cycle
+        env:
+          MARKETSENTINEL_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          uv run python scripts/run_coverage_cycle.py --all-active \
+            --max-new "$MAX_NEW" --max-new-total "$MAX_NEW_TOTAL" --max-tickers "$MAX_TICKERS"
+
+      - name: List covered tickers
+        id: covered
+        run: |
+          COVERED=$(uv run python scripts/run_coverage_cycle.py --mode list-active)
+          echo "covered=$COVERED" >> "$GITHUB_OUTPUT"
+          echo "covered tickers: $COVERED"
+
+      # Gate: a database that fails its own consistency check must never be checkpointed to R2,
+      # built into a public snapshot, or reach the public deployment. A non-zero exit here stops
+      # the job -- every step below is skipped automatically.
+      - name: Validate private database integrity (after the coverage cycle)
+        run: uv run python scripts/check_database_integrity.py data/marketsentinel.db
+
+      # Checkpoint immediately after a validated coverage cycle, before any public snapshot work.
+      # This run's paid Stage A/B/C analyses exist only on the ephemeral runner's disk until this
+      # step durably persists them to R2; if public snapshot build/scan/publish failed *before*
+      # this checkpoint, the next run would re-download the pre-cycle database from R2 and could
+      # pay for the same analyses again. Retried, and gated: a checkpoint failure after retries
+      # stops the job here, so public snapshot build/scan/publish and the Render restart below
+      # never run against work that was not actually saved. (Public-request admission's own work,
+      # if any, was already durably checkpointed above, before this step even ran.)
+      - name: Checkpoint private state to R2 (after the coverage cycle)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET="s3://${{ secrets.R2_PRIVATE_BUCKET }}"
+
+          retry() {
+            local attempt=1 max_attempts=5 delay=5
+            until "$@"; do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "::error::command failed after $max_attempts attempts: $*"
+                return 1
+              fi
+              echo "attempt $attempt/$max_attempts failed, retrying in ${delay}s: $*"
+              sleep "$delay"
+              attempt=$((attempt + 1))
+              delay=$((delay * 2))
+            done
+          }
+
+          # The rolling .bak generation belongs to whichever checkpoint in this run is the first
+          # one to actually execute: when a request bucket is configured that was the checkpoint
+          # right after public-request admission, above, so this step must not repeat it; when
+          # none is configured that earlier step never ran (it is gated the same way admission
+          # itself is), so this is this run's only checkpoint and it is the one that must do it.
+          if [ -z "$R2_REQUESTS_BUCKET" ]; then
+            retry aws s3 cp data/marketsentinel.db.bak "$BUCKET/state/marketsentinel.db.bak" \
+              --endpoint-url "$ENDPOINT" || true
+          fi
+
+          # These two must succeed. This is the durable save of the analyses this run just paid
+          # for -- everything after this step depends on it having actually happened.
+          retry aws s3 cp data/marketsentinel.db "$BUCKET/state/marketsentinel.db" \
+            --endpoint-url "$ENDPOINT"
+          retry aws s3 cp data/constituents_cache.json "$BUCKET/state/constituents_cache.json" \
+            --endpoint-url "$ENDPOINT"
 
       # Gated the same way: publish_public_snapshot.py refuses (exit 1) and writes neither
       # latest.json nor version.txt if the sanitized snapshot fails its own integrity check or the

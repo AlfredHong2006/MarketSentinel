@@ -68,6 +68,22 @@ _ARTICLE_ID = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
 # this only bounds the damage if the sink were filled by something other than this service.
 _MAX_LISTED_KEYS = 2000
 
+# The public host talks to the request store on the request path (one put per request) and once
+# at startup (the listing that rebuilds the pending mirror, inside the app's lifespan). boto3's
+# defaults -- 60 s connect, 60 s read, several attempts -- would let an unreachable store hold a
+# request thread or the whole startup for minutes. These bound one operation to roughly half a
+# minute in the worst case; a failure past that is the same 503 either way.
+R2_CONNECT_TIMEOUT_SECONDS = 5
+R2_READ_TIMEOUT_SECONDS = 10
+R2_MAX_ATTEMPTS = 2
+
+# The worker's explicit-request pass stops after this many consecutive paid failures, exactly like
+# the coverage cycle's own breaker (coverage_cycle.py::_analyze): a provider that is failing every
+# call -- an expired key, an exhausted quota, an outage that is not reported as "unavailable" --
+# must not burn the whole per-run cap on attempts that cannot succeed. Requests it did not reach
+# stay queued for a later run.
+CIRCUIT_BREAKER_CONSECUTIVE_FAILURES = 2
+
 RATE_WINDOW = timedelta(minutes=1)
 
 # Redaction for request-store failure logs. A SigV4 Authorization header can reach an exception's
@@ -198,6 +214,7 @@ class R2RequestSink:
     def _s3(self) -> Any:
         if self._client is None:
             import boto3  # noqa: PLC0415 -- only the public deployment with a bucket needs it
+            from botocore.config import Config  # noqa: PLC0415
 
             self._client = boto3.client(
                 "s3",
@@ -205,6 +222,11 @@ class R2RequestSink:
                 aws_access_key_id=self._access_key_id,
                 aws_secret_access_key=self._secret_access_key,
                 region_name="auto",
+                config=Config(
+                    connect_timeout=R2_CONNECT_TIMEOUT_SECONDS,
+                    read_timeout=R2_READ_TIMEOUT_SECONDS,
+                    retries={"max_attempts": R2_MAX_ATTEMPTS, "mode": "standard"},
+                ),
             )
         return self._client
 
@@ -427,7 +449,7 @@ class PublicRequestService:
 
     def request_coverage(self, symbol: str) -> CoverageRequestView:
         constituent = self.constituents.resolve_cached(symbol)
-        ticker = constituent.symbol
+        ticker = _key_safe_ticker(constituent.symbol)
         coverage = self.repository.get_company_coverage(ticker)
         if coverage is not None and coverage.active:
             return CoverageRequestView(
@@ -458,9 +480,9 @@ class PublicRequestService:
 
     def request_article_analysis(self, symbol: str, article_id: str) -> ArticleAnalysisRequestView:
         constituent = self.constituents.resolve_cached(symbol)
-        ticker = constituent.symbol
+        ticker = _key_safe_ticker(constituent.symbol)
         article = self.repository.get_article(article_id)
-        if article is None or article.ticker != ticker:
+        if article is None or article.ticker != ticker or not _ARTICLE_ID.match(article_id):
             raise RequestNotFoundError("No stored article with that id exists for this company.")
         if article.is_demo:
             raise RequestRejectedError("Demo articles are never analysed.")
@@ -498,6 +520,19 @@ class PublicRequestService:
     def _check_rate(self, now: datetime) -> None:
         if not self._rate.allow(now):
             raise RequestLimitError("Too many requests right now. Try again in a minute.")
+
+
+def _key_safe_ticker(ticker: str) -> str:
+    """The resolved symbol, provided it fits the key grammar the worker accepts.
+
+    Every index symbol does. The guard exists so that a symbol that somehow did not (a slash, a
+    space) can neither escape the key layout in a directory sink nor be written only to be
+    discarded unread on the worker; it is refused here instead, with nothing recorded.
+    """
+
+    if not _TICKER.match(ticker):
+        raise RequestRejectedError("This company's symbol cannot be requested.")
+    return ticker
 
 
 # --------------------------------------------------------------------------------------------
@@ -588,7 +623,9 @@ def admit_public_requests(
     ``max_article_requests`` run through the explicit-request ledger runner, which reuses a
     stored analysis rather than paying again; a failure is recorded in the ledger and the key is
     still consumed, so a permanently failing article costs at most one bounded attempt per
-    request. An unconfigured provider stops the pass and leaves the remaining keys queued.
+    request. An unconfigured provider stops the pass and leaves the remaining keys queued, and so
+    does the circuit breaker after ``CIRCUIT_BREAKER_CONSECUTIVE_FAILURES`` consecutive paid
+    failures.
     """
 
     if max_new_tickers < 0 or max_article_requests < 0:
@@ -601,6 +638,7 @@ def admit_public_requests(
     articles: list[tuple[str, str]] = []
     deferred_articles: list[str] = []
     stop_reason: str | None = None
+    consecutive_failures = 0
 
     for item in (entry for entry in loaded if entry.parsed.kind == "coverage"):
         ticker = item.parsed.ticker
@@ -639,6 +677,12 @@ def admit_public_requests(
             continue
         articles.append((article_id, outcome.job_state or outcome.response.status))
         consumed.append(item.key)
+        if outcome.reused or outcome.response.status in ("generated", "cached"):
+            consecutive_failures = 0
+        elif outcome.paid_attempt:
+            consecutive_failures += 1
+            if consecutive_failures >= CIRCUIT_BREAKER_CONSECUTIVE_FAILURES:
+                stop_reason = "circuit_breaker"
 
     return AdmissionReport(
         activated=tuple(activated),

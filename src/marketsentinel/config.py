@@ -4,8 +4,24 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Settings that are credentials, bucket names, or URLs. A value with surrounding whitespace can
+# never be the intended one: a secret with a trailing newline makes the HTTP client reject the
+# Authorization header, a padded bucket name is a different bucket, and a padded URL fails to
+# parse. This happened in production (a request-store credential pasted with a trailing newline
+# broke every public request), so these are stripped on load; an empty result reads as unset.
+_STRIPPED_SETTINGS = (
+    "hf_token",
+    "llm_api_key",
+    "llm_base_url",
+    "public_snapshot_manifest_url",
+    "public_requests_bucket",
+    "public_requests_endpoint_url",
+    "public_requests_access_key_id",
+    "public_requests_secret_access_key",
+)
 
 
 class Settings(BaseSettings):
@@ -119,6 +135,17 @@ class Settings(BaseSettings):
     allow_demo_fallback: bool = True
 
     user_agent: str = "MarketSentinel/0.1 (portfolio research application)"
+
+    @field_validator(*_STRIPPED_SETTINGS, mode="before")
+    @classmethod
+    def _strip_surrounding_whitespace(cls, value: object, info: ValidationInfo) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        # Only the optional settings collapse to unset; ``llm_base_url`` is a plain ``str``.
+        if stripped or info.field_name == "llm_base_url":
+            return stripped
+        return None
 
 
 @lru_cache

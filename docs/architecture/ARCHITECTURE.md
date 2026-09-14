@@ -561,7 +561,10 @@ shape is a **request drop-box**, not a queue service:
   (`supports_coverage_requests`, `covered_companies`, `pending_coverage_requests`,
   `pending_article_requests`). The credential on the public host is scoped to this one bucket; it
   can never reach the private corpus or the published snapshot. Without a configured store the
-  endpoints do not exist (`404`), like the spending endpoints in public mode.
+  endpoints do not exist (`404`), like the spending endpoints in public mode. Credential, bucket
+  and URL settings are stripped of surrounding whitespace on load (a pasted trailing newline once
+  broke every request in production), and public mode never builds a configured LLM provider
+  even if a key is present in its environment.
 - **Asking is capped; spending is capped elsewhere.** The API validates the ticker against the
   constituent universe and the article against the stored corpus (non-demo, no current-contract
   analysis), and refuses with `429` beyond the pending-coverage cap, the pending-article cap, the
@@ -572,7 +575,9 @@ shape is a **request drop-box**, not a queue service:
   `--max-new-tickers` requested companies (idempotent, spends nothing) and runs at most
   `--max-article-requests` article requests through the explicit-request ledger runner (the same
   `allow_terminal_retry` path as the private per-article endpoint, so a stored analysis is
-  reused rather than re-paid). It writes the exact keys it consumed; after the private
+  reused rather than re-paid). Two consecutive paid failures trip the same circuit breaker the
+  cycle uses, so a provider that is failing every call cannot burn the per-run cap; the requests
+  not reached stay queued. It writes the exact keys it consumed; after the private
   checkpoint the workflow deletes those keys and no others, so everything it did not reach --
   and everything that arrived during the run -- stays queued. The cycle then runs
   `--all-active` (every ticker in `company_coverage`), never-cycled first then least recently

@@ -47,6 +47,7 @@ from marketsentinel.errors import (
     ArticleAnalysisProviderError,
     ArticleAnalysisSemanticValidationError,
     ArticleAnalysisStructuralValidationError,
+    ConstituentNotFoundError,
     CoverageNotActiveError,
 )
 from marketsentinel.event_analysis import (
@@ -74,6 +75,44 @@ class FakeConstituents:
             is_fallback=False,
             fetched_at=T0,
         )
+
+
+# Ticker -> company name, so each ticker's articles can be titled to match, exactly like
+# FakeConstituents/ACME's own fixtures do.
+_MULTI_TICKER_NAMES = {"ACME": "Acme Corporation", "OTHER": "Other Inc", "THIRD": "Third Co"}
+
+
+class MultiTickerConstituents:
+    """Resolves any of ``_MULTI_TICKER_NAMES``, for tests exercising more than one ticker."""
+
+    def resolve(self, symbol: str):
+        if symbol not in _MULTI_TICKER_NAMES:
+            raise ConstituentNotFoundError(
+                f"{symbol!r} is not in the available constituent universe"
+            )
+        return make_constituent().model_copy(
+            update={"symbol": symbol, "yahoo_symbol": symbol, "name": _MULTI_TICKER_NAMES[symbol]}
+        )
+
+    def load(self) -> UniverseResult:
+        return UniverseResult(
+            constituents=[self.resolve(symbol) for symbol in _MULTI_TICKER_NAMES],
+            source="test",
+            is_fallback=False,
+            fetched_at=T0,
+        )
+
+
+def other_article(index: int, published_at: datetime, ticker: str = "OTHER", **updates) -> Article:
+    """Like ``article()`` but for a second ticker, with a distinct fingerprint-bearing title."""
+
+    item = make_article(
+        title=f"{_MULTI_TICKER_NAMES[ticker]} signs supply agreement number {index}",
+        published_at=published_at,
+        url=f"https://wire{index}.example/{ticker.lower()}-{index}",
+        source=f"Wire {index}",
+    )
+    return item.model_copy(update={"ticker": ticker, **updates})
 
 
 class ScriptedProvider:
@@ -891,6 +930,161 @@ def test_the_circuit_breaker_stops_after_two_consecutive_paid_failures(writable_
     assert report.analysis.paid_attempts == 2
     assert report.analysis.deferred == 1
     assert report.summary.states == {"retry_wait": 2, "pending": 1}
+
+
+# --------------------------------------------------------------------------------------------
+# Fair allocation of a shared budget across many tickers (run_all / _analyze_many)
+# --------------------------------------------------------------------------------------------
+
+
+def test_run_all_gives_every_ticker_a_paid_turn_before_any_ticker_gets_a_second(
+    writable_tmp_path,
+):
+    """Regression for a starvation bug: cycling several active tickers with a shared
+    ``max_new_total`` used to allocate each ticker its *whole* per-ticker budget in turn, so
+    whichever ticker sorted first (e.g. NVDA before AMZN) could exhaust the entire run's budget
+    on its own, leaving later tickers with zero paid attempts even though they had due work and
+    the run still had capacity. Fair round-robin instead gives every ticker a paid attempt before
+    any ticker gets a second one, so with a budget smaller than either ticker's own due-article
+    count, both must receive at least one attempt -- which the old allocation would not do."""
+
+    h = build(writable_tmp_path)
+    h.cycle.constituents = MultiTickerConstituents()
+    h.service.constituents = MultiTickerConstituents()
+    for ticker in ("ACME", "OTHER"):
+        h.cycle.activate(ticker, now=T0)
+    h.repository.upsert_articles(
+        [article(index, T0 - timedelta(hours=index)) for index in range(1, 6)]
+        + [other_article(index, T0 - timedelta(hours=index)) for index in range(1, 6)]
+    )
+
+    results = h.cycle.run_all(
+        ["ACME", "OTHER"], now=T0, max_new_per_ticker=25, max_new_total=3, ingest=False
+    )
+
+    by_ticker = {result.ticker: result.report.analysis for result in results}
+    # The whole point: neither ticker is starved down to zero.
+    assert by_ticker["ACME"].paid_attempts >= 1
+    assert by_ticker["OTHER"].paid_attempts >= 1
+    # The shared budget is still respected exactly, and split as evenly as 3 allows.
+    assert by_ticker["ACME"].paid_attempts + by_ticker["OTHER"].paid_attempts == 3
+    assert abs(by_ticker["ACME"].paid_attempts - by_ticker["OTHER"].paid_attempts) <= 1
+    assert h.provider.stage_a_calls == 3
+
+
+def test_run_all_reduces_to_run_for_a_single_ticker(writable_tmp_path):
+    """The fairness rewrite must not change single-ticker behaviour at all."""
+
+    h = build(writable_tmp_path)
+    h.cycle.activate("ACME", now=T0)
+    items = [article(index, T0 - timedelta(hours=index)) for index in range(1, 4)]
+    h.repository.upsert_articles(items)
+
+    [result] = h.cycle.run_all(["ACME"], now=T0, max_new_per_ticker=2, ingest=False)
+
+    assert result.error is None
+    assert result.report.analysis.paid_attempts == 2
+    assert result.report.analysis.deferred == 1
+    assert result.report.analysis.stop_reason == "budget"
+
+
+def test_run_all_caps_each_ticker_at_its_own_per_ticker_limit_once_the_shared_budget_allows(
+    writable_tmp_path,
+):
+    h = build(writable_tmp_path)
+    h.cycle.constituents = MultiTickerConstituents()
+    h.service.constituents = MultiTickerConstituents()
+    for ticker in ("ACME", "OTHER"):
+        h.cycle.activate(ticker, now=T0)
+    h.repository.upsert_articles(
+        [article(index, T0 - timedelta(hours=index)) for index in range(1, 4)]
+        + [other_article(index, T0 - timedelta(hours=index)) for index in range(1, 4)]
+    )
+
+    results = h.cycle.run_all(
+        ["ACME", "OTHER"], now=T0, max_new_per_ticker=1, max_new_total=10, ingest=False
+    )
+
+    by_ticker = {result.ticker: result.report.analysis for result in results}
+    # Each ticker's own cap binds well below the shared ceiling.
+    assert by_ticker["ACME"].paid_attempts == 1
+    assert by_ticker["OTHER"].paid_attempts == 1
+    assert by_ticker["ACME"].deferred == 2
+    assert by_ticker["OTHER"].deferred == 2
+    assert by_ticker["ACME"].stop_reason == "budget"
+    assert by_ticker["OTHER"].stop_reason == "budget"
+
+
+def test_run_all_scopes_the_circuit_breaker_to_the_ticker_that_tripped_it(writable_tmp_path):
+    """One ticker's failing provider call must not stall or stop the others' turns."""
+
+    h = build(
+        writable_tmp_path, ScriptedProvider(always=ArticleAnalysisProviderError("http_error"))
+    )
+    h.cycle.constituents = MultiTickerConstituents()
+    h.service.constituents = MultiTickerConstituents()
+    for ticker in ("ACME", "OTHER"):
+        h.cycle.activate(ticker, now=T0)
+    h.repository.upsert_articles(
+        [article(index, T0 - timedelta(hours=index)) for index in range(1, 4)]
+        + [other_article(index, T0 - timedelta(hours=index)) for index in range(1, 4)]
+    )
+
+    results = h.cycle.run_all(
+        ["ACME", "OTHER"], now=T0, max_new_per_ticker=25, max_new_total=10, ingest=False
+    )
+
+    by_ticker = {result.ticker: result.report.analysis for result in results}
+    for ticker in ("ACME", "OTHER"):
+        assert by_ticker[ticker].stop_reason == "circuit_breaker"
+        assert by_ticker[ticker].paid_attempts == 2
+        assert by_ticker[ticker].deferred == 1
+    assert h.provider.stage_a_calls == 4
+
+
+def test_run_all_reports_an_unresolvable_ticker_without_losing_the_others(writable_tmp_path):
+    h = build(writable_tmp_path)
+    h.cycle.constituents = MultiTickerConstituents()
+    h.service.constituents = MultiTickerConstituents()
+    h.cycle.activate("ACME", now=T0)
+    h.repository.upsert_articles([article(1, T0 - timedelta(hours=1))])
+
+    results = h.cycle.run_all(["ACME", "NOPE", "OTHER"], now=T0, max_new_per_ticker=5)
+
+    by_ticker = {result.ticker: result for result in results}
+    assert by_ticker["ACME"].error is None
+    assert by_ticker["ACME"].report.analysis.paid_attempts == 1
+    assert "not in the available constituent universe" in by_ticker["NOPE"].error
+    assert by_ticker["NOPE"].report is None
+    # OTHER was never activated: reported as a coverage error, not silently dropped.
+    assert "not under continuous coverage" in by_ticker["OTHER"].error
+    assert [result.ticker for result in results] == ["ACME", "NOPE", "OTHER"]
+
+
+def test_run_all_rejects_negative_budgets(writable_tmp_path):
+    h = build(writable_tmp_path)
+    with pytest.raises(ValueError, match="max_new_per_ticker"):
+        h.cycle.run_all(["ACME"], now=T0, max_new_per_ticker=-1)
+    with pytest.raises(ValueError, match="max_new_total"):
+        h.cycle.run_all(["ACME"], now=T0, max_new_per_ticker=1, max_new_total=-1)
+
+
+def test_run_all_stops_every_ticker_when_the_provider_is_unavailable(writable_tmp_path):
+    h = build(writable_tmp_path, provider=UnavailableArticleAnalysisProvider())
+    h.cycle.constituents = MultiTickerConstituents()
+    h.service.constituents = MultiTickerConstituents()
+    for ticker in ("ACME", "OTHER"):
+        h.cycle.activate(ticker, now=T0)
+    h.repository.upsert_articles(
+        [article(1, T0 - timedelta(hours=1)), other_article(1, T0 - timedelta(hours=1))]
+    )
+
+    results = h.cycle.run_all(["ACME", "OTHER"], now=T0, max_new_per_ticker=5, ingest=False)
+
+    for result in results:
+        assert result.report.analysis.stop_reason == "provider_unavailable"
+        assert result.report.analysis.paid_attempts == 0
+        assert result.report.analysis.deferred == 1
 
 
 def test_a_crash_after_the_analysis_was_stored_is_recovered_without_paying_again(

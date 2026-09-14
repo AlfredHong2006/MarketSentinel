@@ -156,6 +156,11 @@ def build_services(settings: Settings) -> Services:
         batch_size=settings.finbert_batch_size,
         hf_token=settings.hf_token,
     )
+    # A public deployment holds no LLM credential by design (the key exists only in the private
+    # worker). Defence in depth for the day one is set there by mistake: public mode never builds
+    # a configured provider or the automatic refresh runner, so even a leaked key has no code
+    # path that could spend it -- independently of refuse_when_public below.
+    llm_enabled = bool(settings.llm_api_key) and not settings.public_mode
     provider = (
         OpenAIArticleIntelligenceProvider(
             api_key=settings.llm_api_key,
@@ -163,7 +168,7 @@ def build_services(settings: Settings) -> Services:
             base_url=settings.llm_base_url,
             timeout_seconds=settings.llm_timeout_seconds,
         )
-        if settings.llm_api_key
+        if llm_enabled
         else UnavailableArticleAnalysisProvider()
     )
     article_events = ArticleEventAnalysisService(
@@ -212,7 +217,7 @@ def build_services(settings: Settings) -> Services:
         historical_news_max_articles=settings.historical_news_max_articles,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
         article_analysis_compatibility=compatibility,
-        article_analysis_runner=automatic_runner if settings.llm_api_key else None,
+        article_analysis_runner=automatic_runner if llm_enabled else None,
         analysis_auto_candidates=settings.analysis_auto_candidates,
         analysis_auto_max_new_per_run=settings.analysis_auto_max_new_per_run,
     )

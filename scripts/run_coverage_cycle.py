@@ -317,28 +317,39 @@ def main(argv: list[str] | None = None) -> int:
         if skipped:
             print(f"ticker cap reached; left for a later run: {', '.join(skipped)}")
 
-    remaining_total = arguments.max_new_total
+    if arguments.mode == "cycle":
+        # Fair, deterministic allocation of the shared max_new_total across every ticker in this
+        # invocation (see CoverageCycleService.run_all / _analyze_many): every ticker gets a
+        # paid-analysis turn before any ticker gets a second one, so early tickers in the cycle
+        # order can no longer exhaust the whole run's budget before the rest are even tried. One
+        # ticker reduces to exactly the old per-ticker behaviour.
+        results = service.run_all(
+            tickers,
+            now=datetime.now(UTC),
+            max_new_per_ticker=arguments.max_new,
+            max_new_total=arguments.max_new_total,
+            ingest=not arguments.no_ingest,
+            analyze=not arguments.no_analyze,
+        )
+        exit_code = 0
+        for result in results:
+            if result.error is not None:
+                print(f"{result.ticker}: {result.error}", file=sys.stderr)
+                exit_code = 2
+                continue
+            assert result.report is not None
+            print(result.report.render())
+        return exit_code
+
     exit_code = 0
     for ticker in tickers:
         now = datetime.now(UTC)
-        budget = arguments.max_new
-        if remaining_total is not None:
-            budget = min(budget, remaining_total)
         try:
-            if arguments.mode == "activate":
-                report = service.activate(ticker, now=now)
-            elif arguments.mode == "status":
-                report = service.status(ticker)
-            else:
-                report = service.run(
-                    ticker,
-                    now=now,
-                    max_new_analyses=budget,
-                    ingest=not arguments.no_ingest,
-                    analyze=not arguments.no_analyze,
-                )
-                if remaining_total is not None:
-                    remaining_total = max(0, remaining_total - report.analysis.paid_attempts)
+            report = (
+                service.activate(ticker, now=now)
+                if arguments.mode == "activate"
+                else service.status(ticker)
+            )
         except CoverageNotActiveError as error:
             print(f"{ticker}: {error}", file=sys.stderr)
             exit_code = 2

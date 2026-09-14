@@ -7,14 +7,18 @@ the worker's admission pass consumes exactly what it processed, under caps, so a
 create unbounded work or spend.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import make_article
 from fastapi.testclient import TestClient
-from test_coverage_ledger import T0, ScriptedProvider, article, build
+from test_coverage_ledger import T0, ScriptedProvider, ScriptedSource, article, build
 from test_overview import (
     COMPATIBILITY,
+    ExplodingNews,
+    ExplodingRunner,
+    ExplodingSentiment,
     FakePrices,
     read_only_service,
     seed_repository,
@@ -22,11 +26,21 @@ from test_overview import (
 )
 from test_public_mode import ExplodingArticleEvents, UniverseConstituents
 
-from marketsentinel.api.app import Services, build_request_sink, create_app
+from marketsentinel.analysis_ledger import LedgeredArticleAnalysisRunner
+from marketsentinel.api.app import Services, build_request_sink, build_services, create_app
 from marketsentinel.config import Settings
 from marketsentinel.domain import CapabilitiesView
-from marketsentinel.errors import ConstituentNotFoundError
+from marketsentinel.errors import ArticleAnalysisProviderError, ConstituentNotFoundError
+from marketsentinel.event_analysis import (
+    OpenAIArticleIntelligenceProvider,
+    UnavailableArticleAnalysisProvider,
+)
+from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.public_requests import (
+    CIRCUIT_BREAKER_CONSECUTIVE_FAILURES,
+    R2_CONNECT_TIMEOUT_SECONDS,
+    R2_MAX_ATTEMPTS,
+    R2_READ_TIMEOUT_SECONDS,
     DirectoryRequestSink,
     PublicRequestService,
     R2RequestSink,
@@ -40,8 +54,16 @@ from marketsentinel.public_requests import (
     order_tickers_for_cycle,
     parse_request_key,
 )
+from marketsentinel.sentiment.finbert import StaticSentimentAnalyzer
+from marketsentinel.service import MarketAnalysisService
 from marketsentinel.storage.sqlite import SQLiteRepository
-from scripts.run_coverage_cycle import build_parser, main, validate_arguments
+from scripts.publish_public_snapshot import publish
+from scripts.run_coverage_cycle import (
+    active_tickers_in_cycle_order,
+    build_parser,
+    main,
+    validate_arguments,
+)
 
 PUBLIC = Settings(
     _env_file=None,
@@ -812,3 +834,372 @@ def test_cli_requests_and_list_active_modes_run_offline(writable_tmp_path, monke
         == 0
     )
     assert consumed.read_text(encoding="utf-8") == ""
+
+
+# --------------------------------------------------------------------------------------------
+# Launch hardening: configuration, credentials, cost control, and the full round trip
+# --------------------------------------------------------------------------------------------
+
+
+def test_credential_bucket_and_url_settings_are_stripped_of_surrounding_whitespace() -> None:
+    """A request-store credential pasted with a trailing newline broke every public request in
+    production (the HTTP client refuses the signed header). Such a value can never be the
+    intended one, so it is stripped on load; whitespace-only reads as unset."""
+
+    settings = Settings(
+        _env_file=None,
+        public_requests_bucket=" marketsentinel-requests\n",
+        public_requests_endpoint_url="https://acct.r2.cloudflarestorage.com\n",
+        public_requests_access_key_id=f" {ACCESS_KEY_ID}\n",
+        public_requests_secret_access_key=f"{SECRET_ACCESS_KEY} \r\n",
+        public_snapshot_manifest_url="\thttps://pub.example/latest.json ",
+        llm_api_key="   ",
+        llm_base_url=" https://api.openai.com/v1 ",
+        hf_token=" hf_token ",
+    )
+
+    assert settings.public_requests_bucket == "marketsentinel-requests"
+    assert settings.public_requests_endpoint_url == "https://acct.r2.cloudflarestorage.com"
+    assert settings.public_requests_access_key_id == ACCESS_KEY_ID
+    assert settings.public_requests_secret_access_key == SECRET_ACCESS_KEY
+    assert settings.public_snapshot_manifest_url == "https://pub.example/latest.json"
+    assert settings.llm_api_key is None
+    assert settings.llm_base_url == "https://api.openai.com/v1"
+    assert settings.hf_token == "hf_token"
+    # Untouched defaults stay exactly as shipped.
+    assert Settings(_env_file=None).llm_base_url == "https://api.openai.com/v1"
+    assert Settings(_env_file=None).public_requests_bucket is None
+
+    sink = build_request_sink(settings)
+    assert isinstance(sink, R2RequestSink)
+    assert sink.bucket == "marketsentinel-requests"
+    assert sink._endpoint_url == "https://acct.r2.cloudflarestorage.com"  # noqa: SLF001
+    assert sink._access_key_id == ACCESS_KEY_ID  # noqa: SLF001
+    assert sink._secret_access_key == SECRET_ACCESS_KEY  # noqa: SLF001
+
+
+def test_public_mode_never_wires_a_configured_provider_even_when_a_key_is_present(
+    writable_tmp_path,
+) -> None:
+    """The public host must never hold an LLM credential. If one is set there by mistake, no
+    code path may be able to spend it: public mode builds the unavailable provider and no
+    automatic refresh runner, independently of the endpoint-level refusal."""
+
+    common = {
+        "_env_file": None,
+        "llm_api_key": "sk-should-never-be-used",
+        "database_path": writable_tmp_path / "wired.db",
+        "constituent_cache_path": writable_tmp_path / "missing-cache.json",
+    }
+
+    public = build_services(Settings(public_mode=True, **common))
+    assert public.analysis.article_analysis_runner is None
+    assert isinstance(
+        public.article_events.analysis_service.provider, UnavailableArticleAnalysisProvider
+    )
+
+    # Private interactive behaviour is unchanged: the key is honoured as before.
+    private = build_services(Settings(public_mode=False, **common))
+    assert isinstance(private.analysis.article_analysis_runner, LedgeredArticleAnalysisRunner)
+    assert isinstance(
+        private.article_events.analysis_service.provider, OpenAIArticleIntelligenceProvider
+    )
+
+
+def test_the_r2_client_is_built_with_bounded_timeouts_and_retries() -> None:
+    """An unreachable store must fail a request, or the startup mirror rebuild, in seconds
+    rather than holding a thread for boto3's multi-minute defaults. Builds a real (offline)
+    client: nothing connects until a call is made."""
+
+    sink = R2RequestSink(
+        bucket="requests",
+        endpoint_url="https://acct.r2.cloudflarestorage.com",
+        access_key_id="k",
+        secret_access_key="s",
+    )
+
+    client = sink._s3()  # noqa: SLF001
+
+    assert client.meta.config.connect_timeout == R2_CONNECT_TIMEOUT_SECONDS
+    assert client.meta.config.read_timeout == R2_READ_TIMEOUT_SECONDS
+    # botocore normalises max_attempts to the total including the first try.
+    assert client.meta.config.retries == {
+        "mode": "standard",
+        "total_max_attempts": R2_MAX_ATTEMPTS + 1,
+    }
+    assert client.meta.endpoint_url == "https://acct.r2.cloudflarestorage.com"
+    assert sink._s3() is client  # noqa: SLF001 -- built once, reused
+
+
+class StrictS3:
+    """Fails on any operation other than the two the sink is allowed: put and list."""
+
+    def __init__(self) -> None:
+        self.buckets: list[str] = []
+
+    def put_object(self, **kwargs):
+        self.buckets.append(kwargs["Bucket"])
+
+    def get_paginator(self, name):
+        assert name == "list_objects_v2"
+        buckets = self.buckets
+
+        class Paginator:
+            def paginate(self, *, Bucket, Prefix):
+                del Prefix
+                buckets.append(Bucket)
+                yield {}
+
+        return Paginator()
+
+    def __getattr__(self, name):
+        raise AssertionError(f"the request sink called {name!r}, which it must never do")
+
+
+def test_the_request_sink_only_puts_and_lists_and_only_in_its_own_bucket() -> None:
+    """The public credential is scoped to the request bucket; the sink itself must also never
+    read, delete, or address any other bucket, so a wider credential would still not be used."""
+
+    client = StrictS3()
+    sink = R2RequestSink(
+        bucket="requests-only", endpoint_url="https://r2.test", access_key_id="k",
+        secret_access_key="s", client=client,
+    )  # fmt: skip
+
+    sink.put(coverage_request_key("AMZN"), {"kind": "coverage"})
+    sink.put(article_request_key("AMZN", "f1"), {"kind": "article"})
+    sink.list_keys()
+
+    assert set(client.buckets) == {"requests-only"}
+
+
+class GrammarBreakingConstituents(TwoCompanyConstituents):
+    """Resolves a symbol that does not fit the request-key grammar."""
+
+    def resolve_cached(self, symbol: str):
+        if symbol == "BAD":
+            return self.resolve("ACME").model_copy(update={"symbol": "BAD/../SYM"})
+        return self.resolve(symbol)
+
+
+def test_a_symbol_outside_the_key_grammar_is_refused_and_nothing_is_recorded(
+    writable_tmp_path,
+) -> None:
+    repository = seed_repository(writable_tmp_path)
+    sink = DirectoryRequestSink(writable_tmp_path / "requests")
+    service = _service(repository, sink)
+    service.constituents = GrammarBreakingConstituents()
+    unanalysed = make_article(title="An unanalysed Acme story", url="https://example.com/u1")
+    repository.upsert_articles([unanalysed])
+
+    with TestClient(_app(repository, service)) as client:
+        coverage = client.post("/api/v1/companies/BAD/coverage-requests")
+        analysis = client.post(
+            f"/api/v1/companies/BAD/articles/{unanalysed.fingerprint}/analysis-requests"
+        )
+        odd_id = client.post("/api/v1/companies/ACME/articles/has%20space/analysis-requests")
+
+    assert coverage.status_code == 409
+    assert analysis.status_code == 409
+    assert odd_id.status_code == 404
+    assert sink.list_keys() == []
+    assert not (writable_tmp_path / "requests").exists()
+
+
+def test_consecutive_paid_failures_trip_the_admission_breaker_and_leave_the_rest_queued(
+    writable_tmp_path,
+) -> None:
+    """A provider failing every call (expired key, exhausted quota) must not burn the whole
+    per-run cap. Like the cycle's own breaker: two consecutive paid failures stop the pass; the
+    attempted keys are consumed (the ledger holds their retry state), the rest stay queued."""
+
+    failing = ScriptedProvider(always=ArticleAnalysisProviderError("http_error"))
+    h, sink = _worker(writable_tmp_path, provider=failing)
+    items = [article(index, T0 - timedelta(hours=index)) for index in range(1, 6)]
+    h.repository.upsert_articles(items)
+    for index, item in enumerate(items):
+        sink.put(
+            article_request_key("ACME", item.fingerprint),
+            {"requested_at": f"2026-09-01T0{index}:00:00+00:00"},
+        )
+
+    report = _admit(h, sink, max_article_requests=20)
+
+    assert h.provider.stage_a_calls == CIRCUIT_BREAKER_CONSECUTIVE_FAILURES
+    assert report.stop_reason == "circuit_breaker"
+    assert [status for _, status in report.articles] == ["retry_wait", "retry_wait"]
+    assert report.deferred_articles == tuple(item.fingerprint for item in items[2:])
+    assert sorted(report.consumed_keys) == sorted(
+        article_request_key("ACME", item.fingerprint) for item in items[:2]
+    )
+    assert "stopped: circuit_breaker" in report.render()
+    # Every key is still in the store: only the workflow deletes, and only what was consumed.
+    assert len(sink.list_keys()) == 5
+
+    # A success in between resets the count, so an isolated failure never trips it.
+    h.provider.always = None
+    h.provider.failures = [ArticleAnalysisProviderError("http_error")]
+    for item in items[:2]:
+        (writable_tmp_path / "requests" / article_request_key("ACME", item.fingerprint)).unlink()
+    recovered = _admit(h, sink, max_article_requests=20)
+    assert recovered.stop_reason is None
+    assert [status for _, status in recovered.articles] == ["retry_wait", "analyzed", "analyzed"]
+
+
+def test_all_active_cycle_order_rotates_so_a_capped_run_is_round_robin(writable_tmp_path) -> None:
+    h = build(writable_tmp_path, sources=[ScriptedSource(name="wire")])
+    h.cycle.constituents = TwoCompanyConstituents()
+    for ticker in ("OTHER", "ACME"):
+        h.cycle.activate(ticker, now=T0)
+
+    # Never cycled: alphabetical.
+    assert active_tickers_in_cycle_order(h.cycle) == ["ACME", "OTHER"]
+    # A run of the first ticker (as --max-tickers 1 would do) moves it behind the other.
+    h.cycle.run("ACME", now=T0 + timedelta(minutes=1), max_new_analyses=0)
+    assert active_tickers_in_cycle_order(h.cycle) == ["OTHER", "ACME"]
+    h.cycle.run("OTHER", now=T0 + timedelta(minutes=2), max_new_analyses=0)
+    assert active_tickers_in_cycle_order(h.cycle) == ["ACME", "OTHER"]
+
+
+class SnapshotResolver(TwoCompanyConstituents):
+    def resolve_cached(self, symbol: str):
+        return self.resolve(symbol.upper())
+
+
+def _public_app_over_snapshot(database_path, sink, compatibility):
+    """A public deployment over one published snapshot, with a request store attached."""
+
+    repository = SQLiteRepository(database_path)
+    repository.initialize()
+    analysis = MarketAnalysisService(
+        constituents=SnapshotResolver(),
+        news=ExplodingNews(),
+        historical_news=ExplodingNews(),
+        sentiment=ExplodingSentiment(),
+        prices=FakePrices(),
+        repository=repository,
+        forecaster=BaselineForecaster(),
+        article_analysis_compatibility=compatibility,
+        article_analysis_runner=ExplodingRunner(),
+    )
+    requests = PublicRequestService(
+        sink=sink,
+        repository=repository,
+        constituents=SnapshotResolver(),
+        compatibility=compatibility,
+        limits=LIMITS,
+        clock=Clock(datetime(2026, 9, 13, 12, 0, tzinfo=UTC)),
+    )
+    return create_app(
+        settings=PUBLIC,
+        services=Services(
+            repository=repository,
+            constituents=SnapshotResolver(),
+            analysis=analysis,
+            article_events=ExplodingArticleEvents(),
+            requests=requests,
+        ),
+    )
+
+
+def _publish(writable_tmp_path, name: str, tickers: list[str]):
+    cache = writable_tmp_path / "constituents_cache.json"
+    cache.write_text(json.dumps({"source": "test", "constituents": []}), encoding="utf-8")
+    output = writable_tmp_path / name
+    assert (
+        publish(
+            database=writable_tmp_path / "ledger.db",
+            constituent_cache=cache,
+            output_dir=output,
+            public_base_url="https://pub.test",
+            tickers=tickers,
+            now=T0,
+        )
+        == 0
+    )
+    version = (output / "version.txt").read_text(encoding="utf-8")
+    return output / version / "public-snapshot.db"
+
+
+def test_the_full_round_trip_from_public_request_to_published_analysis(writable_tmp_path) -> None:
+    """Public request -> store -> worker admission -> (crash and re-admission pays nothing) ->
+    consumed keys deleted -> snapshot published -> the public deployment serves the result and
+    reports the request as covered / analysed."""
+
+    h, sink = _worker(writable_tmp_path)
+    items = [article(index, T0 - timedelta(hours=index)) for index in range(1, 3)]
+    h.repository.upsert_articles(items)
+    h.repository.upsert_sentiments(StaticSentimentAnalyzer().score(items))
+    assert h.service.analyze_article(items[0].fingerprint).status == "generated"
+    paid_before = h.provider.stage_a_calls
+    compatibility = h.runner.compatibility
+
+    # Snapshot 1: one analysed article, nothing covered.
+    first = _publish(writable_tmp_path, "dist-1", ["ACME"])
+    with TestClient(_public_app_over_snapshot(first, sink, compatibility)) as client:
+        capabilities = client.get("/api/v1/capabilities").json()
+        assert capabilities["supports_coverage_requests"] is True
+        assert capabilities["covered_companies"] == []
+        rows = client.get("/api/v1/companies/ACME/articles").json()["articles"]
+        assert [row["has_compatible_analysis"] for row in rows] == [True, False]
+
+        base = "/api/v1/companies/ACME/articles"
+        analysed = client.post(f"{base}/{items[0].fingerprint}/analysis-requests")
+        queued = client.post(f"{base}/{items[1].fingerprint}/analysis-requests")
+        again = client.post(f"{base}/{items[1].fingerprint}/analysis-requests")
+        coverage = client.post("/api/v1/companies/other/coverage-requests")
+        coverage_again = client.post("/api/v1/companies/OTHER/coverage-requests")
+        unknown = client.post("/api/v1/companies/NOPE/coverage-requests")
+        capabilities = client.get("/api/v1/capabilities").json()
+
+    assert analysed.json()["state"] == "analysed"
+    assert (queued.status_code, queued.json()["state"]) == (202, "queued")
+    assert again.json()["state"] == "already_queued"
+    assert (coverage.json()["symbol"], coverage.json()["state"]) == ("OTHER", "queued")
+    assert coverage_again.json()["state"] == "already_queued"
+    assert unknown.status_code == 404
+    assert capabilities["pending_coverage_requests"] == ["OTHER"]
+    assert capabilities["pending_article_requests"] == [items[1].fingerprint]
+    assert sorted(sink.list_keys()) == [
+        f"articles/ACME/{items[1].fingerprint}.json",
+        "coverage/OTHER.json",
+    ]
+
+    # Worker admission: one activation (free), one generated analysis (paid once).
+    report = _admit(h, sink)
+    assert report.activated == ("OTHER",)
+    assert report.articles == ((items[1].fingerprint, "analyzed"),)
+    assert h.provider.stage_a_calls == paid_before + 1
+    assert sorted(report.consumed_keys) == sorted(sink.list_keys())
+
+    # The run failed before its checkpoint, so nothing was deleted: re-admission is free.
+    repeat = _admit(h, sink)
+    assert repeat.already_covered == ("OTHER",)
+    assert repeat.articles == ((items[1].fingerprint, "analyzed"),)
+    assert h.provider.stage_a_calls == paid_before + 1
+
+    # After the checkpoint the workflow deletes exactly the consumed keys.
+    for key in report.consumed_keys:
+        (writable_tmp_path / "requests" / key).unlink()
+    assert sink.list_keys() == []
+
+    # Snapshot 2: the public deployment now serves the analysis and the coverage state.
+    second = _publish(writable_tmp_path, "dist-2", ["ACME", "OTHER"])
+    with TestClient(_public_app_over_snapshot(second, sink, compatibility)) as client:
+        capabilities = client.get("/api/v1/capabilities").json()
+        rows = client.get("/api/v1/companies/ACME/articles").json()["articles"]
+        detail = client.get(f"/api/v1/companies/ACME/articles/{items[1].fingerprint}/analysis")
+        settled = client.post(
+            f"/api/v1/companies/ACME/articles/{items[1].fingerprint}/analysis-requests"
+        )
+        covered = client.post("/api/v1/companies/OTHER/coverage-requests")
+
+    assert capabilities["covered_companies"] == ["OTHER"]
+    assert capabilities["pending_coverage_requests"] == []
+    assert capabilities["pending_article_requests"] == []
+    assert [row["has_compatible_analysis"] for row in rows] == [True, True]
+    assert detail.status_code == 200
+    assert detail.json()["article_id"] == items[1].fingerprint
+    assert settled.json()["state"] == "analysed"
+    assert covered.json()["state"] == "covered"
+    assert sink.list_keys() == []
