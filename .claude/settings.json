@@ -1,1 +1,9 @@
-﻿{ "permissions": { "additionalDirectories": ["C:\\Dev\\MS-worktrees", "C:\\Dev\\MS-shared"] } }
+{
+  "permissions": {
+    "additionalDirectories": ["C:\\Dev\\MS-worktrees", "C:\\Dev\\MS-shared"]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}

@@ -69,14 +69,29 @@ Every completed task reports:
 - **deviations** from the request, and why;
 - **blockers**, open questions, and anything left undone.
 
-## Git: no AI writes
+## Git: no AI writes, with one coordinator exception
 
-The product owner personally performs all repository-history changes.
+The product owner performs repository-history changes, except as the coordinator exception below
+allows.
 
 **Read-only inspection is allowed**: `git status`, `git log`, `git diff`, `git show`, `git blame`,
 `git ls-files`, `git branch --list`, `git remote -v`, `git stash list`.
 
-**Prohibited**, without exception, even when asked to "just commit this":
+**Coordinator exception.** The `/coordinate` session running in the main repository, and only that
+session, may perform these local operations **after the product owner approves the specific
+integration**: commit, merge into local `main`, and create or remove worktrees and branches,
+including the staging those require. Approval covers one integration and does not carry over to the
+next. Without it, the coordinator lists the exact commands for the product owner instead.
+See [docs/DECISIONS.md](docs/DECISIONS.md), 2026-10-06.
+
+**Never, for any agent, coordinator included:** `git push`, force-push, `git rebase`,
+`git reset --hard`, or any deploy.
+
+**No AI attribution.** No commit or pull request may carry AI attribution: no `Co-Authored-By`
+trailer naming an AI, no "Generated with Claude Code" line, no equivalent from any other tool.
+
+**Workers and every other agent** keep the full prohibition. For them the following are
+**prohibited**, without exception, even when asked to "just commit this":
 `git add` / `git rm` / `git mv`, `git commit`, `git push`, `git pull`, `git fetch`, `git merge`,
 `git rebase`, `git cherry-pick`, `git revert`, `git reset`, `git restore`, `git checkout` or
 `git switch` that changes the working tree, `git branch` creation/deletion/renaming, `git tag`,

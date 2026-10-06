@@ -91,7 +91,7 @@ Full pipeline and module boundaries: [docs/architecture/ARCHITECTURE.md](docs/ar
 ## Standard commands
 
 ```bash
-uv sync --dev                                            # install (Python 3.11, locked)
+uv sync --locked --all-extras --dev                      # install (Python 3.11, locked; same as CI)
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest --cov=marketsentinel --cov-report=term-missing   # offline and deterministic
@@ -107,6 +107,13 @@ every push and pull request.
 
 Relevant validation is required for any change; a materiality, grouping, or selection change also
 needs the evaluation command above.
+
+## No AI attribution
+
+Never add AI attribution to a commit or pull request: no `Co-Authored-By` trailer naming an AI, no
+"Generated with Claude Code" line, no equivalent from any other tool. This holds for every agent,
+including the coordinator when it commits. Who may perform Git writes at all is in
+[AGENTS.md](AGENTS.md).
 
 ## What must not casually change
 
