@@ -385,3 +385,59 @@ irreversible and outward-facing operations are the ones that need to stay in Alf
 ## 2026-10-06 — One decisions file
 
 `docs/decisions/DECISIONS.md` was merged into this file, which is now the only decisions record.
+
+---
+
+## 2026-10-06 — After MR-003: data first, nothing frozen
+
+**Context:** MR-003 reported GO WITH LIMITS (provisional). On NVDA and PFE no regime reaches
+`n = 20`, every resolved event is `lagged` so day 0 is empty, and a face-validity sample found
+session sentiment is often about the wrong party (6 of 12 sampled events cleanly about the company,
+4 mixed, 2 not).
+
+**Decision: data first.** MR-004 (API + snapshot) and MR-005 (frontend) are on hold. No public
+market-reaction surface is built until the data underneath it is fit to show.
+
+**Thresholds stay provisional.** Pooling (A), all companies with `>= 3`-source sessions:
+`tau_positive = 0.42`, `tau_negative = 0.20` (floor applied). `MR_V1_FROZEN_THRESHOLDS` stays
+unset. Nothing is frozen, and positive-regime outcomes remain unmeasured.
+
+---
+
+## 2026-10-06 — Primary-company pre-analysis approved
+
+**Decision:** extend the existing scheduled GitHub Actions analysis worker to record, for each
+article, whether the covered company is the **principal subject** of the article or is merely
+**mentioned**. Backfill the stored articles once, then analyse every new article, all within fixed
+budgets. The `mr-v1` engine filters on this label.
+
+**Constraints that carry over unchanged:**
+- extraction and the rule that uses it stay separate: the model records what the article is about;
+  the filter is a deterministic downstream rule;
+- the label is a stored, versioned extraction and is never fabricated: an article that could not be
+  labelled has a typed status, not a guessed role;
+- only the private scheduled worker spends; the public deployment never does;
+- spend is bounded by fixed per-run and backfill budgets.
+
+**Still to be approved, not decided here:** the numeric budgets, the persistent-schema change the
+label needs, the exact filter rule and where it applies, and the wording of the spec amendment
+(`mr-v1` currently says it does not require paid LLM analysis). The implementing workstream ends by
+proposing all four; nothing is spent and nothing is run against the real database before that
+approval.
+
+**Reason:** a market-reaction statistic computed from sentiment about some other company is
+misleading in exactly the way this product exists to avoid, and no deterministic title rule
+recognises the failure shapes MR-003 found.
+
+---
+
+## 2026-10-06 — Later market-reaction workstreams
+
+Queued, not started, each needing its own packet:
+
+- **GDELT investigation for deeper history.** GDELT has never returned a row; a verdict-capable
+  regime needs roughly 24+ months of history and the working source's reach beyond 12 months is
+  unknown.
+- **Bootstrap small-sample false-alarm fix.** MR-003 measured the percentile-bootstrap interval
+  rejecting at about 6–9% on mean-zero noise at `n = 20–30` against a nominal 5%. Changing the
+  interval method is a methodology change and needs approval before freeze.

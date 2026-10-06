@@ -1,6 +1,6 @@
 # MR-003 — Historical Market Reaction Real-Data Validation
 
-Status: READY  
+Status: BLOCKED on MR-006 (report delivered 2026-10-06; thresholds provisional, nothing frozen, positive regime not run)  
 Owner: TBD (one worker; one reviewer pass is warranted for this stream)  
 Depends on: MR-001 and MR-002 (both in main)  
 Worktree: `C:\Dev\MS-worktrees\validation`
