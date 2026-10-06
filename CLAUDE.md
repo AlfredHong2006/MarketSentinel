@@ -136,7 +136,7 @@ needs the evaluation command above.
   priority test, what is explicitly *not* the USP.
 - [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) — the real pipeline,
   module boundaries, cache/version/evidence semantics.
-- [docs/decisions/DECISIONS.md](docs/decisions/DECISIONS.md) — settled decisions that survive
+- [docs/DECISIONS.md](docs/DECISIONS.md) — settled decisions that survive
   individual chats. Treat as binding.
 - [AGENTS.md](AGENTS.md) — how AI agents must work in this repository.
 - [README.md](README.md) — public-facing presentation, screenshots, evaluation figures.

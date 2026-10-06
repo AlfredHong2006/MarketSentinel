@@ -1,8 +1,8 @@
 # MR-003 — Historical Market Reaction Real-Data Validation
 
-Status: READY once MR-002 is merged to main  
+Status: READY  
 Owner: TBD (one worker; one reviewer pass is warranted for this stream)  
-Depends on: MR-001 (in main), MR-002 (must be merged to main first)  
+Depends on: MR-001 and MR-002 (both in main)  
 Worktree: `C:\Dev\MS-worktrees\validation`
 
 ## Objective
@@ -13,6 +13,15 @@ placebo/lag/stability behaviour, and give Alfred an evidence-backed go/no-go plu
 contract that MR-004 and MR-005 can build against.
 
 This is a validation workstream. It does not add product surface and does not redesign `mr-v1`.
+
+## Scope decided by Alfred (2026-10-06, `docs/DECISIONS.md`)
+
+- Validate on **NVDA and PFE only**. Do not run a backfill; that is decided after this result.
+- The London (LSE) path is **untested in validation**: no London-listed company has stored
+  articles. Say so explicitly in the report. Do not present calendar or `CUKX.L` alignment checks
+  as validation of the London path.
+- The amended spec is ratified as `mr-v1`. Alfred's approval of this workstream's integration is
+  the freeze.
 
 ## Source of truth
 
@@ -39,9 +48,9 @@ The order is part of the contract. Do not reorder it.
    per-company contribution to `E`, and the database snapshot date.
 3. Write these to the validation report **before** any code path that reads a price or return is
    run. No return, price, or event outcome may be loaded in this phase.
-4. If the pooling choice is ambiguous in a way that changes a rounded threshold (for example
-   whether companies that fail history sufficiency belong in `E`), compute both, record both, and
-   escalate. Do not pick the one that yields more events.
+4. The spec does not say whether companies that fail history sufficiency (AAPL, MSFT) belong in
+   `E`. Compute the thresholds both ways and record both. If the rounded thresholds agree, proceed.
+   If either differs, escalate. Do not pick the one that yields more events.
 
 ### Phase 2 — real inputs
 
@@ -117,6 +126,7 @@ The order is part of the contract. Do not reorder it.
       reported;
 - [ ] face-validity sample is traced to article IDs;
 - [ ] benchmark is `SPY` / `CUKX.L`, not a price index;
+- [ ] the report states that the London (LSE) path is untested in validation;
 - [ ] `MR_V1_FROZEN_THRESHOLDS` is set in the branch and covered by tests;
 - [ ] the result contract for MR-004/MR-005 is written down;
 - [ ] every test depends only on files under `tests/fixtures/`; none reads `C:\Dev\MS-shared\`,

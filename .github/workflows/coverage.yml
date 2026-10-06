@@ -3,7 +3,7 @@ name: Scheduled Coverage
 # Continuous coverage for the prepared tickers, run privately here (OpenAI credentials live only
 # in this workflow, never on the public Render service) then published as a sanitized public
 # snapshot to Cloudflare R2. See docs/architecture/ARCHITECTURE.md#continuous-coverage and
-# docs/decisions/DECISIONS.md for the ledger semantics this drives, and the "Scheduled coverage
+# docs/DECISIONS.md for the ledger semantics this drives, and the "Scheduled coverage
 # and public snapshot publication" decision for why this workflow is shaped the way it is.
 #
 # No automated Git writes: this workflow never commits or pushes. The only durable state it

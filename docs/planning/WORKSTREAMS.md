@@ -13,27 +13,27 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 
 | ID | Workstream | Owner | Status | Depends on | Worktree | Output |
 |---|---|---|---|---|---|---|
-| MR-001 | Data readiness | Claude Code A | DONE | none | `C:\Dev\MS-worktrees\data` (stale, removable) | readiness report + real fixture — in main as `b830183` |
-| MR-002 | Quant core | Claude Code B | REVIEW | none | `C:\Dev\MS-worktrees\quant` | deterministic engine + tests — uncommitted in worktree, awaiting Alfred's commit/merge |
-| MR-003 | Real-data validation | TBD | BLOCKED | MR-002 merged to main | `C:\Dev\MS-worktrees\validation` (create after merge) | frozen thresholds, placebo/lag validation, go/no-go — packet drafted |
-| MR-004 | API + snapshot integration | TBD | BLOCKED | MR-003 contract freeze | created later | public reaction block + endpoint |
+| MR-001 | Data readiness | Claude Code A | DONE | none | removed | readiness report + real fixture — in main as `b830183` |
+| MR-002 | Quant core | Claude Code B | DONE | none | removed | deterministic engine + tests — merged to main 2026-10-06 |
+| MR-003 | Real-data validation | TBD | READY | none outstanding | `C:\Dev\MS-worktrees\validation` (not yet created) | frozen thresholds, placebo/lag validation on NVDA/PFE, go/no-go |
+| MR-004 | API + snapshot integration | TBD | BLOCKED | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED | MR-003 contract freeze | created later | Historical Market Reaction UI |
 
 ### Reconciliation notes (2026-10-06)
 
-- **MR-001:** verdict READY WITH GAPS. Main's `b830183` has the same content as the data branch's
-  `7508f52`; the data worktree holds nothing main lacks.
-- **MR-002:** the post-review patch **was applied**. All four approved amendments (asymmetric
-  thresholds, exact-only day 0, three-condition history sufficiency, `SPY` / `CUKX.L`) are in the
-  worktree's engine, tests, spec, and `docs/DECISIONS.md`. No MR-002B packet is needed.
-  Checked in the worktree on 2026-10-06: 87 focused tests pass, full suite 1036 pass, `ruff check`
-  and `ruff format --check` clean. The MR-001 fixture is in the worktree's `tests/fixtures/` and is
-  byte-identical to main's. No test reads `C:\Dev\MS-shared\`. No completion report exists (the
+- **MR-001:** verdict READY WITH GAPS. In main as `b830183`. Worktree and branch removed.
+- **MR-002:** merged to local main, including all four approved amendments (asymmetric thresholds,
+  exact-only day 0, three-condition history sufficiency, `SPY` / `CUKX.L`) in the engine, tests,
+  spec, and `docs/DECISIONS.md`. Checked on merged main with the CI install
+  (`uv sync --locked --all-extras --dev`): 1045 tests pass, `ruff check` and `ruff format --check`
+  clean. Worktree removed; branch `work/mr-002-quant-core` kept. No completion report exists (the
   September session predates the report rule).
-- **MR-002 carries the methodology amendment.** The spec and `docs/DECISIONS.md` edits exist only in
-  the quant worktree; main still holds the pre-review spec until that work is merged.
-- **MR-003:** becomes READY the moment MR-002 is in main. Packet:
-  `docs/workstreams/MR-003-real-data-validation.md`.
+- **Spec:** the amended spec is ratified as `mr-v1` (`docs/DECISIONS.md`, 2026-10-06).
+- **MR-003:** READY. Packet: `docs/workstreams/MR-003-real-data-validation.md`. Scope is NVDA and PFE
+  only; the London (LSE) path is untested in validation; backfill is decided after its result.
+- **MR-004 carry-forward:** price persistence was deferred to MR-004 and must not slip past it. A
+  public result that cannot be reproduced is a credibility problem for this product.
+- **Not yet pushed:** local main is ahead of `origin/main`. Pushing is Alfred's.
 
 ## Execution rule
 
@@ -62,9 +62,10 @@ After MR-003 freezes the result contract, run MR-004 and MR-005 in parallel.
 
 - Main repo remains clean/deployable.
 - Each active agent works in an isolated Git worktree.
-- Agents do not push, merge, rebase, reset, or modify main.
-- Current policy: Alfred performs Git writes/commits.
-- Revisit branch-local agent commits only if manual committing becomes a demonstrated bottleneck.
+- Workers perform no Git writes and never modify main.
+- The coordinator may perform local Git operations — commit, merge into local `main`, create and remove worktrees and branches — after Alfred approves each integration. Approval is per integration.
+- No agent ever pushes, force-pushes, rebases, runs `reset --hard`, or deploys. Those stay with Alfred.
+- Revisit branch-local worker commits only if that becomes a demonstrated bottleneck.
 
 ## Agent autonomy
 
@@ -94,6 +95,6 @@ For each completed workstream:
 2. run/confirm objective checks;
 3. optionally run the standard reviewer prompt;
 4. spot-check key acceptance criteria;
-5. Alfred commits/integrates;
+5. Alfred approves the integration; the coordinator commits/merges locally; Alfred pushes;
 6. update this table;
 7. launch newly unblocked work.

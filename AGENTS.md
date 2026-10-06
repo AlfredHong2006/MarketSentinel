@@ -2,7 +2,7 @@
 
 Working rules for AI coding agents in this repository. These are binding and sit alongside
 [CLAUDE.md](CLAUDE.md), [docs/product/PRODUCT.md](docs/product/PRODUCT.md), and
-[docs/decisions/DECISIONS.md](docs/decisions/DECISIONS.md).
+[docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Inspect before editing
 

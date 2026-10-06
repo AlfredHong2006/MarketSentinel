@@ -3,7 +3,7 @@
 Derived from the current codebase. Describes what exists, not what might be built.
 
 Product intent lives in [PRODUCT.md](../product/PRODUCT.md); settled decisions in
-[DECISIONS.md](../decisions/DECISIONS.md); the session entrypoint is [CLAUDE.md](../../CLAUDE.md).
+[DECISIONS.md](../DECISIONS.md); the session entrypoint is [CLAUDE.md](../../CLAUDE.md).
 
 ## Shape of the system
 
