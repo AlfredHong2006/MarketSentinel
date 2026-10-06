@@ -44,3 +44,67 @@ Keep entries concise. Ordinary implementation choices do not belong here.
 **Git policy:** retain the existing safety rule for now: agents do not commit/push/merge/rebase/reset; Alfred performs Git writes. Reconsider branch-local agent commits only if this becomes a measured throughput bottleneck.
 
 **Reason:** obtain most of the wall-clock speedup of multi-agent development without turning a solo-founder project into a high-overhead pseudo-enterprise process.
+
+---
+
+## 2026-09-19 — `mr-v1` principal methodology review: four amendments
+
+**Context:** principal review of `mr-v1` after MR-001 data readiness and the MR-002 quant core.
+All four amendments are approved and binding on `docs/product/HISTORICAL_MARKET_REACTION_V1.md`.
+Numeric thresholds are still **not** frozen; MR-003 freezes them.
+
+**1. Asymmetric regime thresholds replace a single symmetric `tau`.**
+
+The interface is now a `RegimeThresholds(negative, positive)` pair. Selection population `E` is the
+pooled session signals with `distinct_sources >= 3`.
+
+```text
+tau_positive = max(0.20, round(Q0.85(S | E), 2))
+tau_negative = max(0.20, round(-Q0.15(S | E), 2))
+positive event iff S_t >=  tau_positive
+negative event iff S_t <= -tau_negative
+```
+
+Quantiles are linear-interpolated; selection consumes sentiment only and never returns. The result
+records both thresholds, both observed tail shares, and provisional/frozen state. The floor applies
+to each tail independently, and **neither threshold may be loosened to recover event counts.**
+
+*Reason:* company-news sentiment is skewed, so one symmetric threshold silently makes one regime a
+far rarer and more extreme event class than the other. Measured on the MR-001 NVDA/PFE fixture, the
+procedure gives `tau_positive = 0.44` / `tau_negative = 0.22` with both tails at 15.1%, where the
+old symmetric rule gave 23.4% / 6.5%.
+
+**2. Day 0 uses exact-timing events only.**
+
+Session assignment is unchanged. Each session signal and event now carries `date_only_share` and
+`timing_class` (`exact` when `date_only_share == 0`, else `lagged`). The day-0 aggregate excludes
+every lagged event and exposes its own `n_day0`; horizons +1..+10 and the primary +5 statistic keep
+all resolved events. Because the cohorts differ, every path horizon states its own cohort and `n`
+explicitly rather than letting a consumer assume they match. Full event provenance is preserved.
+
+*Reason:* the conservative date-only rule shifts an article one session late, so a lagged event's
+day-0 move is not the reaction to that news. It remains valid for forward horizons, whose anchor
+close is after publication either way.
+
+**3. History sufficiency is three conditions, not one span.**
+
+```text
+span     = last_signal_index - first_signal_index  >= 126
+density  = N_signal / (span + 1)                   >= 0.50
+coverage = N_eligible                              >= 63     (sessions with >=3 distinct sources)
+```
+
+All three are required and all three observed values are reported.
+
+*Reason:* span alone admits two dense clusters separated by a year of silence. The MR-001 real
+fixture is exactly that shape — span 219 with 40 signal sessions — and correctly becomes
+`not_enough_history` under the amended rule. The fixture itself is not relabelled.
+
+**4. Benchmarks are investable trackers, not price indices.**
+
+US -> `SPY`; London -> `CUKX.L`. `^GSPC` / `^FTSE` are retained only as validation/reference inputs
+where already present.
+
+*Reason:* a price index drops the benchmark's dividend yield while the stock leg is
+dividend-adjusted, biasing every market-adjusted return upward by roughly that yield. A total-return
+tracker makes the subtraction like for like.

@@ -1,6 +1,8 @@
 # Historical Market Reaction V1 (`mr-v1`)
 
-Status: approved design; numeric sentiment threshold to be frozen during validation  
+Status: approved design; numeric sentiment thresholds to be frozen during validation  
+Amended: 2026-09-19 (principal methodology review — asymmetric thresholds, day-0 timing cohort,
+history sufficiency, benchmark instruments)  
 Owner: Alfred Hong  
 Scope: deterministic historical research layer for MarketSentinel  
 Methodology version: `mr-v1`
@@ -85,6 +87,24 @@ If publication has a date but no trustworthy time-of-day, use the conservative r
 
 The implementation must expose timestamp-quality metrics.
 
+### Timing metadata
+
+The conservative rule protects against leakage but systematically shifts date-only articles one
+session late, so each session signal and each event must additionally carry:
+
+```text
+date_only_share    fraction of the session's kept articles with no trustworthy time
+timing_class       exact | lagged
+```
+
+```text
+exact  = date_only_share == 0   (every kept article had a full timestamp)
+lagged = otherwise
+```
+
+One date-only article is enough to make a session `lagged`: its assigned session is then very
+likely the one *after* the news rather than the one that reacted to it.
+
 ---
 
 ## 5. Session signal
@@ -106,11 +126,11 @@ A session with no eligible articles has **no signal**. It is not sentiment zero.
 
 ## 6. Positive / negative regimes
 
-Two regimes:
+Two regimes, each with **its own threshold**:
 
 ```text
-clearly_negative: S_t <= -tau
-clearly_positive: S_t >= +tau
+clearly_negative: S_t <= -tau_negative
+clearly_positive: S_t >= +tau_positive
 ```
 
 and require:
@@ -121,16 +141,41 @@ distinct_sources >= 3
 
 ### Threshold rule
 
-The **selection procedure** is fixed under `mr-v1`:
+The **selection procedure** is fixed under `mr-v1`.
 
-- choose `tau` from pooled session-sentiment marginals only;
-- target approximately 15% of signal-defined sessions in each tail;
-- enforce `tau >= 0.20`;
-- do not inspect future-return outcomes while selecting `tau`.
+Selection population:
 
-The numeric `tau` is frozen during MR-003 validation **before outcome inspection** and becomes immutable for `mr-v1`.
+```text
+E = pooled session signals with distinct_sources >= 3
+```
 
-Changing the numeric threshold after that requires a new methodology version.
+Sessions that could never qualify as events do not shape the tails.
+
+```text
+tau_positive = max(0.20, round(Q0.85(S | E), 2))
+tau_negative = max(0.20, round(-Q0.15(S | E), 2))
+```
+
+Quantiles are linear-interpolated. Thresholds are rounded to two decimals.
+
+Rules:
+
+- select from pooled session-sentiment marginals only;
+- never inspect future-return outcomes while selecting either threshold;
+- the floor applies to each threshold independently;
+- **neither threshold may be loosened to recover event counts.** A floored tail simply yields
+  fewer events.
+
+Rationale for asymmetry: real company-news sentiment is skewed, so one symmetric threshold puts
+materially different shares of sessions in the two tails and silently makes one regime a much
+rarer, more extreme event class than the other. Cutting each tail on its own side keeps the two
+regimes comparable.
+
+Both numeric thresholds are frozen during MR-003 validation **before outcome inspection** and
+become immutable for `mr-v1`. Changing either afterwards requires a new methodology version.
+
+The result must record both thresholds, both observed tail shares, and whether the pair is
+provisional or frozen.
 
 No per-company threshold tuning.
 
@@ -149,8 +194,14 @@ market_adjusted_return_h = stock_return_h - benchmark_return_h
 ```
 
 Benchmark mapping:
-- US listing -> S&P 500 benchmark/proxy;
-- London listing -> FTSE 100 benchmark/proxy.
+- US listing -> `SPY`;
+- London listing -> `CUKX.L`.
+
+These are investable trackers whose adjusted closes fold in dividends the same way the stock's
+adjusted closes do, so a market-adjusted return subtracts like for like. The bare price indices
+`^GSPC` and `^FTSE` drop the benchmark's dividend yield and would bias every market-adjusted
+return upward by roughly that yield over the holding window; they are retained only as
+validation/reference series where already present, never as the engine's benchmark input.
 
 Use the existing price path where possible. Benchmark data must use compatible session dates.
 
@@ -177,6 +228,21 @@ The product does **not** search horizons and report whichever looks strongest.
 Day 0 is contemporaneous context and must be labelled accordingly. It is not predictive evidence.
 
 Optional +1 and +10 descriptive markers may be shown, but only +5 drives the main verdict.
+
+### Day-0 cohort
+
+Day 0 is the only horizon whose meaning depends on the session being the *right* session, so:
+
+- the day-0 aggregate uses **exact-timing events only**;
+- no `lagged` event may contribute to it;
+- it exposes its own `n_day0`, separate from the resolved event count;
+- horizons +1 through +10, and the primary +5 statistic, continue to use **all** resolved events,
+  lagged included — their anchor close is genuinely after publication either way.
+
+Because day 0 and +1..+10 may therefore be computed over different cohorts, the result contract
+must state each horizon's cohort and its own `n` explicitly. A consumer must never have to infer
+that the sample sizes are identical. Where no exact event exists, day 0 is absent rather than
+approximated.
 
 ---
 
@@ -216,13 +282,24 @@ Do not use p-values in the user-facing V1.
 ## 11. Evidence states
 
 ### Not enough history
-Use when the company does not meet the minimum history span required for defensible research.
+Use when the company does not meet the minimum history required for defensible research.
 
-Target rule from lead design:
+All three conditions are required (inclusive):
 
 ```text
->= 126 trading sessions between first and last signal-defined session
+span      = last_signal_index - first_signal_index          >= 126
+density   = N_signal / (span + 1)                           >= 0.50
+coverage  = N_eligible                                      >= 63
 ```
+
+where `N_signal` is the number of signal-defined sessions and `N_eligible` is the number of
+signal-defined sessions with `distinct_sources >= 3`.
+
+Span alone is not sufficient: two dense clusters of news separated by a long silence produce a
+wide span over a corpus that cannot support an event study. Density measures coverage of the
+window itself, and `N_eligible` ensures enough of those sessions could actually become events.
+
+The result must report all three observed quantities alongside their thresholds.
 
 MR-003 must verify this is practical on real data before final freeze.
 
@@ -414,11 +491,11 @@ Implementation agents may:
 
 They may **not** silently change:
 - signal formula;
-- timing semantics;
-- threshold selection procedure;
-- benchmark logic;
+- timing semantics, including the day-0 cohort rule;
+- threshold selection procedure, including the asymmetry and either floor;
+- benchmark logic, including the benchmark instruments;
 - primary horizon;
-- evidence/verdict rules;
+- evidence/verdict rules, including the three history-sufficiency conditions;
 - claims policy.
 
 A consequential methodology change requires:
