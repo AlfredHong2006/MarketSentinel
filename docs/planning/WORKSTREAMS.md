@@ -13,11 +13,27 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 
 | ID | Workstream | Owner | Status | Depends on | Worktree | Output |
 |---|---|---|---|---|---|---|
-| MR-001 | Data readiness | Claude Code A | READY | none | `C:\Dev\MS-worktrees\data` | readiness report + real fixture |
-| MR-002 | Quant core | Claude Code B | READY | none initially; consume MR-001 fixture when available | `C:\Dev\MS-worktrees\quant` | deterministic engine + tests |
-| MR-003 | Real-data validation | TBD | BLOCKED | MR-001 + MR-002 | created later | frozen `tau`, placebo/lag validation, go/no-go |
+| MR-001 | Data readiness | Claude Code A | DONE | none | `C:\Dev\MS-worktrees\data` (stale, removable) | readiness report + real fixture — in main as `b830183` |
+| MR-002 | Quant core | Claude Code B | REVIEW | none | `C:\Dev\MS-worktrees\quant` | deterministic engine + tests — uncommitted in worktree, awaiting Alfred's commit/merge |
+| MR-003 | Real-data validation | TBD | BLOCKED | MR-002 merged to main | `C:\Dev\MS-worktrees\validation` (create after merge) | frozen thresholds, placebo/lag validation, go/no-go — packet drafted |
 | MR-004 | API + snapshot integration | TBD | BLOCKED | MR-003 contract freeze | created later | public reaction block + endpoint |
 | MR-005 | Frontend | TBD | BLOCKED | MR-003 contract freeze | created later | Historical Market Reaction UI |
+
+### Reconciliation notes (2026-10-06)
+
+- **MR-001:** verdict READY WITH GAPS. Main's `b830183` has the same content as the data branch's
+  `7508f52`; the data worktree holds nothing main lacks.
+- **MR-002:** the post-review patch **was applied**. All four approved amendments (asymmetric
+  thresholds, exact-only day 0, three-condition history sufficiency, `SPY` / `CUKX.L`) are in the
+  worktree's engine, tests, spec, and `docs/DECISIONS.md`. No MR-002B packet is needed.
+  Checked in the worktree on 2026-10-06: 87 focused tests pass, full suite 1036 pass, `ruff check`
+  and `ruff format --check` clean. The MR-001 fixture is in the worktree's `tests/fixtures/` and is
+  byte-identical to main's. No test reads `C:\Dev\MS-shared\`. No completion report exists (the
+  September session predates the report rule).
+- **MR-002 carries the methodology amendment.** The spec and `docs/DECISIONS.md` edits exist only in
+  the quant worktree; main still holds the pre-review spec until that work is merged.
+- **MR-003:** becomes READY the moment MR-002 is in main. Packet:
+  `docs/workstreams/MR-003-real-data-validation.md`.
 
 ## Execution rule
 

@@ -1,6 +1,6 @@
 # MR-002 — Historical Market Reaction Quant Core
 
-Status: READY  
+Status: REVIEW (complete in worktree, uncommitted; awaiting Alfred's commit/merge)  
 Owner: Claude Code B  
 Depends on: none initially; consume MR-001 real fixture as soon as it is available  
 Worktree: `C:\Dev\MS-worktrees\quant`

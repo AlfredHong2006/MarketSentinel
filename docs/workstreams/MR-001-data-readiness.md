@@ -1,6 +1,6 @@
 # MR-001 — Historical Market Reaction Data Readiness
 
-Status: READY  
+Status: DONE (in main as `b830183`)  
 Owner: Claude Code A  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\data`
