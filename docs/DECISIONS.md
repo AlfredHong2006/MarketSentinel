@@ -492,3 +492,25 @@ article. It stays `mr-v1` because nothing is frozen.
 
 **Not validated by any of this:** real label quality. Every test used a scripted provider. The
 pilot's label review is the first evidence.
+
+---
+
+## 2026-10-07 — Pilot acceptance rule for company-role labels
+
+**Decision:** the bulk role-label backfill may start only if the 200-label pilot passes this rule.
+
+- Alfred reviews **30 pilot labels drawn at random** from the pilot's labels. The draw uses seed
+  `20261007`, fixed before any label exists, so the sample cannot be chosen after seeing the labels.
+- A label is **correct** when Alfred, reading the headline, agrees with the stored role: `principal`
+  if the company is a party to the main development reported, `mentioned` if it is only context for
+  someone else's.
+- **At least 27 of the 30 correct:** the backfill proceeds.
+- **26 or fewer:** no bulk dispatch. The prompt changes as a new prompt version, the pilot is
+  repeated, and a fresh random 30 is reviewed. The earlier labels stay as history.
+
+This replaces the 40-label / 90% rule the MR-006 proposal suggested. The count and date of each
+review are recorded in `docs/planning/WORKSTREAMS.md`. The commands are in
+`docs/planning/SCHEMA_6_ROLLOUT.md`.
+
+**Limit of the rule:** the pilot labels the 200 highest-priority articles in a fixed order, so the
+30 are random within those 200, not across the whole corpus.
