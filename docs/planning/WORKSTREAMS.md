@@ -19,8 +19,8 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
-| MR-007 | GDELT investigation for deeper history | Claude Code worker | REVIEW (criteria met with one flagged deviation; awaiting Alfred's approval to integrate) | none | `C:\Dev\MS-worktrees\gdelt` (`ms/mr-007-gdelt`), work uncommitted | whether 24+ months of history is obtainable; report + recommendation, no backfill |
-| MR-009 | Backfill start offset and run plan (months 13–36) | TBD | READY (not started) | none to draft; the backfill itself waits for the rollout and the pilot | `C:\Dev\MS-worktrees\backfill-offset` (not yet created) | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
+| MR-007 | GDELT investigation for deeper history | Claude Code worker | DONE | none | removed | verdict: 24+ months OBTAINABLE WITH LIMITS (Google News RSS to 36 months, date-only); report and probe script merged to local main 2026-10-07 |
+| MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | RUNNING (started 2026-10-07, unattended) | none to draft; the backfill itself waits for the rollout and the pilot | `C:\Dev\MS-worktrees\backfill-offset` (`ms/mr-009-backfill-offset`) | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-007 (2026-10-07) — current plan
@@ -32,7 +32,10 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
   `docs/workstreams/MR-009-backfill-start-offset.md`.
 - **Date-only timestamps accepted** for verdicts. The bulk-file route is not to be scoped.
 - **Verdict wording requirement for MR-004 and MR-005:** results describe moves from the day after
-  publication, not the same-day reaction. Not yet written into the spec's claims policy.
+  publication, not the same-day reaction. In the spec's claims policy (section 17, "Timing
+  wording") since 2026-10-07.
+- **MR-007 integrated 2026-10-07.** Its one request to a third host, `data.gdeltproject.org`, was
+  approved by Alfred and is accepted as a deviation from the packet's two endpoints.
 - **GDELT check from GitHub Actions:** later, non-blocking, a few spaced requests. No packet.
 - **Still open for Alfred, to be proposed by MR-009:** where the backfill runs against the live
   corpus in R2, whether it performs any paid Stage A/B/C analysis, and the role-label budget for

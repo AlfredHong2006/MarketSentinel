@@ -1,6 +1,6 @@
 # MR-007 — GDELT Investigation for Deeper History
 
-Status: REVIEW (report delivered 2026-10-07: OBTAINABLE WITH LIMITS; awaiting Alfred's approval to integrate)  
+Status: DONE (merged to local main 2026-10-07; verdict OBTAINABLE WITH LIMITS)  
 Owner: TBD  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\gdelt`

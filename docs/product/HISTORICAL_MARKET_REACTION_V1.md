@@ -2,7 +2,7 @@
 
 Status: approved design; numeric sentiment thresholds to be frozen during validation  
 Amended: 2026-09-19 (principal methodology review — asymmetric thresholds, day-0 timing cohort,
-history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1; Student-t interval and zero-width rule, sections 10 and 11)  
+history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1; Student-t interval and zero-width rule, sections 10 and 11; timing wording, section 17)  
 Owner: Alfred Hong  
 Scope: deterministic historical research layer for MarketSentinel  
 Methodology version: `mr-v1`
@@ -502,6 +502,13 @@ Null copy should be:
 Not:
 
 > The news was priced in by the close.
+
+### Timing wording
+
+Results describe the move from the day after publication, not the same-day reaction. Nearly every
+event is assigned to the session after the news was published, so copy must not imply a
+same-session reaction. Say "from the day after publication" or "in the sessions after the news";
+do not say "on the day of the news" or "same-day reaction".
 
 ---
 

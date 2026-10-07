@@ -1,9 +1,9 @@
 # MR-009 — Backfill Start Offset and Run Plan (Months 13–36)
 
-Status: READY (not started; no worktree yet)  
+Status: RUNNING (started 2026-10-07, unattended)  
 Owner: TBD  
 Depends on: none to draft and test; the backfill itself waits for the schema-6 rollout and the label pilot  
-Worktree: `C:\Dev\MS-worktrees\backfill-offset` (create when started)
+Worktree: `C:\Dev\MS-worktrees\backfill-offset`
 
 ## Objective
 
