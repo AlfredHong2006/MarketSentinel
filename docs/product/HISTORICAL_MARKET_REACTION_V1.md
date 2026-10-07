@@ -2,7 +2,7 @@
 
 Status: approved design; numeric sentiment thresholds to be frozen during validation  
 Amended: 2026-09-19 (principal methodology review — asymmetric thresholds, day-0 timing cohort,
-history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1)  
+history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1; Student-t interval and zero-width rule, sections 10 and 11)  
 Owner: Alfred Hong  
 Scope: deterministic historical research layer for MarketSentinel  
 Methodology version: `mr-v1`
@@ -290,13 +290,32 @@ For each regime at +5 sessions, compute:
 - resolved event count `n`;
 - median market-adjusted return;
 - mean market-adjusted return;
-- 95% bootstrap confidence interval for the mean;
+- an approximate 95% interval for the mean (below);
 - share of events with market-adjusted return > 0.
 
-Bootstrap:
-- percentile bootstrap;
-- deterministic fixed seed derived from methodology version;
-- default `B = 2000`, unless validation demonstrates a compelling implementation reason to change it before `mr-v1` is frozen.
+Interval for the mean:
+- classical Student-t interval, `mean +/- t(0.975, n-1) * s / sqrt(n)` with `s` the sample standard
+  deviation (n-1 divisor). It is deterministic and uses no random seed or resampling.
+- it is approximate, not an exact 95% interval. MR-008 measured how often it excluded zero on
+  simulated mean-zero returns (standard deviation 4.31%, 8,000 trials per cell, Monte-Carlo
+  standard error about 0.25 percentage points) for n = 20-50:
+    - normal: 4.9-5.3%;
+    - heavy-tailed (Student-t, 3 degrees of freedom): 4.2-4.6%;
+    - contaminated (90% small moves, 10% five times larger): 3.6-4.2%;
+    - skewed (exponential, skewness 2): 6.4-8.0%.
+  The measured rate is above the nominal 5% for skewed returns and below it for heavy-tailed ones.
+  Real market-adjusted returns were not used to choose the method and may behave differently.
+  Do not describe the interval as having exactly 95% coverage or a 5% false-positive rate.
+- the same method is used at every horizon, including day 0.
+- zero-width rule: if the interval cannot be computed from the sample (fewer than two events,
+  a non-finite value, no spread among the values) or its lower and upper bounds are equal, the
+  interval is reported as degenerate, spans zero, and never counts as excluding zero. This holds
+  for any interval method and is checked both when the interval is built and when the verdict is
+  applied.
+- the percentile bootstrap, bootstrap-t and BCa remain selectable in code for research, with
+  seeds derived from the methodology version; they are not used for a verdict.
+- the result records the interval method; the bootstrap resample count is reported only for a
+  method that resamples.
 
 Do not use p-values in the user-facing V1.
 
@@ -342,7 +361,7 @@ Show descriptive evidence but no relationship verdict.
 A regime may be labelled as historical relationship detected only if all are true:
 
 1. `n >= 20`;
-2. bootstrap 95% CI for the mean excludes zero;
+2. the interval for the mean (section 10) excludes zero, and is not degenerate or zero-width;
 3. `abs(mean) >= 0.5%`;
 4. chronological first-half and second-half means have the same sign;
 5. **mean and median have the same sign**.
@@ -522,6 +541,7 @@ They may **not** silently change:
 - benchmark logic, including the benchmark instruments;
 - primary horizon;
 - evidence/verdict rules, including the three history-sufficiency conditions;
+- the interval method for the mean or its zero-width rule;
 - claims policy.
 
 A consequential methodology change requires:

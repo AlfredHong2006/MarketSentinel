@@ -1,6 +1,6 @@
 # MR-008 — Bootstrap Small-Sample False-Alarm Fix
 
-Status: REVIEW (first pass delivered 2026-10-07; second pass below implements Alfred's decision)  
+Status: DONE (both passes merged to local main 2026-10-07)  
 Owner: TBD  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\bootstrap`

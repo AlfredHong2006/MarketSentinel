@@ -20,7 +20,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | TBD | READY (not started) | none | `C:\Dev\MS-worktrees\gdelt` (not yet created) | whether 24+ months of history is obtainable; report + recommendation, no backfill |
-| MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | REVIEW | second pass (Student-t default + zero-width guard) | `C:\Dev\MS-worktrees\bootstrap` (`ms/mr-008-bootstrap`), work uncommitted | first pass delivered: no candidate qualified; Alfred chose Student-t; not integrated |
+| MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-003 (2026-10-06)
 
@@ -74,6 +74,15 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07 entry).
   give the interval `[0.01, 0.01]` and the state `detected`. **Alfred's decision**
   (`docs/DECISIONS.md`): Student-t becomes the default, the measured levels are disclosed, and no
   method may count a zero-width interval as evidence. The packet's second-pass section covers it.
+- **MR-008 second pass reviewed and integrated 2026-10-07: DONE.** In the worktree before the
+  merge: 1215 tests pass, ruff clean. Coordinator probe on synthetic inputs: for all four methods,
+  identical, single, two-equal, `nan` and `inf` samples never reach `detected` or `unstable` and are
+  flagged degenerate; a hand-built zero-width or degenerate-flagged statistic is refused by the
+  verdict rule; `interval_method` is required; Student-t bounds match SciPy to 4e-15; a clear
+  synthetic effect is still `detected`; the percentile function is textually identical to main's.
+  Thresholds, minimum counts and the 0.5% floor are unchanged; `MR_V1_FROZEN_THRESHOLDS` is unset.
+  Spec sections 10 and 11 amended as proposed. One result-contract change to know for MR-004:
+  `bootstrap_resamples` is now `null` when the method does not resample.
 - **AAPL and MSFT** are neither activated nor labelled; revisit after MR-007.
 - **Real label quality is unvalidated** until the pilot review: every test used a scripted provider.
 ### Reconciliation notes (2026-10-06)
