@@ -4,6 +4,10 @@ Adds each of the spec section 11 conditions in turn, so the contribution of the 
 (the only condition with a stated nominal level) can be read against the full rule. Pure numpy; no
 database, no prices, no network. The scale is the mean unconditional NVDA/PFE +5 market-adjusted
 standard deviation reported by `scripts/mr003_validate.py`.
+
+It measures the default interval method. MR-003's quoted 5.4-9.2% figures were measured when the
+default was the percentile bootstrap; since MR-008 the default is the Student-t interval, so a
+rerun reports that method. `scripts/mr008_interval_levels.py` measures every method by name.
 """
 
 from __future__ import annotations

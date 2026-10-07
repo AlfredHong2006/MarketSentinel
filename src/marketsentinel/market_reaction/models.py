@@ -50,6 +50,23 @@ EXTREME_STOCK_SESSION_MOVE = 0.20
 EXTREME_BENCHMARK_SESSION_MOVE = 0.07
 
 
+class IntervalMethod(StrEnum):
+    """How the 95% interval for the mean is built (spec section 10).
+
+    `student_t` is the `mr-v1` default (MR-008). The bootstrap methods stay selectable. Every
+    method is approximate; the measured false-exclusion levels are in the MR-008 proposal.
+    """
+
+    PERCENTILE_BOOTSTRAP = "percentile_bootstrap"
+    BOOTSTRAP_T = "bootstrap_t"
+    BCA = "bca"
+    STUDENT_T = "student_t"
+
+
+# The one constant that decides which interval method every engine result uses.
+DEFAULT_INTERVAL_METHOD = IntervalMethod.STUDENT_T
+
+
 class ListingExchange(StrEnum):
     US = "XNYS"
     LONDON = "XLON"
@@ -224,6 +241,12 @@ class ReturnStatistics(BaseModel):
     ci_low: float
     ci_high: float
     share_positive: float
+    # Which method produced `ci_low`/`ci_high`, so a stored interval is never read as another.
+    interval_method: IntervalMethod
+    # True when the sample cannot support the chosen interval (n < 2, non-finite values, no
+    # spread, or equal bounds). The interval is then the finite span between zero and the mean,
+    # which contains zero, and `ci_excludes_zero` is False for it whatever the bounds are.
+    interval_degenerate: bool = False
 
 
 class PathPoint(BaseModel):
@@ -426,7 +449,11 @@ class MarketReactionResult(BaseModel):
     min_distinct_sources: int = MIN_DISTINCT_SOURCES
     primary_horizon: int = PRIMARY_HORIZON
     max_path_horizon: int = MAX_PATH_HORIZON
-    bootstrap_resamples: int = BOOTSTRAP_RESAMPLES
+    # Resamples behind the default interval; None when the default method does not resample, so
+    # a Student-t interval is never presented as if a bootstrap produced it.
+    bootstrap_resamples: int | None = (
+        None if DEFAULT_INTERVAL_METHOD is IntervalMethod.STUDENT_T else BOOTSTRAP_RESAMPLES
+    )
     state: EvidenceState | None
     signal_session_count: int
     first_signal_session: date | None
