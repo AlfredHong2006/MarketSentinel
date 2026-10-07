@@ -514,3 +514,45 @@ review are recorded in `docs/planning/WORKSTREAMS.md`. The commands are in
 
 **Limit of the rule:** the pilot labels the 200 highest-priority articles in a fixed order, so the
 30 are random within those 200, not across the whole corpus.
+
+---
+
+## 2026-10-07 — Interval method: Student-t becomes the `mr-v1` default
+
+**Context:** MR-008 compared four interval methods for the mean on simulated returns only (no real
+return or outcome was loaded). Under the selection rule fixed in its packet, **no candidate
+qualified**: none held a false-exclusion rate of at most 5.49% for every shape at `n = 20–50`.
+
+**Decision:** adopt the classical **Student-t interval**, `mean ± t(0.975, n-1) · s / sqrt(n)`, as
+the default interval method for `mr-v1`, replacing the percentile bootstrap. It is used at every
+horizon, including day 0. It is deterministic and needs no seed.
+
+**This is a choice of the best available method, not a method that met the rule.** Measured
+false-exclusion rate on mean-zero simulated returns at `n = 20–50` (8,000 trials per cell):
+
+| shape | Student-t | percentile bootstrap (replaced) |
+|---|---|---|
+| normal | 4.9–5.3% | 5.7–7.8% |
+| heavy-tailed, Student-t(3) | 4.2–4.6% | 6.5–8.0% |
+| contaminated mixture | 3.6–4.2% | 7.4–8.4% |
+| skewed | 6.4–8.0% | 6.9–9.5% |
+
+Student-t is at or below nominal on symmetric shapes and still above it on skewed returns. It gives
+up some power: averaged over shapes and true means of ±1% and ±2%, 46.0% → 39.1% at `n = 20` and
+54.6% → 50.4% at `n = 30`.
+
+**Disclosure.** The spec and the methodology text state these measured levels and call the interval
+approximate. No exact 95% level is claimed, and no coverage figure is shown that was not measured
+for the final procedure.
+
+**Zero-width intervals never count as evidence.** No interval method may report "excludes zero" from
+a zero-width interval or from a sample with fewer than two observations or no spread. On main today
+the percentile default labels 25 identical returns of 1% as `detected` from the interval
+`[0.01, 0.01]`; that is closed for every method, at the interval and again at the point where the
+verdict rule reads it.
+
+**Not changed:** thresholds, the minimum event counts, the 0.5% effect floor, the split-half and
+mean/median conditions. It stays `mr-v1` because nothing is frozen.
+
+**Still unvalidated:** which simulated shape real market-adjusted returns resemble, and the effect
+of dependence between events. Both were deliberately not examined.

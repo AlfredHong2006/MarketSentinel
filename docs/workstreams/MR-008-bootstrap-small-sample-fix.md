@@ -1,6 +1,6 @@
 # MR-008 — Bootstrap Small-Sample False-Alarm Fix
 
-Status: READY  
+Status: REVIEW (first pass delivered 2026-10-07; second pass below implements Alfred's decision)  
 Owner: TBD  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\bootstrap`
@@ -115,6 +115,53 @@ Write `docs/research/MR-008-proposal.md`:
    block. Do not edit the spec;
 5. whether the day-0 and path-horizon intervals should use the same method, with the reason;
 6. what switching the default would involve (the one constant, the tests that then change).
+
+## Second pass (added 2026-10-07, after Alfred's decision)
+
+The first pass found that no candidate met the selection rule. Alfred decided
+(`docs/DECISIONS.md`, 2026-10-07, "Interval method"): adopt Student-t as the default, disclose the
+measured levels, and make a zero-width interval unable to count as evidence under any method.
+This section supersedes "the default stays the current percentile bootstrap" above.
+
+The first pass left one acceptance criterion unmet: degenerate inputs are not safe on the default
+path. On main, 25 identical returns of 1% give the interval `[0.01, 0.01]` and the state `detected`.
+
+Second-pass work:
+
+1. `DEFAULT_INTERVAL_METHOD` becomes Student-t. It applies at every horizon, including day 0.
+2. **Zero-width guard, for every method including the percentile bootstrap,** enforced twice:
+   - at the interval: fewer than two observations, non-finite values, no spread, or a computed
+     interval whose bounds are equal, all return the degenerate zero-containing interval with
+     `interval_degenerate = True`;
+   - at the verdict: `ci_excludes_zero` returns `False` whenever the statistic is flagged degenerate
+     or its bounds are equal, so no caller can reach `detected` or `unstable` through one.
+3. `interval_method` on `ReturnStatistics` becomes a required field with no default, so a stored or
+   hand-built statistic can never be silently relabelled when the default changes.
+4. The result must not present a bootstrap resample count as if it produced a Student-t interval.
+   Make the smallest change that removes the misleading reading, and report it.
+5. Tests: the default is Student-t; every method, on every degenerate shape, never yields
+   `detected` or `unstable` through the full `regime_state` rule; a constructed case where a
+   bootstrap method's bounds coincide; the engine end to end on a synthetic regime of identical
+   returns.
+6. Update `docs/research/MR-008-proposal.md` section 4 with the final proposed spec text for
+   sections 10 and 11: the Student-t method, the measured levels by shape, the word "approximate",
+   and the zero-width rule. The coordinator applies it to the spec at integration; do not edit the
+   spec.
+7. Update the quoted figures or comments in `scripts/mr003_nominal_level.py` only if they would now
+   be wrong about what the script measures. Do not run `scripts/mr003_validate.py`.
+
+Second-pass acceptance criteria, in addition to the ones below that still apply:
+
+- [ ] the default is Student-t and the result records it;
+- [ ] no method can produce `detected` or `unstable` from a zero-width or degenerate interval, shown
+      by tests at both the interval and the verdict;
+- [ ] `interval_method` is required on `ReturnStatistics`;
+- [ ] no result field misdescribes how the interval was built;
+- [ ] the proposal's section 4 holds the final spec text;
+- [ ] still synthetic only: no real return, outcome or evidence state loaded or inspected.
+
+"Default results byte-identical to main" no longer applies. What must stay identical: everything
+that is not an interval bound or a state that depends on one.
 
 ## Allowed scope
 

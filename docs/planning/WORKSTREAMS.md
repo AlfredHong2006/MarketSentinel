@@ -20,7 +20,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | TBD | READY (not started) | none | `C:\Dev\MS-worktrees\gdelt` (not yet created) | whether 24+ months of history is obtainable; report + recommendation, no backfill |
-| MR-008 | Bootstrap small-sample false-alarm fix | TBD | READY | none | `C:\Dev\MS-worktrees\bootstrap` (`ms/mr-008-bootstrap`) | interval method that holds its nominal level at n = 20–50, selectable with default unchanged; proposal for Alfred |
+| MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | REVIEW | second pass (Student-t default + zero-width guard) | `C:\Dev\MS-worktrees\bootstrap` (`ms/mr-008-bootstrap`), work uncommitted | first pass delivered: no candidate qualified; Alfred chose Student-t; not integrated |
 
 ### After MR-003 (2026-10-06)
 
@@ -62,6 +62,18 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07 entry).
   `docs/workstreams/MR-007-gdelt-deeper-history.md`. MR-008 chooses its method on synthetic data
   only and does not switch the default. MR-007 is permitted small read-only probes of GDELT and
   Google News RSS and writes nothing to the database.
+- **MR-008 reviewed 2026-10-07: REVIEW, not integrated.** Report
+  `C:\Dev\MS-shared\reports\MR-008.md`; proposal `docs/research/MR-008-proposal.md` in the worktree.
+  Confirmed in the worktree: 1192 tests pass, `ruff check` and `ruff format --check` clean; only
+  `statistics.py` and `models.py` changed under `src/`; the spec, `docs/DECISIONS.md`,
+  `docs/planning/`, packets and fixtures untouched; no new test or script reads a fixture, the
+  database or `C:\Dev\MS-shared\`; `MR_V1_FROZEN_THRESHOLDS` unset. **Default diffed against main
+  by the coordinator:** 2,273 seeded synthetic samples, including degenerate ones, give
+  byte-identical intervals, statistics and states on both trees. **Unmet criterion:** degenerate
+  inputs are not safe on the default path — on main and on the branch, 25 identical returns of 1%
+  give the interval `[0.01, 0.01]` and the state `detected`. **Alfred's decision**
+  (`docs/DECISIONS.md`): Student-t becomes the default, the measured levels are disclosed, and no
+  method may count a zero-width interval as evidence. The packet's second-pass section covers it.
 - **AAPL and MSFT** are neither activated nor labelled; revisit after MR-007.
 - **Real label quality is unvalidated** until the pilot review: every test used a scripted provider.
 ### Reconciliation notes (2026-10-06)
