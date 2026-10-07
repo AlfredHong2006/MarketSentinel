@@ -19,8 +19,8 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
-| MR-007 | GDELT investigation for deeper history | TBD | BLOCKED (queued, no packet) | Alfred's go-ahead | created later | whether 24+ months of history is obtainable |
-| MR-008 | Bootstrap small-sample false-alarm fix | TBD | BLOCKED (queued, no packet) | Alfred's go-ahead; methodology change before freeze | created later | interval method that holds its nominal level at n = 20–30 |
+| MR-007 | GDELT investigation for deeper history | TBD | READY (not started) | none | `C:\Dev\MS-worktrees\gdelt` (not yet created) | whether 24+ months of history is obtainable; report + recommendation, no backfill |
+| MR-008 | Bootstrap small-sample false-alarm fix | TBD | READY | none | `C:\Dev\MS-worktrees\bootstrap` (`ms/mr-008-bootstrap`) | interval method that holds its nominal level at n = 20–50, selectable with default unchanged; proposal for Alfred |
 
 ### After MR-003 (2026-10-06)
 
@@ -54,6 +54,14 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07 entry).
   5. raise the steady-state defaults (10 per ticker, 25 total) in a reviewed commit.
 - **Then MR-003 resumes:** outcome-blind check of placement (a) versus the (b) fallback, threshold
   re-selection on the labelled pool, positive regime, freeze decision. It needs a refreshed packet.
+- **Rollout checklist with exact commands:** `docs/planning/SCHEMA_6_ROLLOUT.md`.
+- **Pilot acceptance rule (Alfred, 2026-10-07):** Alfred reviews 30 pilot labels drawn at random
+  with a pre-fixed seed; the bulk backfill proceeds only if at least 27 are correct. Result: not
+  yet run.
+- **Packets drafted 2026-10-07:** `docs/workstreams/MR-008-bootstrap-small-sample-fix.md` and
+  `docs/workstreams/MR-007-gdelt-deeper-history.md`. MR-008 chooses its method on synthetic data
+  only and does not switch the default. MR-007 is permitted small read-only probes of GDELT and
+  Google News RSS and writes nothing to the database.
 - **AAPL and MSFT** are neither activated nor labelled; revisit after MR-007.
 - **Real label quality is unvalidated** until the pilot review: every test used a scripted provider.
 ### Reconciliation notes (2026-10-06)

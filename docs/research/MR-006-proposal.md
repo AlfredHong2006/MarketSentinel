@@ -377,13 +377,25 @@ a script to run unattended. Each step lists what to check before and after.
    `analyzed=200`; cumulative `input_tokens` / `output_tokens` per call against §1 (≈ 900 / 70; if the
    real figure is more than ≈ 25% above the ceiling, stop and revise the budget); no
    `circuit_breaker`; the job finished well inside 90 minutes (record seconds per call).
-6. **Label-quality gate (the first look at real labels; nothing before this validates them).** On a
-   downloaded copy, read at least 40 labels, including the two MR-003 sessions that were not
-   principal-driven (NVDA 2026-03-23 and 2026-04-21) and the Sanofi-reprimand session (PFE
-   2026-02-03). *Proposed pass:* the shapes in the prompt come out `mentioned`, a clear own-company
-   event comes out `principal`, and Alfred agrees with at least 90% of the sample. If not, change the
-   prompt as a **new** prompt version (new contract, new rows; the pilot's labels stay as history) and
-   repeat from step 5.
+6. **Label-quality gate (the first look at real labels; nothing before this validates them).**
+   *Acceptance rule, set by Alfred on 2026-10-07 and replacing the proposed 40-label / 90% rule:*
+   - Alfred reviews **30 pilot labels drawn at random** from the pilot's labels, on a downloaded
+     copy of the published snapshot. The draw uses a seed fixed before the pilot runs, so the sample
+     cannot be chosen after seeing the labels. The exact command is in
+     `docs/planning/SCHEMA_6_ROLLOUT.md`.
+   - A label is **correct** when Alfred, reading the headline, agrees with the stored role:
+     `principal` if the company is a party to the main development reported, `mentioned` if it is
+     only context for someone else's.
+   - **Proceed to the bulk backfill only if at least 27 of the 30 are correct.**
+   - At 26 or fewer, no bulk dispatch runs. Change the prompt as a **new** prompt version (new
+     contract, new rows; the pilot's labels stay as history), repeat the pilot from step 5, and
+     review a fresh random 30.
+   - Record the count and the date in `docs/planning/WORKSTREAMS.md` either way.
+
+   Separately, and not part of the pass rule: if the pilot happened to label them, look at the two
+   MR-003 sessions that were not principal-driven (NVDA 2026-03-23 and 2026-04-21) and the
+   Sanofi-reprimand session (PFE 2026-02-03), and note what the labels say. The pilot labels the
+   200 highest-priority articles in a fixed order, so these may not be among them.
 7. **Bulk backfill.** Dispatches of `max_backfill_roles ≤ 1000` until the report shows
    `deferred_backfill=0` for each ticker. Priority articles go first, so a partial backfill is still
    useful. *After each:* green run, integrity gate and checkpoint passed, tokens within the plan.
