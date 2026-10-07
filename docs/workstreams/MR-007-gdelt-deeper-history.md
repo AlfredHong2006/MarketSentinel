@@ -1,6 +1,6 @@
 # MR-007 — GDELT Investigation for Deeper History
 
-Status: RUNNING (started 2026-10-07; Alfred approves network access at the keyboard)  
+Status: REVIEW (report delivered 2026-10-07: OBTAINABLE WITH LIMITS; awaiting Alfred's approval to integrate)  
 Owner: TBD  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\gdelt`

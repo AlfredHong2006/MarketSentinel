@@ -15,12 +15,37 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 |---|---|---|---|---|---|---|
 | MR-001 | Data readiness | Claude Code A | DONE | none | removed | readiness report + real fixture — in main as `b830183` |
 | MR-002 | Quant core | Claude Code B | DONE | none | removed | deterministic engine + tests — merged to main 2026-10-06 |
-| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | schema rollout, label pilot + review, NVDA/PFE backfill | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
+| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | schema rollout, label pilot + review, months 13–36 news backfill, role labels for all 36 months | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
-| MR-007 | GDELT investigation for deeper history | Claude Code worker | RUNNING (started 2026-10-07) | none | `C:\Dev\MS-worktrees\gdelt` (`ms/mr-007-gdelt`) | whether 24+ months of history is obtainable; report + recommendation, no backfill |
+| MR-007 | GDELT investigation for deeper history | Claude Code worker | REVIEW (criteria met with one flagged deviation; awaiting Alfred's approval to integrate) | none | `C:\Dev\MS-worktrees\gdelt` (`ms/mr-007-gdelt`), work uncommitted | whether 24+ months of history is obtainable; report + recommendation, no backfill |
+| MR-009 | Backfill start offset and run plan (months 13–36) | TBD | READY (not started) | none to draft; the backfill itself waits for the rollout and the pilot | `C:\Dev\MS-worktrees\backfill-offset` (not yet created) | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
+
+### After MR-007 (2026-10-07) — current plan
+
+Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
+
+- **Backfill approved:** Google News RSS, months 13–36, NVDA and PFE, same 30-day window regime, no
+  re-fetch of the stored 12 months. It needs the start-offset change drafted and approved first:
+  `docs/workstreams/MR-009-backfill-start-offset.md`.
+- **Date-only timestamps accepted** for verdicts. The bulk-file route is not to be scoped.
+- **Verdict wording requirement for MR-004 and MR-005:** results describe moves from the day after
+  publication, not the same-day reaction. Not yet written into the spec's claims policy.
+- **GDELT check from GitHub Actions:** later, non-blocking, a few spaced requests. No packet.
+- **Still open for Alfred, to be proposed by MR-009:** where the backfill runs against the live
+  corpus in R2, whether it performs any paid Stage A/B/C analysis, and the role-label budget for
+  the new articles.
+- **Critical path, in order:**
+  1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — Alfred;
+  2. pilot of 200 labels, then Alfred's review of 30 (at least 27 correct) — Alfred;
+  3. role-label backfill of the stored 12 months, NVDA and PFE — Alfred;
+  4. MR-009 approved and integrated (can be drafted in parallel with 1–3);
+  5. news backfill of months 13–36, then role labels for those articles — Alfred;
+  6. MR-003 resumes on the full labelled corpus: outcome-blind filter-placement check, threshold
+     re-selection, positive regime, freeze decision. Needs a refreshed packet;
+  7. MR-004 and MR-005.
 
 ### After MR-003 (2026-10-06)
 
@@ -83,6 +108,18 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07 entry).
   Thresholds, minimum counts and the 0.5% floor are unchanged; `MR_V1_FROZEN_THRESHOLDS` is unset.
   Spec sections 10 and 11 amended as proposed. One result-contract change to know for MR-004:
   `bootstrap_resamples` is now `null` when the method does not resample.
+- **MR-007 reviewed 2026-10-07: verdict 24+ months OBTAINABLE WITH LIMITS.** Report
+  `C:\Dev\MS-shared\reports\MR-007.md`; write-up `docs/research/MR-007-gdelt-report.md` in the
+  worktree. Google News RSS returned a full 100-entry page for 30-day windows 13, 18, 24 and 36
+  months back for NVDA and PFE, 91–98% date-only. GDELT DOC 2.0 answered HTTP 429 on the first
+  request of two runs, so its content is unmeasured. Confirmed in the worktree: 1215 tests pass,
+  ruff clean, no tracked file changed, the local database untouched. Deliverables are a report and a
+  probe script only. **Flagged deviation:** one request went to a third host,
+  `data.gdeltproject.org` (a single bulk-file sample); the packet permitted two endpoints, and the
+  report says Alfred approved that request at the keyboard. **Not validated:** anything about GDELT
+  content; Google for AAPL, MSFT, AMZN or London names; the corrected bulk-file column code was
+  never run. **Awaiting Alfred:** whether to backfill months 13–24, whether date-only timing is
+  acceptable for verdicts, whether to keep pursuing GDELT.
 - **AAPL and MSFT** are neither activated nor labelled; revisit after MR-007.
 - **Real label quality is unvalidated** until the pilot review: every test used a scripted provider.
 ### Reconciliation notes (2026-10-06)

@@ -556,3 +556,35 @@ mean/median conditions. It stays `mr-v1` because nothing is frozen.
 
 **Still unvalidated:** which simulated shape real market-adjusted returns resemble, and the effect
 of dependence between events. Both were deliberately not examined.
+
+---
+
+## 2026-10-07 — After MR-007: Google News backfill to 36 months, date-only timing accepted
+
+**Context:** MR-007 found Google News RSS returns a full page for 30-day windows out to at least 36
+months for NVDA and PFE, with 91–98% of entries date-only. GDELT's search API answered HTTP 429 and
+could not be measured.
+
+**1. Backfill approved: months 13–36, NVDA and PFE, from Google News RSS.**
+- Keep the existing 30-day window regime, so the deeper history is sampled the same way as the 12
+  months already stored. No shorter windows.
+- Do not re-fetch the 12 months already stored. The backfill script only takes a horizon today, so
+  a small start-offset change is to be drafted and approved before anything runs.
+- **Order:** it runs only after the schema-6 rollout and the label pilot have both passed.
+- Still to be approved with that draft: where the run executes against the live corpus, whether it
+  performs any paid Stage A/B/C analysis, and the role-label budget for the new articles (the
+  approved role budget covers only the articles stored on 2026-10-07).
+
+**2. Date-only timestamps are accepted for verdicts.** The bulk-file route to real publication
+times is not to be scoped.
+
+**3. Verdict wording.** Because nearly every event is assigned to the session after publication,
+user-facing results must say that they describe moves **from the day after publication**, not the
+same-day reaction. No copy may imply a same-session reaction for these results.
+
+**4. GDELT from GitHub Actions: later, non-blocking.** A check of whether the worker's address is
+also rate-limited may be run at some point, as a few spaced requests. Nothing waits on it.
+
+**Reason:** depth is what stands between the current corpus and any verdict; MR-003 found no regime
+reaches 20 events on 12 months. Extending the same source in the same way adds depth without mixing
+sampling regimes. Timing precision is a known, disclosed limit, not a blocker.
