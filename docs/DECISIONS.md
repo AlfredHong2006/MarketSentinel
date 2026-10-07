@@ -441,3 +441,54 @@ Queued, not started, each needing its own packet:
 - **Bootstrap small-sample false-alarm fix.** MR-003 measured the percentile-bootstrap interval
   rejecting at about 6–9% on mean-zero noise at `n = 20–30` against a nominal 5%. Changing the
   interval method is a methodology change and needs approval before freeze.
+
+---
+
+## 2026-10-07 — Company-role stage: budget, schema, filter rule and spec amendment approved
+
+**Context:** MR-006 delivered the primary-company (company-role) stage offline with the LLM mocked,
+and proposed four items in `docs/research/MR-006-proposal.md`. All four are approved.
+
+**1. Budget.**
+- Scope: backfill **NVDA and PFE only** (about 2,852 stored articles). AAPL and MSFT are neither
+  activated nor labelled now; revisit after MR-007.
+- Pilot dispatch of 200 labels first. Alfred reviews a sample of the pilot labels before any larger
+  dispatch; nothing bulk runs before that review.
+- Then bulk dispatches of at most 1,000 labels each.
+- Steady state: 10 new labels per ticker and 25 in total per run.
+- Workflow defaults stay `0` until raised on purpose in a reviewed commit.
+- Model `gpt-4o-mini`. List price checked 2026-10-07: $0.15 per 1M input tokens, $0.60 per 1M
+  output tokens. On the proposal's token estimates that is about $0.04 for the pilot and well under
+  $1 for the NVDA + PFE backfill. The estimates are replaced by measured tokens after the pilot.
+
+**2. Schema.** One new table, `article_company_roles`, and `PRAGMA user_version` 5 → 6. No existing
+table is altered. Rollout order: refresh the baked fallback snapshot, disable the schedule, push,
+deploy the public build, dispatch one worker run with every role cap at `0`, then re-enable the
+schedule. The label table stays in the public snapshot, for reproducibility.
+
+**3. Filter rule.** Placement (a): the filter applies to articles **before session signals are
+built**, so session sentiment, the distinct-source count, the selection population `E` and history
+sufficiency are all computed on `principal`-labelled articles. An **unlabelled article is
+excluded**; it is never treated as `principal` or as `mentioned`. Stored `confidence` is not used
+by the rule, and there is no third role.
+
+**Fallback, decided outcome-blind.** After the backfill, and before any return is loaded, compute
+thresholds, the event funnel (counts only) and history sufficiency for NVDA and PFE. If placement
+(a) leaves both companies history-sufficient, (a) stands. If it does not, use placement (b): signals
+unchanged, the filter applied at event qualification. The result of that check is written down
+before any return is read.
+
+**Consequence for the provisional thresholds.** Under (a) the provisional `0.42` / `0.20` do not
+carry over: both thresholds are re-selected on the labelled pool, from sentiment only. Under (b)
+they stand. Either way nothing is frozen yet.
+
+**4. Spec amendment.** `docs/product/HISTORICAL_MARKET_REACTION_V1.md` is amended as proposed:
+eligibility additionally requires a stored `principal` role label. `mr-v1` still does not require
+Stage A/B/C analysis and still uses the broader sentiment-scored corpus as its population, but it
+can no longer be computed for a company without paid labelling: a one-off backfill plus every new
+article. It stays `mr-v1` because nothing is frozen.
+
+**Also decided:** labels for demo articles are left as they are; the engine already drops demo data.
+
+**Not validated by any of this:** real label quality. Every test used a scripted provider. The
+pilot's label review is the first evidence.

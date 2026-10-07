@@ -1,6 +1,6 @@
 # MR-006 — Primary-Company Pre-Analysis
 
-Status: READY  
+Status: REVIEW (offline work complete 2026-10-07, acceptance criteria met; awaiting Alfred's approval to integrate)  
 Owner: TBD (one worker, unattended overnight run)  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\primary-company`
