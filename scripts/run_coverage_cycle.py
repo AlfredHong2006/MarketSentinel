@@ -48,6 +48,13 @@ from pathlib import Path
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
 from marketsentinel.analysis_ledger import LedgeredArticleAnalysisRunner
+from marketsentinel.company_role import (
+    CompanyRoleService,
+    CompanyRoleStore,
+    OpenAICompanyRoleProvider,
+    UnavailableCompanyRoleProvider,
+)
+from marketsentinel.company_role_ledger import LedgeredCompanyRoleRunner, RoleBudget
 from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import CacheOnlyConstituentResolver, WikipediaConstituentService
 from marketsentinel.coverage_cycle import (
@@ -156,6 +163,38 @@ def build_coverage_service(settings: Settings, *, offline: bool) -> CoverageCycl
         live_window_days=settings.historical_news_days,
         sentiment_window_days=settings.historical_news_days,
         sentiment_half_life_hours=settings.sentiment_half_life_hours,
+        role_runner=build_role_runner(settings, repository, constituents),
+    )
+
+
+def build_role_runner(
+    settings: Settings, repository: SQLiteRepository, constituents: object
+) -> LedgeredCompanyRoleRunner:
+    """The company-role stage, wired like Stage A/B/C: private worker, ledger, no public path.
+
+    Inert unless a positive role cap is passed on the command line, so wiring it spends nothing.
+    """
+
+    model = settings.company_role_model or settings.llm_model
+    provider = (
+        OpenAICompanyRoleProvider(
+            api_key=settings.llm_api_key,
+            model_version=model,
+            base_url=settings.llm_base_url,
+            timeout_seconds=settings.llm_timeout_seconds,
+        )
+        if settings.llm_api_key
+        else UnavailableCompanyRoleProvider()
+    )
+    service = CompanyRoleService(repository, provider, constituents)
+    return LedgeredCompanyRoleRunner(repository, service, owner_prefix="coverage-cycle-role")
+
+
+def role_budget_from(arguments: argparse.Namespace) -> RoleBudget:
+    return RoleBudget(
+        max_new_per_ticker=arguments.max_new_roles,
+        max_new_total=arguments.max_new_roles_total,
+        max_backfill_total=arguments.max_backfill_roles,
     )
 
 
@@ -236,6 +275,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Where to write the consumed request keys, one per line (requests mode).",
     )
     parser.add_argument(
+        "--max-new-roles",
+        type=int,
+        default=0,
+        help="Per-ticker cap on paid company-role labels for NEW articles (published inside the "
+        "live window) in one cycle (default: 0, i.e. the role stage spends nothing). Needs "
+        "--max-new-roles-total as well.",
+    )
+    parser.add_argument(
+        "--max-new-roles-total",
+        type=int,
+        default=0,
+        help="Hard cap on paid company-role labels for new articles across every ticker in this "
+        "invocation (default: 0).",
+    )
+    parser.add_argument(
+        "--max-backfill-roles",
+        type=int,
+        default=0,
+        help="Hard cap on paid company-role labels for OLDER stored articles (the one-off "
+        "backfill) across every ticker in this invocation (default: 0). Articles are labelled "
+        "once per role contract, so repeating a run never pays twice.",
+    )
+    parser.add_argument(
         "--max-new-tickers",
         type=int,
         default=3,
@@ -251,10 +313,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def validate_arguments(parser: argparse.ArgumentParser, arguments: argparse.Namespace) -> None:
-    for name in ("max_new", "max_new_total", "max_tickers", "max_new_tickers"):
+    for name in (
+        "max_new",
+        "max_new_total",
+        "max_tickers",
+        "max_new_tickers",
+        "max_new_roles",
+        "max_new_roles_total",
+        "max_backfill_roles",
+    ):
         value = getattr(arguments, name)
         if value is not None and value < 0:
             parser.error(f"--{name.replace('_', '-')} must not be negative")
+    if arguments.mode != "cycle" and (
+        arguments.max_new_roles or arguments.max_new_roles_total or arguments.max_backfill_roles
+    ):
+        parser.error("the role caps only apply to --mode cycle")
     if arguments.max_article_requests < 0:
         parser.error("--max-article-requests must not be negative")
     if arguments.mode != "cycle" and (arguments.no_ingest or arguments.no_analyze):
@@ -317,6 +391,16 @@ def main(argv: list[str] | None = None) -> int:
         if skipped:
             print(f"ticker cap reached; left for a later run: {', '.join(skipped)}")
 
+    role_budget = role_budget_from(arguments)
+    if role_budget.enabled and not isinstance(service.repository, CompanyRoleStore):
+        # Fail before any spend rather than midway: a positive cap needs somewhere to store labels.
+        print(
+            "the company-role stage cannot run: this build's repository has no role-label "
+            "storage (the schema change awaits approval).",
+            file=sys.stderr,
+        )
+        return 2
+
     if arguments.mode == "cycle":
         # Fair, deterministic allocation of the shared max_new_total across every ticker in this
         # invocation (see CoverageCycleService.run_all / _analyze_many): every ticker gets a
@@ -330,6 +414,7 @@ def main(argv: list[str] | None = None) -> int:
             max_new_total=arguments.max_new_total,
             ingest=not arguments.no_ingest,
             analyze=not arguments.no_analyze,
+            role_budget=role_budget,
         )
         exit_code = 0
         for result in results:

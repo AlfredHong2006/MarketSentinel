@@ -30,6 +30,14 @@ from marketsentinel.analysis_ledger import (
     deterministic_skip_reason,
     processing_order,
 )
+from marketsentinel.company_role_ledger import (
+    LedgeredCompanyRoleRunner,
+    RoleBudget,
+    is_new_article,
+    priority_article_ids,
+    reconcile_role_jobs,
+    role_processing_order,
+)
 from marketsentinel.domain import (
     Article,
     Constituent,
@@ -282,6 +290,30 @@ class AnalysisPassReport:
 
 
 @dataclass(frozen=True)
+class RolePassReport:
+    """One ticker's company-role pass. Absent from a report when the stage did not run."""
+
+    reconciled: dict[str, int] = field(default_factory=dict)
+    claimable_new: int = 0
+    claimable_backfill: int = 0
+    paid_attempts: int = 0
+    generated: int = 0
+    reused: int = 0
+    retry_scheduled: int = 0
+    failed: int = 0
+    skipped: int = 0
+    refused: int = 0
+    deferred_new: int = 0
+    deferred_backfill: int = 0
+    stop_reason: str | None = None
+    # Cumulative over every run for this ticker under the role contract (from the ledger), so a
+    # reviewer can compare real token use with the proposal's estimate. Not a per-run figure.
+    ledger_states: dict[str, int] = field(default_factory=dict)
+    ledger_input_tokens: int = 0
+    ledger_output_tokens: int = 0
+
+
+@dataclass(frozen=True)
 class EvidenceCheckReport:
     checked: int = 0
     changed: int = 0
@@ -315,6 +347,7 @@ class CoverageReport:
     evidence: EvidenceCheckReport
     summary: AnalysisJobSummary
     watermarks: tuple[IngestionWatermark, ...]
+    roles: RolePassReport | None = None
 
     def render(self) -> str:
         lines = [
@@ -352,6 +385,22 @@ class CoverageReport:
             f"failed={a.failed} skipped={a.skipped} refused={a.refused} deferred={a.deferred}"
             + (f" stopped={a.stop_reason}" if a.stop_reason else "")
         )
+        if self.roles is not None:
+            r = self.roles
+            lines.append(
+                f"  role stage: claimable_new={r.claimable_new} "
+                f"claimable_backfill={r.claimable_backfill} paid_attempts={r.paid_attempts} "
+                f"generated={r.generated} reused={r.reused} "
+                f"retry_scheduled={r.retry_scheduled} failed={r.failed} skipped={r.skipped} "
+                f"refused={r.refused} deferred_new={r.deferred_new} "
+                f"deferred_backfill={r.deferred_backfill}"
+                + (f" stopped={r.stop_reason}" if r.stop_reason else "")
+            )
+            states = ", ".join(f"{k}={v}" for k, v in sorted(r.ledger_states.items()))
+            lines.append(
+                f"  role ledger: {states or 'none'} input_tokens={r.ledger_input_tokens} "
+                f"output_tokens={r.ledger_output_tokens} (cumulative)"
+            )
         e = self.evidence
         lines.append(
             f"  evidence: checked={e.checked} changed_since_analysis={e.changed} "
@@ -386,6 +435,23 @@ class _TickerQueue:
     counts: Counter[str] = field(default_factory=Counter)
 
 
+@dataclass
+class _RoleQueue:
+    """One ticker's role-stage state: new and backfill queues, each with its own position."""
+
+    reconciled: dict[str, int]
+    new: list[Article]
+    backfill: list[Article]
+    positions: dict[str, int] = field(default_factory=lambda: {"new": 0, "backfill": 0})
+    paid: dict[str, int] = field(default_factory=lambda: {"new": 0, "backfill": 0})
+    consecutive_failures: int = 0
+    stop_reason: str | None = None
+    counts: Counter[str] = field(default_factory=Counter)
+
+    def items(self, phase: str) -> list[Article]:
+        return self.new if phase == "new" else self.backfill
+
+
 class CoverageCycleService:
     def __init__(
         self,
@@ -399,6 +465,7 @@ class CoverageCycleService:
         sentiment_window_days: int = 30,
         sentiment_half_life_hours: float = 24.0,
         overlap: timedelta = DEFAULT_OVERLAP,
+        role_runner: LedgeredCompanyRoleRunner | None = None,
     ) -> None:
         if live_window_days < 1:
             raise ValueError("live_window_days must be positive")
@@ -414,6 +481,7 @@ class CoverageCycleService:
         self.sentiment_window_days = sentiment_window_days
         self.sentiment_half_life_hours = sentiment_half_life_hours
         self.overlap = overlap
+        self.role_runner = role_runner
 
     @property
     def contract(self) -> str:
@@ -446,6 +514,7 @@ class CoverageCycleService:
         max_new_analyses: int,
         ingest: bool = True,
         analyze: bool = True,
+        role_budget: RoleBudget | None = None,
     ) -> CoverageReport:
         if max_new_analyses < 0:
             raise ValueError("max_new_analyses must not be negative")
@@ -456,6 +525,13 @@ class CoverageCycleService:
         analysis = (
             self._analyze(constituent, now, max_new_analyses) if analyze else AnalysisPassReport()
         )
+        roles = (
+            self._label_roles_many([(constituent, coverage)], now, role_budget).get(
+                constituent.symbol
+            )
+            if analyze
+            else None
+        )
         evidence = self._check_evidence(constituent, coverage, now)
         return self._report(
             "cycle",
@@ -465,6 +541,7 @@ class CoverageCycleService:
             reconcile=reconcile,
             analysis=analysis,
             evidence=evidence,
+            roles=roles,
         )
 
     def run_all(
@@ -476,6 +553,7 @@ class CoverageCycleService:
         max_new_total: int | None = None,
         ingest: bool = True,
         analyze: bool = True,
+        role_budget: RoleBudget | None = None,
     ) -> list[CoverageRunResult]:
         """Cycle many tickers in one pass, allocating a shared ``max_new_total`` fairly.
 
@@ -524,6 +602,13 @@ class CoverageCycleService:
                 max_new_per_ticker=max_new_per_ticker,
                 max_new_total=max_new_total,
             )
+        roles_by_ticker: dict[str, RolePassReport] = {}
+        if analyze and resolved:
+            roles_by_ticker = self._label_roles_many(
+                [(constituent, coverage) for _, constituent, coverage in resolved],
+                now,
+                role_budget,
+            )
 
         for symbol, constituent, coverage in resolved:
             evidence = self._check_evidence(constituent, coverage, now)
@@ -537,6 +622,7 @@ class CoverageCycleService:
                     reconcile=reconciles[symbol],
                     analysis=analyses_by_ticker.get(constituent.symbol, AnalysisPassReport()),
                     evidence=evidence,
+                    roles=roles_by_ticker.get(constituent.symbol),
                 ),
             )
         return [outcomes[symbol] for symbol in symbols]
@@ -875,6 +961,147 @@ class CoverageCycleService:
             )
         return reports
 
+    def _label_roles_many(
+        self,
+        targets: Sequence[tuple[Constituent, CompanyCoverage]],
+        now: datetime,
+        budget: RoleBudget | None,
+    ) -> dict[str, RolePassReport]:
+        """The company-role pass: reconcile, then label under explicit caps, deterministically.
+
+        Inert unless a role runner is wired *and* a cap is positive: with the delivered zero
+        defaults it creates no job and makes no call. Each article is paid for once per role
+        contract (the ledger lease and the stored-label check), budget-limited work stays
+        ``pending``, and articles in sessions that can change an `mr-v1` result come first.
+
+        Two phases, each round-robin across tickers so a shared cap cannot be exhausted by
+        whichever ticker sorts first: *new* articles (published inside the live window) under
+        ``max_new_per_ticker`` / ``max_new_total``, then *backfill* (older stored articles) under
+        ``max_backfill_total``. Two consecutive paid failures stop a ticker, and an unavailable
+        provider stops everything without consuming an attempt.
+        """
+
+        runner = self.role_runner
+        if runner is None or budget is None or not budget.enabled:
+            return {}
+
+        contract = runner.contract_key
+        queues: dict[str, _RoleQueue] = {}
+        order: list[str] = []
+        for constituent, coverage in targets:
+            reconciled = reconcile_role_jobs(self.repository, contract, constituent.symbol, now)
+            due = self.repository.list_due_analysis_jobs(constituent.symbol, contract, now)
+            due_ids = {job.article_fingerprint for job in due}
+            articles = [
+                article
+                for article in self.repository.list_articles(constituent.symbol)
+                if article.fingerprint in due_ids
+            ]
+            priority = priority_article_ids(
+                self.repository.list_scored_articles(constituent.symbol, limit=None),
+                constituent.market,
+            )
+            ordered = role_processing_order(articles, priority)
+            queues[constituent.symbol] = _RoleQueue(
+                reconciled=reconciled,
+                new=[a for a in ordered if is_new_article(a, now, coverage.live_window_days)],
+                backfill=[
+                    a for a in ordered if not is_new_article(a, now, coverage.live_window_days)
+                ],
+            )
+            order.append(constituent.symbol)
+
+        provider_unavailable = False
+
+        def drain(phase: str, total_cap: int, per_ticker_cap: int | None) -> None:
+            nonlocal provider_unavailable
+            remaining = total_cap
+            active = [t for t in order if queues[t].items(phase)]
+            while active and not provider_unavailable and remaining > 0:
+                still_active: list[str] = []
+                for ticker in active:
+                    if remaining <= 0:
+                        break
+                    queue = queues[ticker]
+                    items = queue.items(phase)
+                    while queue.stop_reason is None and queue.positions[phase] < len(items):
+                        article = items[queue.positions[phase]]
+                        queue.positions[phase] += 1
+                        outcome = runner.process(article.fingerprint)
+                        if outcome.stops_run:
+                            # Nothing was spent and the job stayed pending: not consumed.
+                            queue.positions[phase] -= 1
+                            provider_unavailable = True
+                            break
+                        if not outcome.paid_attempt:
+                            if outcome.reused or outcome.response.status == "cached":
+                                queue.counts["reused"] += 1
+                                queue.consecutive_failures = 0
+                            elif outcome.refused:
+                                queue.counts["refused"] += 1
+                            elif outcome.job_state == "skipped":
+                                queue.counts["skipped"] += 1
+                            else:
+                                queue.counts["failed"] += 1
+                            continue  # free: keep going within this same turn
+                        queue.paid[phase] += 1
+                        remaining -= 1
+                        if outcome.response.status == "generated":
+                            queue.counts["generated"] += 1
+                            queue.consecutive_failures = 0
+                        else:
+                            key = (
+                                "retry_scheduled" if outcome.job_state == "retry_wait" else "failed"
+                            )
+                            queue.counts[key] += 1
+                            queue.consecutive_failures += 1
+                            if queue.consecutive_failures >= 2:
+                                queue.stop_reason = "circuit_breaker"
+                        break  # a paid attempt always yields the turn to the next ticker
+                    if provider_unavailable:
+                        break
+                    if (
+                        queue.stop_reason is None
+                        and queue.positions[phase] < len(items)
+                        and (per_ticker_cap is None or queue.paid[phase] < per_ticker_cap)
+                    ):
+                        still_active.append(ticker)
+                active = still_active
+
+        if budget.max_new_per_ticker > 0 and budget.max_new_total > 0:
+            drain("new", budget.max_new_total, budget.max_new_per_ticker)
+        if budget.max_backfill_total > 0:
+            drain("backfill", budget.max_backfill_total, None)
+
+        reports: dict[str, RolePassReport] = {}
+        for ticker in order:
+            queue = queues[ticker]
+            deferred_new = len(queue.new) - queue.positions["new"]
+            deferred_backfill = len(queue.backfill) - queue.positions["backfill"]
+            stop_reason = queue.stop_reason
+            if stop_reason is None and (deferred_new or deferred_backfill):
+                stop_reason = "provider_unavailable" if provider_unavailable else "budget"
+            ledger = self.repository.analysis_job_summary(ticker, contract)
+            reports[ticker] = RolePassReport(
+                reconciled=queue.reconciled,
+                claimable_new=len(queue.new),
+                claimable_backfill=len(queue.backfill),
+                paid_attempts=sum(queue.paid.values()),
+                generated=queue.counts["generated"],
+                reused=queue.counts["reused"],
+                retry_scheduled=queue.counts["retry_scheduled"],
+                failed=queue.counts["failed"],
+                skipped=queue.counts["skipped"],
+                refused=queue.counts["refused"],
+                deferred_new=deferred_new,
+                deferred_backfill=deferred_backfill,
+                stop_reason=stop_reason,
+                ledger_states=ledger.states,
+                ledger_input_tokens=ledger.input_tokens,
+                ledger_output_tokens=ledger.output_tokens,
+            )
+        return reports
+
     def _check_evidence(
         self, constituent: Constituent, coverage: CompanyCoverage, now: datetime
     ) -> EvidenceCheckReport:
@@ -929,6 +1156,7 @@ class CoverageCycleService:
         reconcile: ReconcileReport | None = None,
         analysis: AnalysisPassReport | None = None,
         evidence: EvidenceCheckReport | None = None,
+        roles: RolePassReport | None = None,
     ) -> CoverageReport:
         return CoverageReport(
             ticker=constituent.symbol,
@@ -941,6 +1169,7 @@ class CoverageCycleService:
             evidence=evidence or EvidenceCheckReport(),
             summary=self.repository.analysis_job_summary(constituent.symbol, self.contract),
             watermarks=tuple(self.repository.list_ingestion_watermarks(constituent.symbol)),
+            roles=roles,
         )
 
 

@@ -11,14 +11,22 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
-from marketsentinel.domain import Article, ArticleAnalysis, DailySentiment, ScoredArticle
+from marketsentinel.domain import (
+    Article,
+    ArticleAnalysis,
+    CompanyReference,
+    CompanyRole,
+    CompanyRoleLabel,
+    DailySentiment,
+    ScoredArticle,
+)
 from marketsentinel.normalization import normalize_text, normalize_url
 from marketsentinel.timeutils import ensure_utc
 
 # Exported so callers that must validate a database file against the schema this code expects --
 # rather than only run it -- never hardcode this number a second time (see public_snapshot.py and
 # scripts/build_deployment_snapshot.py).
-SCHEMA_USER_VERSION = 5
+SCHEMA_USER_VERSION = 6
 
 _SCHEMA = f"""
 PRAGMA foreign_keys = ON;
@@ -141,6 +149,27 @@ CREATE TABLE IF NOT EXISTS article_analysis_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_article_analysis_jobs_ticker_state
     ON article_analysis_jobs (ticker, analysis_contract, state);
+
+-- Version 6: company-role labels (MR-006). Immutable and versioned like the analyses above: the
+-- key is the article plus the role stage's own three version fields, rows are only ever inserted,
+-- and no row means "not labelled" -- never "mentioned". ``role`` deliberately has no CHECK so a
+-- vocabulary change is a version bump, not a migration; the reader rejects values it does not know.
+CREATE TABLE IF NOT EXISTS article_company_roles (
+    article_fingerprint TEXT NOT NULL REFERENCES articles(fingerprint) ON DELETE CASCADE,
+    model_version TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    subject_symbol TEXT NOT NULL,
+    subject_name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    confidence REAL NOT NULL CHECK (confidence BETWEEN 0 AND 1),
+    rationale TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (article_fingerprint, model_version, prompt_version, schema_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_article_company_roles_subject
+    ON article_company_roles (subject_symbol, model_version, prompt_version, schema_version);
 
 PRAGMA user_version = {SCHEMA_USER_VERSION};
 """
@@ -370,6 +399,82 @@ class SQLiteRepository:
                     analysis.analysis_created_at.isoformat(),
                 ),
             )
+
+    def get_company_role(
+        self,
+        article_fingerprint: str,
+        model_version: str,
+        prompt_version: str,
+        schema_version: str,
+    ) -> CompanyRoleLabel | None:
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                """
+                SELECT * FROM article_company_roles
+                WHERE article_fingerprint = ? AND model_version = ?
+                  AND prompt_version = ? AND schema_version = ?
+                """,
+                (article_fingerprint, model_version, prompt_version, schema_version),
+            ).fetchone()
+        return _row_to_company_role(row) if row is not None else None
+
+    def store_company_role(self, label: CompanyRoleLabel) -> bool:
+        """Insert a label once; return whether a row was written. Never replaces an existing one."""
+
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO article_company_roles (
+                    article_fingerprint, model_version, prompt_version, schema_version,
+                    subject_symbol, subject_name, role, confidence, rationale, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(article_fingerprint, model_version, prompt_version, schema_version)
+                DO NOTHING
+                """,
+                (
+                    label.article_id,
+                    label.model_version,
+                    label.prompt_version,
+                    label.schema_version,
+                    label.subject_company.symbol,
+                    label.subject_company.name,
+                    label.role.value,
+                    label.confidence,
+                    label.rationale,
+                    label.created_at.isoformat(),
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def list_company_roles(
+        self,
+        ticker: str,
+        model_version: str,
+        prompt_version: str,
+        schema_version: str,
+    ) -> dict[str, CompanyRoleLabel]:
+        """Return the labels of one role contract for a ticker's stored articles, by fingerprint.
+
+        An article with no readable label is simply absent: that is "unlabelled", not "mentioned".
+        """
+
+        with closing(self._connect()) as connection, connection:
+            rows = connection.execute(
+                """
+                SELECT roles.*
+                FROM article_company_roles AS roles
+                JOIN articles AS a ON a.fingerprint = roles.article_fingerprint
+                WHERE a.ticker = ? AND roles.model_version = ?
+                  AND roles.prompt_version = ? AND roles.schema_version = ?
+                """,
+                (ticker, model_version, prompt_version, schema_version),
+            ).fetchall()
+        labels: dict[str, CompanyRoleLabel] = {}
+        for row in rows:
+            label = _row_to_company_role(row)
+            if label is not None:
+                labels[label.article_id] = label
+        return labels
 
     def list_article_analyses(
         self,
@@ -1280,6 +1385,30 @@ def _row_to_scored_article(row: sqlite3.Row) -> ScoredArticle:
         model_name=row["model_name"],
         scored_at=datetime.fromisoformat(row["scored_at"]),
     )
+
+
+def _row_to_company_role(row: sqlite3.Row) -> CompanyRoleLabel | None:
+    """Rebuild a stored label, or ``None`` for a row this build cannot read (read as unlabelled)."""
+
+    try:
+        return CompanyRoleLabel(
+            article_id=row["article_fingerprint"],
+            subject_company=CompanyReference(
+                symbol=row["subject_symbol"], name=row["subject_name"]
+            ),
+            role=CompanyRole(row["role"]),
+            confidence=row["confidence"],
+            rationale=row["rationale"],
+            model_version=row["model_version"],
+            prompt_version=row["prompt_version"],
+            schema_version=row["schema_version"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+    except (ValueError, ValidationError):
+        LOGGER.warning(
+            "Ignoring unreadable stored company role for article_id=%s", row["article_fingerprint"]
+        )
+        return None
 
 
 def _row_to_article(row: sqlite3.Row) -> Article:

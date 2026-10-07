@@ -57,7 +57,7 @@ from marketsentinel.event_analysis import (
 from marketsentinel.forecasting.baseline import BaselineForecaster
 from marketsentinel.sentiment.finbert import StaticSentimentAnalyzer
 from marketsentinel.service import MarketAnalysisService
-from marketsentinel.storage.sqlite import SQLiteRepository
+from marketsentinel.storage.sqlite import SCHEMA_USER_VERSION, SQLiteRepository
 from scripts.run_coverage_cycle import build_coverage_service, build_parser
 
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
@@ -270,7 +270,7 @@ def test_initialize_migrates_a_version_4_database_and_keeps_existing_rows(writab
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert {"article_analysis_jobs", "ingestion_watermarks", "company_coverage"} <= tables
-    assert version == 5
+    assert version == SCHEMA_USER_VERSION
     assert repository.get_article(stored.fingerprint) == stored
 
 

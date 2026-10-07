@@ -16,6 +16,7 @@ _STRIPPED_SETTINGS = (
     "hf_token",
     "llm_api_key",
     "llm_base_url",
+    "company_role_model",
     "public_snapshot_manifest_url",
     "public_requests_bucket",
     "public_requests_endpoint_url",
@@ -120,6 +121,10 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    # Company-role stage (principal subject vs merely mentioned). It reuses the provider key above
+    # and the private worker only; `None` means "use llm_model". The spend caps are not settings:
+    # they are explicit per-run inputs of scripts/run_coverage_cycle.py and default to zero.
+    company_role_model: str | None = None
     article_analysis_evidence_limit: int = Field(default=5, ge=0, le=8)
     analysis_auto_candidates: int = Field(default=15, ge=0, le=40)
     analysis_auto_max_new_per_run: int = Field(default=6, ge=0, le=15)

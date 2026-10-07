@@ -487,6 +487,66 @@ class ArticleAnalysisResponse(BaseModel):
     failure_category: str | None = None
 
 
+class CompanyRole(StrEnum):
+    """The covered company's role in the development an article reports.
+
+    ``principal``: the company is a party to the underlying event -- buyer, seller, bidder, target,
+    plaintiff or defendant, contractual counterparty, regulated or investigated entity, or owner of
+    the affected asset, right, or liability. ``mentioned``: the company is only the setting, the
+    product or technology another party uses, a comparison, a roundup entry, or a competitor's
+    context. The vocabulary is deliberately two values: a counterparty is already a party, and
+    every failure shape MR-003 found is ``mentioned``.
+
+    There is intentionally no "unknown" member. An article that could not be labelled has *no
+    label*, which is a different fact from ``mentioned`` and is never represented by a role.
+    """
+
+    PRINCIPAL = "principal"
+    MENTIONED = "mentioned"
+
+
+class CompanyRoleExtraction(BaseModel):
+    """Provider output of the company-role stage; identity stays application-owned.
+
+    ``subject_symbol`` echoes the symbol the application supplied. It carries no information the
+    application does not already hold; it exists so a provider that answers about some other
+    company is caught as a semantic failure instead of being stored against the wrong subject.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    subject_symbol: str = Field(min_length=1, max_length=20)
+    role: CompanyRole
+    confidence: float = Field(ge=0, le=1, multiple_of=0.05)
+    rationale: str = Field(min_length=1, max_length=300)
+
+
+class CompanyRoleLabel(BaseModel):
+    """A stored, versioned, immutable role label for one article under one role contract."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    article_id: str = Field(min_length=1, max_length=128)
+    subject_company: CompanyReference
+    role: CompanyRole
+    confidence: float = Field(ge=0, le=1)
+    rationale: str = Field(min_length=1, max_length=300)
+    model_version: str = Field(min_length=1, max_length=200)
+    prompt_version: str = Field(min_length=1, max_length=100)
+    schema_version: str = Field(min_length=1, max_length=100)
+    created_at: datetime
+
+
+class CompanyRoleResponse(BaseModel):
+    """Safe result of one labelling attempt; a failure never substitutes a guessed role."""
+
+    article_id: str
+    status: Literal["cached", "generated", "unavailable", "failed", "not_found"]
+    label: CompanyRoleLabel | None = None
+    message: str | None = None
+    failure_category: str | None = None
+
+
 AnalysisResult.model_rebuild()
 
 

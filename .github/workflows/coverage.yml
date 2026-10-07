@@ -35,6 +35,18 @@ on:
       max_article_requests:
         description: "Max public article analysis requests processed this run"
         default: "20"
+      # Company-role stage (principal subject vs merely mentioned). Every cap defaults to zero,
+      # which makes the stage inert: no job is created and no call is made until these are raised
+      # deliberately. Budget-limited work stays pending for a later run.
+      max_new_roles:
+        description: "Max new-article company-role labels per ticker this run (0 = stage off)"
+        default: "0"
+      max_new_roles_total:
+        description: "Hard cap on new-article company-role labels across all tickers this run"
+        default: "0"
+      max_backfill_roles:
+        description: "Hard cap on one-off backfill company-role labels across all tickers this run"
+        default: "0"
 
 # A second overlapping run would race the same private SQLite database and the same R2 objects.
 # cancel-in-progress stays false so a run already in flight finishes rather than being cut off
@@ -56,6 +68,11 @@ env:
   MAX_TICKERS: ${{ github.event.inputs.max_tickers || '12' }}
   MAX_NEW_TICKERS: ${{ github.event.inputs.max_new_tickers || '3' }}
   MAX_ARTICLE_REQUESTS: ${{ github.event.inputs.max_article_requests || '20' }}
+  # A scheduled run has no dispatch inputs, so these fall back to zero: the scheduled workflow
+  # spends nothing on the role stage until the defaults here are changed on purpose.
+  MAX_NEW_ROLES: ${{ github.event.inputs.max_new_roles || '0' }}
+  MAX_NEW_ROLES_TOTAL: ${{ github.event.inputs.max_new_roles_total || '0' }}
+  MAX_BACKFILL_ROLES: ${{ github.event.inputs.max_backfill_roles || '0' }}
   # Mapped to env because the secrets context is not available in a step-level `if`. Empty
   # (unset secret) means no request bucket is configured and every request step is skipped.
   R2_REQUESTS_BUCKET: ${{ secrets.R2_REQUESTS_BUCKET }}
@@ -237,13 +254,18 @@ jobs:
       # Every actively covered ticker (the always-on TICKERS plus everything admitted from public
       # requests), never-cycled first then least recently attempted, so MAX_TICKERS makes a capped
       # run round-robin across runs. MAX_NEW_TOTAL is the hard ceiling on paid cycle analyses in
-      # this run regardless of how many companies are covered.
+      # this run regardless of how many companies are covered. The company-role labels the cycle
+      # pays for (MAX_NEW_ROLES*, MAX_BACKFILL_ROLES; all zero by default) are written to the same
+      # private database, so the integrity gate and the checkpoint below cover them exactly like
+      # Stage A/B/C results: they reach R2 before any public snapshot step runs.
       - name: Run bounded coverage cycle
         env:
           MARKETSENTINEL_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           uv run python scripts/run_coverage_cycle.py --all-active \
-            --max-new "$MAX_NEW" --max-new-total "$MAX_NEW_TOTAL" --max-tickers "$MAX_TICKERS"
+            --max-new "$MAX_NEW" --max-new-total "$MAX_NEW_TOTAL" --max-tickers "$MAX_TICKERS" \
+            --max-new-roles "$MAX_NEW_ROLES" --max-new-roles-total "$MAX_NEW_ROLES_TOTAL" \
+            --max-backfill-roles "$MAX_BACKFILL_ROLES"
 
       - name: List covered tickers
         id: covered
