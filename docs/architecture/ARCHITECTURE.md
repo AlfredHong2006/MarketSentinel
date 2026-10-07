@@ -153,8 +153,8 @@ current-contract analysis instead of paying again when only the evidence pool ha
 
 [storage/sqlite.py](../../src/marketsentinel/storage/sqlite.py) is the only persistence layer.
 Tables: `articles`, `sentiments`, `daily_sentiment`, `article_intelligence_analyses`, plus the
-operational coverage ledger `company_coverage`, `ingestion_watermarks`, `article_analysis_jobs`
-(`PRAGMA user_version = 5`, WAL, additive tables and column migrations applied at `initialize()`).
+operational coverage ledger `company_coverage`, `ingestion_watermarks`, `article_analysis_jobs`, and
+the immutable role labels `article_company_roles` (`PRAGMA user_version = 6`, WAL, additive tables and column migrations applied at `initialize()`).
 The ledger holds operational state only — never a materiality verdict, group, rank, or risk.
 
 An analysis row is keyed by `(article_fingerprint, model_version, cache_version, schema_version)`
@@ -479,6 +479,51 @@ backfill mode such as `reanalyze-stale` (or a deliberate requeue).
 evidence fingerprint. It is a *spending* rule used only by the ledger; `accepts_for_cache` and
 `accepts_for_display` are unchanged, and the display path still shows the newest compatible
 analysis.
+
+## Company-role stage: principal subject or merely mentioned
+
+Status: implemented and tested offline (MR-006); **not yet run against real data**. Labels are stored
+in `article_company_roles` (schema version 6; see `docs/research/MR-006-proposal.md` §2).
+
+A market-reaction statistic computed from sentiment about some other company is misleading, and no
+title rule recognises the failure shapes MR-003 found. So the covered company's *role* in each
+article is extracted once and stored: `principal` (a party to the reported event) or `mentioned`
+(context for someone else's development). It follows the same split as everything else here:
+
+- **Extraction is a stage of its own** ([company_role.py](../../src/marketsentinel/company_role.py)):
+  its own prompt version (`company-role-v1`), schema version (`company-role-schema-v1`), provider
+  interface, and typed responses. It does **not** touch `STAGE_A/B/C_PROMPT_VERSION`,
+  `ARTICLE_ANALYSIS_SCHEMA_VERSION`, or `analysis_compatibility.py`, so every stored analysis stays
+  valid. Article text is fenced as untrusted data (with `<` escaped so a headline cannot close the
+  fence). Output is validated structurally (closed two-value vocabulary, bounds, no extra fields) and
+  semantically (the echoed symbol must be the company the application supplied).
+- **Failure is safe.** A label that cannot be produced yields a typed status
+  (`unavailable` / `failed` / `not_found`) and *no row*. There is no default role: an unlabelled
+  article is a different fact from one labelled `mentioned`, in storage (no row) and in the engine
+  (`articles_unlabelled`).
+- **Spend goes through the existing job ledger**
+  ([company_role_ledger.py](../../src/marketsentinel/company_role_ledger.py)). Role jobs are rows in
+  `article_analysis_jobs` under their own contract key (`role:m=...;p=...;s=...`, which cannot equal a
+  Stage A/B/C key), so leases, retry rules, and "paid once per contract" are the ones already
+  documented above, and the Stage A/B/C ledger is untouched. The only skip rule is `demo`.
+- **Budgets are explicit and default to zero** (`RoleBudget`; `--max-new-roles`,
+  `--max-new-roles-total`, `--max-backfill-roles`; matching `workflow_dispatch` inputs). With every
+  cap at zero the stage creates no job and makes no call. *New* work is an article published inside
+  the ticker's live window; *backfill* is older stored history. Budget-limited work stays `pending`.
+  Order is deterministic: articles in a session with at least three distinct sources (the ones that
+  can change an `mr-v1` result, computed with the engine's own session assignment) come first, then
+  newest first. Only the private scheduled worker spends, and the labels reach R2 through the same
+  integrity gate and checkpoint as Stage A/B/C results, before any public snapshot step.
+- **The rule that uses the label is separate and deterministic**
+  ([market_reaction/role_filter.py](../../src/marketsentinel/market_reaction/role_filter.py)). The
+  engine takes labels as plain input data (no I/O) and applies `principal_only` in one of two
+  placements behind an explicit switch: before session signals are built (which also changes the
+  threshold-selection population `E`), or at event qualification (signals and `E` untouched). An
+  unlabelled article is handled by an explicit policy (`exclude` / `include` /
+  `session_ineligible`); there is no silent default. With no filter supplied the engine's behaviour is
+  unchanged, and the result's `role_filter` report states how many articles the rule excluded and how
+  many were unlabelled. Which placement and policy `mr-v1` uses is a methodology decision, not made
+  here.
 
 ## Scheduled coverage and public snapshot publication
 

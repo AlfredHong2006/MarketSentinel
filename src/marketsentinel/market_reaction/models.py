@@ -360,6 +360,57 @@ class DataQualityReport(BaseModel):
     reasons: tuple[str, ...] = ()
 
 
+class RoleFilterPlacement(StrEnum):
+    """Where the company-role eligibility rule is applied. Both are implemented; neither is chosen.
+
+    ``before_signals``: articles that fail the rule never reach session-signal construction, so
+    the session signal, its source count, history sufficiency, and the pooled threshold-selection
+    population ``E`` are all computed from principal articles only.
+
+    ``at_qualification``: session signals and ``E`` are exactly the unfiltered ones; the rule is
+    applied when a tail session would become an event, which then also needs at least
+    ``MIN_DISTINCT_SOURCES`` distinct sources among its principal articles.
+    """
+
+    BEFORE_SIGNALS = "before_signals"
+    AT_QUALIFICATION = "at_qualification"
+
+
+class UnlabelledPolicy(StrEnum):
+    """How an article with no role label is treated. There is no silent default.
+
+    ``exclude``: treated as not principal (it does not count). ``include``: counted as principal
+    (the rule is applied to labelled articles only). ``session_ineligible``: any session holding an
+    unlabelled article cannot become an event. None of these treats an unlabelled article as
+    ``mentioned``; the report always states how many there were.
+    """
+
+    EXCLUDE = "exclude"
+    INCLUDE = "include"
+    SESSION_INELIGIBLE = "session_ineligible"
+
+
+class RoleFilterReport(BaseModel):
+    """What the company-role rule did, so a consumer can see its effect. Counts are over the
+    company's non-demo input articles."""
+
+    model_config = ConfigDict(frozen=True)
+
+    rule: str = "principal_only"
+    placement: RoleFilterPlacement
+    unlabelled_policy: UnlabelledPolicy
+    articles_considered: int
+    articles_principal: int
+    articles_mentioned: int
+    # An article with no label: a different fact from `articles_mentioned`.
+    articles_unlabelled: int
+    # Articles the rule removed under this placement and policy.
+    articles_excluded: int
+    # before_signals + session_ineligible: sessions dropped for holding an unlabelled article.
+    # at_qualification: tail sessions that could not become events under the rule.
+    sessions_removed: int = 0
+
+
 class MarketReactionResult(BaseModel):
     """Versioned, self-describing result suitable for later snapshot/API projection."""
 
@@ -386,3 +437,5 @@ class MarketReactionResult(BaseModel):
     session_signals: tuple[SessionSignal, ...]
     spearman: SpearmanResult | None = None
     data_quality: DataQualityReport
+    # Present only when a company-role filter was supplied; None means "no filter was applied".
+    role_filter: RoleFilterReport | None = None

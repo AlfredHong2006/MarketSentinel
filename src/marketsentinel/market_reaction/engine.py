@@ -36,11 +36,19 @@ from marketsentinel.market_reaction.models import (
     Regime,
     RegimeResult,
     RegimeThresholds,
+    RoleFilterPlacement,
+    RoleFilterReport,
     SessionSignal,
     ThresholdStatus,
     TimingClass,
 )
 from marketsentinel.market_reaction.returns import SessionPrices, align_prices, reaction_path
+from marketsentinel.market_reaction.role_filter import (
+    RoleFilter,
+    build_role_filtered_signals,
+    finalize_qualification_report,
+    unfiltered_role_report,
+)
 from marketsentinel.market_reaction.signal import (
     SignalDiagnostics,
     build_session_signals,
@@ -91,12 +99,20 @@ def analyze_market_reaction(
     calendar: SessionCalendar | None = None,
     integrity_exclusions: Mapping[date, str] | None = None,
     quality_policy: DataQualityPolicy | None = None,
+    role_filter: RoleFilter | None = None,
 ) -> MarketReactionResult:
     """Run the full `mr-v1` procedure for one company.
 
     `integrity_exclusions` maps an event session to the recorded evidence that the observation is
     invalid (a feed or corporate-action fault). It is the only way an event leaves the sample; a
     large return alone only raises a review flag.
+
+    `role_filter` applies the deterministic company-role eligibility rule (see `role_filter.py`).
+    With `None` (the default) nothing about the procedure or the result changes; with a filter, the
+    result's `role_filter` field reports how many articles the rule excluded and how many had no
+    label. The thresholds are always an argument: under the `before_signals` placement the caller
+    selects them from signals built with `build_role_filtered_signals`, so the selection population
+    `E` is role-filtered too.
     """
 
     threshold_values, threshold_status = resolve_thresholds(thresholds)
@@ -106,19 +122,51 @@ def analyze_market_reaction(
     exchange = calendar.exchange if calendar is not None else resolve_exchange(listing_market)
     if exchange is None:
         return _unresolved_exchange_result(
-            ticker, threshold_values, threshold_status, len(article_list)
+            ticker,
+            threshold_values,
+            threshold_status,
+            len(article_list),
+            None
+            if role_filter is None
+            else unfiltered_role_report(article_list, ticker, role_filter),
         )
     if calendar is None:
         calendar = _calendar_for(exchange, article_list, stock_list, benchmark_list)
 
-    built = build_session_signals(article_list, ticker, calendar) if calendar else None
+    role_report: RoleFilterReport | None = None
+    blocked_sessions: frozenset[date] = frozenset()
+    if role_filter is None:
+        built = build_session_signals(article_list, ticker, calendar) if calendar else None
+    else:
+        filtered = build_role_filtered_signals(article_list, ticker, calendar, role_filter)
+        built, role_report, blocked_sessions = (
+            filtered.signals,
+            filtered.report,
+            filtered.blocked_sessions,
+        )
+        if role_filter.placement is RoleFilterPlacement.AT_QUALIFICATION:
+            role_report = finalize_qualification_report(
+                filtered,
+                sum(
+                    1
+                    for signal in built.signals
+                    if signal.session in blocked_sessions
+                    and classify_regime(signal, threshold_values) is not None
+                ),
+            )
     signals = built.signals if built else ()
     diagnostics = built.diagnostics if built else SignalDiagnostics(len(article_list))
     stock = _aligned(stock_list, calendar)
     benchmark = _aligned(benchmark_list, calendar)
 
     events = _build_events(
-        signals, calendar, stock, benchmark, threshold_values, dict(integrity_exclusions or {})
+        signals,
+        calendar,
+        stock,
+        benchmark,
+        threshold_values,
+        dict(integrity_exclusions or {}),
+        blocked_sessions,
     )
     quality = _quality_report(diagnostics, stock, benchmark, events, quality_policy)
     history = _history_sufficiency(signals, calendar)
@@ -149,6 +197,7 @@ def analyze_market_reaction(
         session_signals=signals,
         spearman=_session_spearman(signals, calendar, stock, benchmark),
         data_quality=quality,
+        role_filter=role_report,
     )
 
 
@@ -186,6 +235,7 @@ def _build_events(
     benchmark: SessionPrices,
     thresholds: RegimeThresholds,
     exclusions: dict[date, str],
+    role_blocked: frozenset[date] = frozenset(),
 ) -> list[ReactionEvent]:
     """Qualify, exclude, apply same-regime exclusivity, then resolve — in that order.
 
@@ -193,13 +243,16 @@ def _build_events(
     events enter the sample can never depend on their outcomes. Two same-regime events overlap
     when their +5 return intervals (t, t+5] share a session, i.e. when they are fewer than five
     sessions apart. A recorded-invalid event holds no window.
+
+    A session in `role_blocked` (the `at_qualification` company-role rule) never qualifies, so it
+    is not an event at all and holds no exclusivity window either.
     """
 
     events: list[ReactionEvent] = []
     last_kept: dict[Regime, tuple[int, date]] = {}
     for signal in signals:
         regime = classify_regime(signal, thresholds)
-        if regime is None or calendar is None:
+        if regime is None or calendar is None or signal.session in role_blocked:
             continue
         position = calendar.index_of(signal.session)
         path = reaction_path(stock, benchmark, position)
@@ -458,6 +511,7 @@ def _unresolved_exchange_result(
     thresholds: RegimeThresholds,
     threshold_status: ThresholdStatus,
     article_count: int,
+    role_report: RoleFilterReport | None = None,
 ) -> MarketReactionResult:
     state = EvidenceState.DATA_QUALITY_INADEQUATE
     empty = {
@@ -499,4 +553,5 @@ def _unresolved_exchange_result(
         data_quality=DataQualityReport(
             exchange_resolved=False, reasons=("unresolved_exchange",), **zeros
         ),
+        role_filter=role_report,
     )
