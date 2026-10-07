@@ -34,6 +34,7 @@ from marketsentinel.market_reaction import (
     select_thresholds,
     selection_population,
 )
+from marketsentinel.market_reaction.models import IntervalMethod
 from marketsentinel.market_reaction.returns import align_prices, reaction_path
 from marketsentinel.market_reaction.signal import (
     article_polarity,
@@ -766,6 +767,19 @@ def test_detected_state_and_reaction_path():
     assert positive.point_at(0).statistics.n == 24
 
 
+def test_identical_returns_never_reach_a_verdict_through_a_zero_width_interval():
+    # 25 identical +1% returns gave `detected` on main (zero-width percentile interval).
+    result = run(*scenario([0.01] * 25))
+    positive = result.positive
+    assert positive.primary.n == 25
+    assert positive.primary.interval_method is IntervalMethod.STUDENT_T
+    assert positive.primary.interval_degenerate is True
+    assert positive.ci_excludes_zero is False
+    assert positive.state is EvidenceState.NO_CONSISTENT_RELATIONSHIP
+    assert all(point.statistics.interval_degenerate for point in positive.path[1:])
+    assert result.bootstrap_resamples is None
+
+
 def test_detected_state_for_the_negative_regime():
     result = run(*scenario(noisy(-0.03, 22), positive=False))
     assert result.negative.state is EvidenceState.DETECTED
@@ -1100,7 +1114,7 @@ def test_result_carries_version_provenance_and_round_trips():
     assert (result.positive.threshold, result.negative.threshold) == (0.30, 0.30)
     assert (result.exchange, result.benchmark_symbol) == (ListingExchange.US, "SPY")
     assert (result.primary_horizon, result.max_path_horizon) == (5, 10)
-    assert (result.min_distinct_sources, result.bootstrap_resamples) == (3, 2000)
+    assert (result.min_distinct_sources, result.bootstrap_resamples) == (3, None)
     event = result.positive.events[0]
     assert event.article_ids == (f"s{ORIGIN}-0", f"s{ORIGIN}-1", f"s{ORIGIN}-2")
     assert len(event.sources) == event.distinct_source_count == 3
