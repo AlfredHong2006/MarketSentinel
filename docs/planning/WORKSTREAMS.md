@@ -19,7 +19,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
-| MR-007 | GDELT investigation for deeper history | TBD | READY (not started) | none | `C:\Dev\MS-worktrees\gdelt` (not yet created) | whether 24+ months of history is obtainable; report + recommendation, no backfill |
+| MR-007 | GDELT investigation for deeper history | Claude Code worker | RUNNING (started 2026-10-07) | none | `C:\Dev\MS-worktrees\gdelt` (`ms/mr-007-gdelt`) | whether 24+ months of history is obtainable; report + recommendation, no backfill |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-003 (2026-10-06)

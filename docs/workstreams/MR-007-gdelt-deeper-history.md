@@ -1,9 +1,9 @@
 # MR-007 — GDELT Investigation for Deeper History
 
-Status: READY (not started; no worktree yet)  
+Status: RUNNING (started 2026-10-07; Alfred approves network access at the keyboard)  
 Owner: TBD  
 Depends on: none  
-Worktree: `C:\Dev\MS-worktrees\gdelt` (create when started)
+Worktree: `C:\Dev\MS-worktrees\gdelt`
 
 ## Objective
 
