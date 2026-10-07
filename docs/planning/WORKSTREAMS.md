@@ -15,10 +15,10 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 |---|---|---|---|---|---|---|
 | MR-001 | Data readiness | Claude Code A | DONE | none | removed | readiness report + real fixture — in main as `b830183` |
 | MR-002 | Quant core | Claude Code B | DONE | none | removed | deterministic engine + tests — merged to main 2026-10-06 |
-| MR-003 | Real-data validation | Claude Code worker | BLOCKED | MR-006 (entity filter) before any freeze | `C:\Dev\MS-worktrees\validation` (`ms/mr-003-validation`), work uncommitted | report delivered: GO WITH LIMITS (provisional); thresholds provisional, nothing frozen |
+| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | schema rollout, label pilot + review, NVDA/PFE backfill | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
-| MR-006 | Primary-company pre-analysis | Claude Code worker | REVIEW | Alfred's approval to integrate | `C:\Dev\MS-worktrees\primary-company` (`ms/mr-006-primary-company`), work uncommitted | offline implementation complete incl. label storage (`user_version` 6); acceptance criteria met; not yet integrated |
+| MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | TBD | BLOCKED (queued, no packet) | Alfred's go-ahead | created later | whether 24+ months of history is obtainable |
 | MR-008 | Bootstrap small-sample false-alarm fix | TBD | BLOCKED (queued, no packet) | Alfred's go-ahead; methodology change before freeze | created later | interval method that holds its nominal level at n = 20–30 |
 
@@ -29,37 +29,33 @@ Decisions are in `docs/DECISIONS.md` (three 2026-10-06 entries).
 - **Data first.** MR-004 and MR-005 are on hold until the data is fit to show.
 - **Nothing is frozen.** `tau_positive = 0.42` / `tau_negative = 0.20` (pooling A) are provisional;
   `MR_V1_FROZEN_THRESHOLDS` is unset; positive-regime outcomes are unmeasured.
-- **MR-003 is not DONE.** Its report is in `C:\Dev\MS-shared\reports\MR-003.md`. Open against its
-  packet: thresholds not frozen, positive regime not run. Its files are uncommitted in the
-  validation worktree and have not been integrated.
-- **MR-006** is the approved pre-analysis. It spends nothing and writes to no real database; it ends
-  with a proposal. A real backfill and the first paid run happen only after Alfred approves that
-  proposal.
-- **MR-006 reconciled 2026-10-07: REVIEW, not ready to integrate.** Report
-  `C:\Dev\MS-shared\reports\MR-006.md` (worker status BLOCKED); proposal
-  `docs/research/MR-006-proposal.md` in the worktree. Confirmed in the worktree: 1147 tests pass,
-  `ruff check` and `ruff format --check` clean; `storage/sqlite.py`, the Stage A/B/C constants,
-  `analysis_compatibility.py`, the spec, `docs/DECISIONS.md`, `docs/planning/`, other packets and
-  frozen fixtures are unchanged; all three workflow role caps default to `0`; no new test reads
-  `C:\Dev\MS-shared\` or the live database. **Unmet acceptance criteria:** the label table,
-  the `user_version` 5 → 6 bump, the SQLite store methods and the v5 migration test do not exist
-  (the edit to `storage/sqlite.py` was denied during the unattended run and the worker did not work
-  around it). Until then the CLI refuses any positive role cap, so the stage cannot spend.
-  Awaiting Alfred on: budget, schema change, filter rule, spec amendment.
-- **MR-006 second pass, reconciled 2026-10-07 (later): acceptance criteria met, awaiting
-  integration approval.** The storage step is done: `article_company_roles` table and index,
-  `SCHEMA_USER_VERSION = 6`, three store methods, and a v5 → v6 migration test. Confirmed in the
-  worktree: 1158 tests pass, `ruff check` and `ruff format --check` clean, materiality evaluation
-  PASS; Stage A/B/C constants, `analysis_compatibility.py`, the spec, `docs/DECISIONS.md`,
-  `docs/planning/`, other packets and frozen fixtures unchanged; role caps still default to `0`;
-  `MR_V1_FROZEN_THRESHOLDS` still unset. **Merging makes main a schema-6 build**, so pushing it
-  starts the rollout order in the proposal's §2. Not yet recorded in `docs/DECISIONS.md`: the
-  budget, schema, filter-rule and spec-amendment approvals. The approved spec amendment has not
-  been applied to the spec file.
-- **Order after MR-006:** Alfred approves budget/schema/filter/spec amendment → integrate → one-off
-  backfill → MR-003 reruns thresholds on the filtered pool and measures the positive regime →
-  freeze decision.
+- **MR-003 is not DONE.** Open against its packet: thresholds not frozen, positive regime not run.
+  Its report, scripts and tracker price fixture were integrated into main on 2026-10-07 as
+  artifacts only. Report: `C:\Dev\MS-shared\reports\MR-003.md`.
 
+### After MR-006 (2026-10-07)
+
+Decisions are in `docs/DECISIONS.md` (2026-10-07 entry).
+
+- **MR-006 is DONE and merged to local main** with MR-003's artifacts. Checked on merged main with
+  the CI install: 1164 tests pass, `ruff check` and `ruff format --check` clean, materiality
+  evaluation PASS. Report: `C:\Dev\MS-shared\reports\MR-006.md`. Proposal and runbook:
+  `docs/research/MR-006-proposal.md`.
+- **The approved spec amendment is applied** (company-role eligibility, spec section 2.1).
+- **Main is now a schema-6 build and is not pushed.** Pushing starts the rollout, in this order:
+  refresh the baked fallback snapshot, disable the schedule, push, deploy the public build, dispatch
+  one worker run with every role cap at `0`, re-enable the schedule. Push and deploy are Alfred's.
+- **Nothing has been spent and no real label exists.** Role caps default to `0`.
+- **Operational steps before MR-003 can resume, all Alfred's (runbook section 5):**
+  1. schema rollout as above;
+  2. pilot dispatch of 200 labels, NVDA and PFE;
+  3. Alfred reviews a sample of the pilot labels — nothing larger runs before this;
+  4. bulk backfill in dispatches of at most 1,000, NVDA and PFE only;
+  5. raise the steady-state defaults (10 per ticker, 25 total) in a reviewed commit.
+- **Then MR-003 resumes:** outcome-blind check of placement (a) versus the (b) fallback, threshold
+  re-selection on the labelled pool, positive regime, freeze decision. It needs a refreshed packet.
+- **AAPL and MSFT** are neither activated nor labelled; revisit after MR-007.
+- **Real label quality is unvalidated** until the pilot review: every test used a scripted provider.
 ### Reconciliation notes (2026-10-06)
 
 - **MR-001:** verdict READY WITH GAPS. In main as `b830183`. Worktree and branch removed.

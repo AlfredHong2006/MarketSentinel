@@ -2,7 +2,7 @@
 
 Status: approved design; numeric sentiment thresholds to be frozen during validation  
 Amended: 2026-09-19 (principal methodology review — asymmetric thresholds, day-0 timing cohort,
-history sufficiency, benchmark instruments)  
+history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1)  
 Owner: Alfred Hong  
 Scope: deterministic historical research layer for MarketSentinel  
 Methodology version: `mr-v1`
@@ -41,9 +41,31 @@ Eligible articles must:
 - belong to the company;
 - not be demo data;
 - have valid sentiment probabilities;
-- have a usable publication date/time.
+- have a usable publication date/time;
+- carry a stored company-role label of `principal` (section 2.1).
 
-Do not require full paid LLM analysis. `mr-v1` should use the broader sentiment-scored corpus.
+Do not require full paid event analysis (Stage A/B/C). `mr-v1` uses the broader sentiment-scored
+corpus as its population: every sentiment-scored article is labelled, and the label, not the event
+analysis, decides eligibility.
+
+### 2.1 Company role
+
+Each article carries one stored, versioned, immutable label for the covered company's role in the
+development it reports:
+
+- `principal`: the company is a party to the underlying event (buyer, seller, bidder, target,
+  plaintiff or defendant, contractual counterparty, regulated or investigated entity, or owner of the
+  affected asset, right, or liability);
+- `mentioned`: the company is only context for someone else's development.
+
+The label is an extraction recorded by a separate paid LLM stage with its own prompt and schema
+versions. It is never a guess: an article that could not be labelled is **unlabelled**, which is a
+different state from `mentioned`.
+
+Eligibility is a deterministic rule on the stored label, never a prompt: an article counts only when
+its label is `principal`. An unlabelled article does not count. The result must report how many
+articles were excluded by the rule and how many were unlabelled, and which label contract (model,
+prompt version, schema version) produced the labels used.
 
 ---
 
@@ -146,7 +168,8 @@ The **selection procedure** is fixed under `mr-v1`.
 Selection population:
 
 ```text
-E = pooled session signals with distinct_sources >= 3
+E = pooled session signals with distinct_sources >= 3,
+    built from principal-labelled articles only (section 2.1)
 ```
 
 Sessions that could never qualify as events do not shape the tails.
@@ -359,6 +382,8 @@ Median must always be shown alongside mean so users can see outlier sensitivity.
 
 Track at minimum:
 - unusable/missing publication-time share;
+- share of articles without a role label;
+- share of articles excluded as `mentioned`;
 - stock-price gaps;
 - benchmark-price gaps;
 - unresolved exchange;
@@ -491,6 +516,7 @@ Implementation agents may:
 
 They may **not** silently change:
 - signal formula;
+- the company-role eligibility rule, its vocabulary, or the unlabelled-article policy;
 - timing semantics, including the day-0 cohort rule;
 - threshold selection procedure, including the asymmetry and either floor;
 - benchmark logic, including the benchmark instruments;
