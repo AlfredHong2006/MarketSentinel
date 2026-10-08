@@ -588,3 +588,38 @@ also rate-limited may be run at some point, as a few spaced requests. Nothing wa
 **Reason:** depth is what stands between the current corpus and any verdict; MR-003 found no regime
 reaches 20 events on 12 months. Extending the same source in the same way adds depth without mixing
 sampling regimes. Timing precision is a known, disclosed limit, not a blocker.
+
+---
+
+## 2026-10-08 — Months 13–36 backfill: boundary, run path, budget and pacing
+
+**Context:** MR-009 drafted the backfill change offline and proposed how to run it. Decisions on its
+six open items:
+
+**1. Exact boundary.** The deeper backfill ends exactly at the start of the stored history. No week
+already stored is fetched a second time. A month-based skip would have re-fetched about 46 days,
+and a second fetch of the same weeks can return different articles, leaving those weeks sampled
+twice inside one pooled distribution.
+
+**2. The draft is approved:** an option to skip the recent part of the horizon, a Google-only
+switch so GDELT cannot enter the sample, optional request pacing, and a zero-analysis budget that
+cannot reach a paid call even when a key is present.
+
+**3. Run path.** A manual dispatch of the existing coverage workflow, **one ticker per dispatch**,
+so the existing integrity check, checkpoint and single-writer rule apply and no R2 write key leaves
+GitHub. The workflow gains one input and one step for this; a scheduled run never executes it.
+
+**4. No paid Stage A/B/C analysis** in the backfill. **Role labels for the new articles are
+approved: about 4,000** (estimated range 3,500–4,700), in dispatches of at most 1,000, and **only
+after the label pilot has passed.** Together with the 2,852 approved on 2026-10-07 that is about
+6,850 labels, roughly $1.21 at the planned token figure and `gpt-4o-mini` list price; unmeasured
+until the pilot.
+
+**5. Pacing:** 5.25 seconds between Google requests, redirect resolutions included. It is the only
+spacing MR-007 tested.
+
+**6. Read-cap guard.** The backfill's sentiment rebuild reads at most 5,000 scored articles per
+ticker, newest first. It must never truncate silently: a run that would exceed the cap says so
+loudly and does not present a truncated result as complete. Raising the cap is a separate decision.
+
+**Order is unchanged:** schema-6 rollout, then the label pilot and its review, then the backfill.

@@ -1,6 +1,6 @@
 # MR-009 — Backfill Start Offset and Run Plan (Months 13–36)
 
-Status: RUNNING (started 2026-10-07, unattended)  
+Status: REVIEW (first pass approved 2026-10-08; second pass below adds the exact boundary, the read-cap guard and the workflow step)  
 Owner: TBD  
 Depends on: none to draft and test; the backfill itself waits for the schema-6 rollout and the label pilot  
 Worktree: `C:\Dev\MS-worktrees\backfill-offset`
@@ -119,6 +119,83 @@ Write `docs/research/MR-009-proposal.md`:
    only months 13–36 were fetched, and how to roll back;
 5. what the deeper history does to `mr-v1`: thresholds are re-selected on the larger labelled pool,
    and MR-003 resumes only after the backfill and its labels are complete.
+
+## Second pass (added 2026-10-08, after Alfred's decisions)
+
+Decisions: `docs/DECISIONS.md`, 2026-10-08, "Months 13–36 backfill". The first-pass draft is
+approved. This pass adds three things and keeps every first-pass hard limit: offline, no network,
+no real database, no backfill run, no LLM, no Git writes.
+
+### A. Exact boundary at the start of stored history
+
+- The range must end exactly where the stored history for that ticker begins, so no stored week is
+  fetched again. Derive the boundary at run time from the database the run executes against: the
+  earliest stored `published_at` among the ticker's non-demo articles.
+- Add the option that selects this behaviour (for example `--until-stored-start`) and an explicit
+  override that takes the boundary as an ISO-8601 timestamp with a UTC offset. They are mutually
+  exclusive with each other and with `--skip-recent-months`.
+- Add a plan-only mode: resolve the boundary, print it, print the five earliest stored
+  `published_at` values and the stored article count for the 30 days after the boundary, print the
+  planned buckets, and exit without any network call or write. It exists so the boundary can be
+  read and checked before anything is fetched.
+- Refuse before any fetch, with a clear message and a non-zero exit, when the ticker has no stored
+  articles or the boundary falls outside the horizon.
+- The run must store no article with `published_at` at or after the boundary. The bucket containing
+  the boundary is clipped there; all earlier bucket boundaries stay those of a plain 36-month run.
+- State from the code whether the stored corpus can contain an article older than the first
+  backfill's range (which would move a derived boundary too far back), and how plan-only output
+  would reveal it.
+
+### B. Loud guard for the 5,000-article read cap
+
+- Wherever the backfill reads scored articles under `_SENTIMENT_AGGREGATION_LIMIT` (or any other
+  capped read it depends on), a result that hit the cap must never be used as if complete.
+- Before any fetch: refuse to start when the ticker's stored count already reaches the cap.
+- After storing: when the count now exceeds the cap, the run reports it prominently, exits
+  non-zero, and does not write a rebuild computed from a truncated read. Articles already stored
+  and scored stay stored; say exactly what state the database is left in and what the operator does
+  next.
+- Do not raise the cap. Set out in the proposal what raising it would involve and whether NVDA at
+  36 months is expected to hit it, as an option for Alfred.
+
+### C. Workflow input and step
+
+- Add to `.github/workflows/coverage.yml` one dispatch input for a single ticker and one optional
+  plan-only input, and one step that runs the backfill for that ticker with: a 36-month horizon,
+  the stored-start boundary, Google only, a zero analysis budget, and 5.25-second pacing.
+- One ticker per dispatch: reject a value containing more than one ticker.
+- The step runs only on a manual dispatch with the input set; a scheduled run never executes it.
+- The step receives no OpenAI secret and no other secret it does not need.
+- It runs before the coverage-cycle step and before the integrity check and checkpoint that follow
+  the cycle, so backfilled rows reach R2 only through the existing gate.
+- Plan-only must not write: state whether the rest of the job then proceeds as a normal run or
+  stops, and make that explicit in the step and the runbook.
+- Establish from the code whether a dispatch can set the ordinary spend caps (`max_new`,
+  `max_new_total`, `max_article_requests`, `max_new_tickers`) to `0`, as the runbook assumes, and
+  what the cycle does then.
+- Tests on the workflow file, in the style of the existing workflow-structure tests: the step is
+  gated on the input, carries no OpenAI secret, sits before the checkpoint, and passes the five
+  required arguments.
+
+### Second-pass acceptance criteria
+
+- [ ] a run ends exactly at the start of stored history, stores nothing at or after it, and the
+      boundary is derived from the database at run time, with an explicit override;
+- [ ] plan-only prints the boundary and buckets and performs no network call and no write, shown
+      by tests;
+- [ ] an empty corpus or an out-of-horizon boundary is refused before any fetch;
+- [ ] a capped read is never used as complete: refused up front or reported with a non-zero exit,
+      shown by tests at the cap, one below and one above;
+- [ ] the workflow input and step exist, are gated, carry no OpenAI secret, and are covered by
+      tests;
+- [ ] with none of the new options set, planned buckets, the provider wiring and every existing
+      test result are unchanged;
+- [ ] the proposal's command, runbook and verification steps are updated to the exact-boundary run,
+      with a plan-only dispatch as the first step;
+- [ ] focused tests, the full suite, `uv run ruff check .` and `uv run ruff format --check .` pass.
+
+`.github/workflows/coverage.yml` joins the allowed scope for this pass only, for the addition
+described above. Nothing else in the workflow may change.
 
 ## Allowed scope
 

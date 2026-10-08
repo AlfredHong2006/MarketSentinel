@@ -20,7 +20,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | Claude Code worker | DONE | none | removed | verdict: 24+ months OBTAINABLE WITH LIMITS (Google News RSS to 36 months, date-only); report and probe script merged to local main 2026-10-07 |
-| MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | RUNNING (started 2026-10-07, unattended) | none to draft; the backfill itself waits for the rollout and the pilot | `C:\Dev\MS-worktrees\backfill-offset` (`ms/mr-009-backfill-offset`) | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
+| MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | REVIEW (first pass approved; second pass pending) | second pass: exact boundary, read-cap guard, workflow step; the backfill itself waits for the rollout and the pilot | `C:\Dev\MS-worktrees\backfill-offset` (`ms/mr-009-backfill-offset`), work uncommitted | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-007 (2026-10-07) — current plan
@@ -40,6 +40,28 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
 - **Still open for Alfred, to be proposed by MR-009:** where the backfill runs against the live
   corpus in R2, whether it performs any paid Stage A/B/C analysis, and the role-label budget for
   the new articles.
+- **MR-009 reviewed 2026-10-08: REVIEW, draft not integrated.** Report
+  `C:\Dev\MS-shared\reports\MR-009.md`; proposal `docs/research/MR-009-proposal.md` in the worktree.
+  Finding: `--as-of` cannot do it (the script rejects it in backfill mode), so the draft adds
+  `--skip-recent-months`, `--google-only` (the script otherwise tries GDELT first), optional
+  request pacing, and makes `--max-new-analyses 0` unable to reach a paid call. Confirmed in the
+  worktree: 1247 tests pass, ruff clean, no existing test modified; the spec, `docs/DECISIONS.md`,
+  `docs/planning/`, packets, the workflow, the schema, ledger, coverage, role stage and engine are
+  untouched; the local database is untouched. Coordinator probe of the pure planner: default plans
+  are byte-identical to main across 25 run-date and horizon combinations; `--months 36` with a
+  12-month skip covers exactly 720 days on the plain 36-month boundaries with no hole and no gap at
+  the seam; out-of-range offsets are rejected. **Not built:** the workflow input and step the
+  recommended run needs (proposed as text only). **Open for Alfred:** the draft itself; a roughly
+  46-day overlap with what is stored; where it runs; no paid analysis; the role-label budget for
+  about 4,000 new articles; pacing. **Flagged from the report:** the backfill's sentiment rebuild
+  reads at most 5,000 scored articles per ticker, newest first, and NVDA at 36 months is estimated
+  near that. The worker also used shell commands outside the pre-approved list (read-only listing
+  and search, and one Python text replacement); none touched the network, a database or Git.
+- **MR-009 decisions, 2026-10-08** (`docs/DECISIONS.md`): exact boundary at the start of stored
+  history; first-pass draft approved; run as a manual workflow dispatch, one ticker per dispatch;
+  no paid analysis; about 4,000 role labels approved in dispatches of at most 1,000, only after the
+  pilot passes; 5.25-second pacing; a loud guard for the 5,000-article read cap. The second pass
+  builds the boundary, the guard and the workflow input and step. Not integrated until it reports.
 - **Critical path, in order:**
   1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — Alfred;
   2. pilot of 200 labels, then Alfred's review of 30 (at least 27 correct) — Alfred;
