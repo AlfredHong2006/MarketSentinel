@@ -61,6 +61,7 @@ from marketsentinel.coverage_cycle import (
     CoverageCycleService,
     HistoricalProviderSource,
     RecentProviderSource,
+    role_scope,
 )
 from marketsentinel.errors import CoverageNotActiveError
 from marketsentinel.event_analysis import (
@@ -198,6 +199,13 @@ def role_budget_from(arguments: argparse.Namespace) -> RoleBudget:
     )
 
 
+def role_tickers_from(arguments: argparse.Namespace) -> list[str]:
+    """The explicit role ticker list: upper-cased, de-duplicated, empty when none was given."""
+
+    raw = arguments.role_tickers or ""
+    return list(dict.fromkeys(item.strip().upper() for item in raw.split(",") if item.strip()))
+
+
 def active_tickers_in_cycle_order(service: CoverageCycleService) -> list[str]:
     """Every active ticker, never-cycled first, then least recently attempted by any provider."""
 
@@ -298,6 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
         "once per role contract, so repeating a run never pays twice.",
     )
     parser.add_argument(
+        "--role-tickers",
+        default=None,
+        help="Comma-separated tickers the company-role stage may label (for example NVDA,PFE). "
+        "Required whenever any role cap is positive; covered tickers not listed get no role call "
+        "and use no role budget. Cycle mode only.",
+    )
+    parser.add_argument(
         "--max-new-tickers",
         type=int,
         default=3,
@@ -329,6 +344,13 @@ def validate_arguments(parser: argparse.ArgumentParser, arguments: argparse.Name
         arguments.max_new_roles or arguments.max_new_roles_total or arguments.max_backfill_roles
     ):
         parser.error("the role caps only apply to --mode cycle")
+    if arguments.mode != "cycle" and arguments.role_tickers is not None:
+        parser.error("--role-tickers only applies to --mode cycle")
+    if role_budget_from(arguments).enabled and not role_tickers_from(arguments):
+        parser.error(
+            "a positive role cap needs --role-tickers (the tickers the role stage may label); "
+            "refusing before any spend"
+        )
     if arguments.max_article_requests < 0:
         parser.error("--max-article-requests must not be negative")
     if arguments.mode != "cycle" and (arguments.no_ingest or arguments.no_analyze):
@@ -415,7 +437,11 @@ def main(argv: list[str] | None = None) -> int:
             ingest=not arguments.no_ingest,
             analyze=not arguments.no_analyze,
             role_budget=role_budget,
+            role_tickers=role_tickers_from(arguments),
         )
+        if role_budget.enabled:
+            covered = [c.ticker for c in service.repository.list_company_coverage() if c.active]
+            print(role_scope(covered, role_tickers_from(arguments)).render())
         exit_code = 0
         for result in results:
             if result.error is not None:

@@ -491,12 +491,34 @@ article is extracted once and stored: `principal` (a party to the reported event
 (context for someone else's development). It follows the same split as everything else here:
 
 - **Extraction is a stage of its own** ([company_role.py](../../src/marketsentinel/company_role.py)):
-  its own prompt version (`company-role-v1`), schema version (`company-role-schema-v1`), provider
+  its own prompt version (`company-role-v2`), schema version (`company-role-schema-v1`), provider
   interface, and typed responses. It does **not** touch `STAGE_A/B/C_PROMPT_VERSION`,
   `ARTICLE_ANALYSIS_SCHEMA_VERSION`, or `analysis_compatibility.py`, so every stored analysis stays
   valid. Article text is fenced as untrusted data (with `<` escaped so a headline cannot close the
   fence). Output is validated structurally (closed two-value vocabulary, bounds, no extra fields) and
   semantically (the echoed symbol must be the company the application supplied).
+- **`company-role-v2` replaced `company-role-v1` after a failed label pilot** (DECISIONS
+  2026-10-08). The output schema, vocabulary and rationale limit are unchanged. v2 states three
+  rules as general definitions: a buyer or seller in a transaction is `principal`; an incident
+  involving the company's own operations or assets is `principal`, as is any development where the
+  company is the actor; stock-price commentary, buy or sell opinions and analyst ratings or
+  price-target changes are `mentioned`. The last **reverses v1**, which made the object of a rating
+  or target change `principal`, so those articles stop counting toward `mr-v1` session sentiment.
+  The instructions also settle four collisions (a price move caused by a company development; a
+  rating when the company is the only one named; own results reported with analyst reaction; an
+  incident at the company's own facility versus a customer's use of its product). The prompt version
+  is part of the role contract key, so v2 is a different contract: **v1 labels and v1 jobs stay as
+  history, are never edited, and are never read as v2**; every article gets a fresh `pending` v2
+  job, paid only under explicit caps (zero caps spend nothing). No schema or `user_version` change.
+- **Role labelling is ticker-scoped.** The stage labels only the tickers a run names with
+  `--role-tickers` (the workflow passes the dispatch's `tickers` input; a scheduled run uses that
+  input's default, `NVDA,PFE`, so a company activated by a public request gets no role labels
+  until it is added). A positive role cap with no list is refused before any spend (argument
+  validation exits 2; `CoverageCycleService` raises as well). A covered ticker not on the list is
+  dropped before reconcile: no job, no paid call, no share of any cap, in the new-article and the
+  backfill pass alike. A listed ticker that is not covered labels nothing and is reported, not an
+  error. The run prints `role scope: labelled tickers=...; covered tickers left out=...; listed but
+  not covered=...`. Stage A/B/C, `--all-active` and every cap are unchanged.
 - **Failure is safe.** A label that cannot be produced yields a typed status
   (`unavailable` / `failed` / `not_found`) and *no row*. There is no default role: an unlabelled
   article is a different fact from one labelled `mentioned`, in storage (no row) and in the engine
@@ -507,7 +529,8 @@ article is extracted once and stored: `principal` (a party to the reported event
   Stage A/B/C key), so leases, retry rules, and "paid once per contract" are the ones already
   documented above, and the Stage A/B/C ledger is untouched. The only skip rule is `demo`.
 - **Budgets are explicit and default to zero** (`RoleBudget`; `--max-new-roles`,
-  `--max-new-roles-total`, `--max-backfill-roles`; matching `workflow_dispatch` inputs). With every
+  `--max-new-roles-total`, `--max-backfill-roles`, always with `--role-tickers`; matching
+  `workflow_dispatch` inputs). With every
   cap at zero the stage creates no job and makes no call. *New* work is an article published inside
   the ticker's live window; *backfill* is older stored history. Budget-limited work stays `pending`.
   Order is deterministic: articles in a session with at least three distinct sources (the ones that
