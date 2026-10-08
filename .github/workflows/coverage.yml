@@ -193,7 +193,7 @@ jobs:
             --request-interval-seconds 5.25
 
           if [ "$BACKFILL_PLAN_ONLY" = "true" ]; then
-            echo "::notice::Plan only: stopping the job here on purpose. Nothing was fetched or written and no later step ran."
+            echo "::notice::INTENTIONAL PLAN-ONLY STOP, NOT A FAILURE: the plan above is the result. Nothing was fetched or written and no later step ran. This job shows red by design."
             exit 1
           fi
 
