@@ -16,14 +16,32 @@ twice. Run backfill and repair modes only while continuous coverage for that tic
 Usage:
     python scripts/backfill_historical_intelligence.py --ticker NVDA --months 12
     python scripts/backfill_historical_intelligence.py --ticker NVDA --mode reanalyze-stale
+    python scripts/backfill_historical_intelligence.py --ticker NVDA --months 36 \\
+        --skip-recent-months 12 --google-only --max-new-analyses 0
+    # Extend stored history backwards, ending exactly where it starts (plan first, then run):
+    python scripts/backfill_historical_intelligence.py --ticker NVDA --months 36 \\
+        --until-stored-start --plan-only
+    python scripts/backfill_historical_intelligence.py --ticker NVDA --months 36 \\
+        --until-stored-start --google-only --max-new-analyses 0 --request-interval-seconds 5.25
+
+Exit codes: 0 done; 2 refused before any fetch (bad arguments, no stored history, boundary
+outside the horizon, or the stored corpus already fills the scored-read cap); 3 stopped because
+storing pushed the scored-article count past the read cap (see the message for the database state).
 """
 
 import argparse
+import re
+import sqlite3
 import sys
 from datetime import UTC, datetime
 
 from marketsentinel.analysis_compatibility import ArticleAnalysisCompatibility
-from marketsentinel.backfill_service import HistoricalIntelligenceBackfillService
+from marketsentinel.backfill_service import (
+    HistoricalIntelligenceBackfillService,
+    ScoredReadCapExceeded,
+    plan_anchored_backfill,
+    resolve_anchored_boundary,
+)
 from marketsentinel.config import Settings, get_settings
 from marketsentinel.constituents import CacheOnlyConstituentResolver, WikipediaConstituentService
 from marketsentinel.event_analysis import (
@@ -35,6 +53,7 @@ from marketsentinel.event_analysis import (
     OpenAIArticleIntelligenceProvider,
     UnavailableArticleAnalysisProvider,
 )
+from marketsentinel.historical_backfill import BackfillRefusal
 from marketsentinel.sentiment.finbert import FinBertAnalyzer
 from marketsentinel.sources.historical import (
     GdeltHistoricalNewsProvider,
@@ -54,6 +73,23 @@ def horizon_days_for(months: int) -> int:
     """
 
     return months * HORIZON_DAYS_PER_MONTH
+
+
+def offset_days_for(skip_months: int, months: int) -> int:
+    """Convert ``--skip-recent-months`` into days with the same 30-day month as the horizon.
+
+    Rejected here, with the CLI's own words, when it is negative or leaves no range, so the
+    operator sees which two options disagree instead of the planner's day counts.
+    """
+
+    if skip_months < 0:
+        raise ValueError("--skip-recent-months must not be negative")
+    if skip_months >= months:
+        raise ValueError(
+            f"--skip-recent-months ({skip_months}) must be smaller than --months ({months}); "
+            "otherwise no month is left to backfill"
+        )
+    return horizon_days_for(skip_months)
 
 
 def parse_as_of(value: str) -> datetime:
@@ -79,6 +115,70 @@ def _parse_as_of(parser: argparse.ArgumentParser, value: str | None) -> datetime
         parser.error(str(error))
 
 
+def parse_until(value: str) -> datetime:
+    """Parse ``--until``, requiring an explicit UTC offset (a naive value is never assumed UTC)."""
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+        raise ValueError("--until must include a UTC offset, for example 2025-08-27T00:00:00+00:00")
+    return ensure_utc(parsed)
+
+
+_SINGLE_TICKER = re.compile(r"[A-Za-z][A-Za-z0-9.\-]{0,9}")
+
+
+def is_single_ticker(value: str) -> bool:
+    """True for exactly one ticker symbol: no comma, space or list."""
+
+    return _SINGLE_TICKER.fullmatch(value.strip()) is not None
+
+
+class ReadOnlySQLiteRepository(SQLiteRepository):
+    """A repository whose connections cannot write, and which never creates or migrates a file.
+
+    Plan-only mode reads through this instead of ``initialize()``, which runs the schema script
+    (journal and ``user_version`` pragmas, ``CREATE``/``ALTER``) and would create a missing file.
+    ``immutable=1`` keeps even the ``-wal``/``-shm`` side files from being created next to a
+    WAL-mode database, which a plain ``mode=ro`` open does. The cost: an unmerged ``-wal`` is not
+    read, so run it on a database no writer has open (the workflow's downloaded copy is one).
+    """
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            f"{self.path.resolve().as_uri()}?mode=ro&immutable=1", uri=True, timeout=10
+        )
+        connection.row_factory = sqlite3.Row
+        return connection
+
+
+def refuse(message: str) -> None:
+    """Exit 2 with a message: used only before anything has been fetched or written."""
+
+    print(f"REFUSED: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def report_read_cap_exceeded(error: ScoredReadCapExceeded) -> None:
+    """Exit 3 with a prominent description of the database state and what to do next."""
+
+    bar = "=" * 78
+    print(
+        f"\n{bar}\nBACKFILL STOPPED: SCORED-READ CAP EXCEEDED ({error.cap})\n{bar}\n"
+        f"{error}\n\n"
+        "What to do next:\n"
+        "  - Do not re-run. The next run refuses to start while the ticker's scored articles "
+        f"reach {error.cap}.\n"
+        "  - In the GitHub workflow this step fails, so the job never reaches a checkpoint: the "
+        "database in R2 is unchanged and nothing needs undoing.\n"
+        "  - On a local database, the rows described above stay stored and are harmless.\n"
+        "  - Moving the cap is a product-owner decision (backfill_service."
+        "_SENTIMENT_AGGREGATION_LIMIT); see docs/research/MR-009-proposal.md.\n"
+        f"{bar}",
+        file=sys.stderr,
+    )
+    sys.exit(3)
+
+
 def concurrency_warning(ticker: str, *, under_continuous_coverage: bool) -> str:
     """The runtime warning printed before any backfill or repair mode does work."""
 
@@ -102,8 +202,16 @@ def build_backfill_service(
     max_new_analyses: int,
     offline: bool = False,
     priority_bonus_limit: int = 0,
+    google_only: bool = False,
+    request_interval_seconds: float = 0.0,
 ) -> HistoricalIntelligenceBackfillService:
-    """Wire the same dependency shapes as api/app.py::build_services, for the backfill class."""
+    """Wire the same dependency shapes as api/app.py::build_services, for the backfill class.
+
+    ``google_only`` makes Google News RSS the only history source, with no GDELT attempt, so a run
+    cannot mix a second source into the stored sampling regime. ``max_new_analyses == 0`` wires
+    the unavailable provider even when a key is configured, so a fetch-and-score run cannot reach
+    a paid analysis call by any path.
+    """
 
     repository = SQLiteRepository(settings.database_path)
     repository.initialize()
@@ -116,17 +224,23 @@ def build_backfill_service(
     constituents = (
         CacheOnlyConstituentResolver(constituent_service) if offline else constituent_service
     )
-    historical_news = HistoricalNewsService(
-        primary=GdeltHistoricalNewsProvider(
-            timeout_seconds=settings.request_timeout_seconds,
-            user_agent=settings.user_agent,
-            window_days=settings.historical_gdelt_window_days,
-            request_interval_seconds=settings.historical_gdelt_request_interval_seconds,
-        ),
-        rss_fallback=GoogleNewsHistoricalProvider(
-            timeout_seconds=settings.request_timeout_seconds,
-            user_agent=settings.user_agent,
-        ),
+    google = GoogleNewsHistoricalProvider(
+        timeout_seconds=settings.request_timeout_seconds,
+        user_agent=settings.user_agent,
+        request_interval_seconds=request_interval_seconds,
+    )
+    historical_news = (
+        HistoricalNewsService(primary=google)
+        if google_only
+        else HistoricalNewsService(
+            primary=GdeltHistoricalNewsProvider(
+                timeout_seconds=settings.request_timeout_seconds,
+                user_agent=settings.user_agent,
+                window_days=settings.historical_gdelt_window_days,
+                request_interval_seconds=settings.historical_gdelt_request_interval_seconds,
+            ),
+            rss_fallback=google,
+        )
     )
     sentiment = FinBertAnalyzer(
         model_name=settings.finbert_model,
@@ -141,7 +255,7 @@ def build_backfill_service(
             base_url=settings.llm_base_url,
             timeout_seconds=settings.llm_timeout_seconds,
         )
-        if settings.llm_api_key
+        if settings.llm_api_key and max_new_analyses > 0
         else UnavailableArticleAnalysisProvider()
     )
     article_events = ArticleEventAnalysisService(
@@ -179,6 +293,51 @@ def main() -> None:
         type=int,
         default=12,
         help="Backfill horizon in 30-day months (default: 12, i.e. a 360-day horizon).",
+    )
+    boundary = parser.add_mutually_exclusive_group()
+    boundary.add_argument(
+        "--skip-recent-months",
+        type=int,
+        default=None,
+        help="Backfill mode only. Skip the most recent N 30-day months of the horizon and fetch "
+        "nothing for them (default: 0, i.e. the whole horizon). '--months 36 --skip-recent-months "
+        "12' plans months 13-36 counted back from today, on the same calendar-month buckets a "
+        "plain '--months 36' run would use.",
+    )
+    boundary.add_argument(
+        "--until-stored-start",
+        action="store_true",
+        help="Backfill mode only. End the range exactly at the earliest stored published_at of "
+        "this ticker's non-demo articles, read at run time from the database the run uses. The "
+        "bucket containing it is clipped there; every earlier bucket boundary is a plain "
+        "--months run's. Nothing at or after it is stored.",
+    )
+    boundary.add_argument(
+        "--until",
+        default=None,
+        metavar="TIMESTAMP",
+        help="Backfill mode only. Like --until-stored-start but with an explicit end: an "
+        "ISO-8601 timestamp with a UTC offset, for example 2025-08-27T00:00:00+00:00.",
+    )
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="With --until-stored-start or --until. Resolve and print the boundary, the five "
+        "earliest stored published_at values, the stored count for the 30 days after the "
+        "boundary and the planned buckets, then exit: no network call, no database write.",
+    )
+    parser.add_argument(
+        "--google-only",
+        action="store_true",
+        help="Backfill mode only. Use Google News RSS as the sole history source; GDELT is never "
+        "contacted, so no second source can enter the stored sampling regime.",
+    )
+    parser.add_argument(
+        "--request-interval-seconds",
+        type=float,
+        default=0.0,
+        help="Minimum seconds between Google News RSS requests, redirect resolutions included "
+        "(default: 0, unpaced as before).",
     )
     parser.add_argument(
         "--mode",
@@ -229,14 +388,66 @@ def main() -> None:
     if arguments.as_of is not None and arguments.mode != "fill-selection-gaps":
         parser.error("--as-of only applies to --mode fill-selection-gaps")
     as_of = _parse_as_of(parser, arguments.as_of)
+    anchored = arguments.until_stored_start or arguments.until is not None
+    if arguments.mode != "backfill" and (
+        arguments.skip_recent_months is not None
+        or anchored
+        or arguments.plan_only
+        or arguments.google_only
+        or arguments.request_interval_seconds
+    ):
+        parser.error(
+            "--skip-recent-months, --until-stored-start, --until, --plan-only, --google-only and "
+            "--request-interval-seconds only apply to --mode backfill"
+        )
+    if arguments.plan_only and not anchored:
+        parser.error("--plan-only needs --until-stored-start or --until")
+    if not is_single_ticker(arguments.ticker):
+        parser.error("--ticker takes exactly one ticker symbol (no commas or spaces)")
+    if arguments.request_interval_seconds < 0:
+        parser.error("--request-interval-seconds must not be negative")
+    until_override: datetime | None = None
+    if arguments.until is not None:
+        try:
+            until_override = parse_until(arguments.until)
+        except ValueError as error:
+            parser.error(str(error))
+    offset_days = 0
+    if arguments.skip_recent_months:
+        try:
+            offset_days = offset_days_for(arguments.skip_recent_months, arguments.months)
+        except ValueError as error:
+            parser.error(str(error))
 
     settings = get_settings()
+    ticker = arguments.ticker.strip().upper()
+    horizon_days = horizon_days_for(arguments.months)
+    if anchored and not settings.database_path.exists():
+        # Without this, opening the repository would create an empty database and the run would
+        # then "refuse" on it; say what is actually wrong instead, and leave no file behind.
+        refuse(f"no database at {settings.database_path}; there is no stored history to extend.")
+    if arguments.plan_only:
+        try:
+            plan = plan_anchored_backfill(
+                ReadOnlySQLiteRepository(settings.database_path),
+                ticker,
+                now=datetime.now(UTC),
+                horizon_days=horizon_days,
+                override=until_override,
+            )
+        except BackfillRefusal as error:
+            refuse(str(error))
+        print(plan.render())
+        return
+
     service = build_backfill_service(
         settings,
         bucket_candidate_cap=arguments.bucket_candidate_cap,
         max_new_analyses=arguments.max_new_analyses,
         offline=arguments.mode == "fill-selection-gaps",
         priority_bonus_limit=arguments.priority_bonus,
+        google_only=arguments.google_only,
+        request_interval_seconds=arguments.request_interval_seconds,
     )
     coverage = service.repository.get_company_coverage(arguments.ticker.strip().upper())
     print(
@@ -248,20 +459,43 @@ def main() -> None:
     )
     now = datetime.now(UTC)
 
-    if arguments.mode == "reanalyze-stale":
-        report = service.reanalyze_stale(arguments.ticker, now=now)
-    elif arguments.mode == "refresh-evidence":
-        report = service.refresh_evidence(arguments.ticker, now=now)
-    elif arguments.mode == "fill-selection-gaps":
-        report = service.fill_selection_gaps(
-            arguments.ticker,
-            now=as_of or now,
-            horizon_days=horizon_days_for(arguments.months),
-        )
-    else:
-        report = service.backfill(
-            arguments.ticker, now=now, horizon_days=horizon_days_for(arguments.months)
-        )
+    # Anchored runs read their end from the database before the first fetch, and refuse here.
+    until_arguments: dict[str, datetime] = {}
+    if anchored:
+        try:
+            until = resolve_anchored_boundary(
+                service.repository,
+                ticker,
+                now=now,
+                horizon_days=horizon_days,
+                override=until_override,
+            )
+        except BackfillRefusal as error:
+            refuse(str(error))
+        print(f"Boundary: nothing at or after {until.isoformat()} will be stored.")
+        until_arguments = {"until": until}
+
+    try:
+        if arguments.mode == "reanalyze-stale":
+            report = service.reanalyze_stale(arguments.ticker, now=now)
+        elif arguments.mode == "refresh-evidence":
+            report = service.refresh_evidence(arguments.ticker, now=now)
+        elif arguments.mode == "fill-selection-gaps":
+            report = service.fill_selection_gaps(
+                arguments.ticker, now=as_of or now, horizon_days=horizon_days
+            )
+        else:
+            report = service.backfill(
+                arguments.ticker,
+                now=now,
+                horizon_days=horizon_days,
+                offset_days=offset_days,
+                **until_arguments,
+            )
+    except BackfillRefusal as error:
+        refuse(str(error))
+    except ScoredReadCapExceeded as error:
+        report_read_cap_exceeded(error)
 
     print(report.render())
 

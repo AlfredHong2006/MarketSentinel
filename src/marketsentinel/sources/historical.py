@@ -248,13 +248,35 @@ class GoogleNewsHistoricalProvider:
         max_redirect_resolutions: int = 10,
         http_get: Callable[..., httpx.Response] = httpx.get,
         resolve_url: Callable[[str], str | None] | None = None,
+        request_interval_seconds: float = 0.0,
+        sleeper: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.user_agent = user_agent
         self.relevance_threshold = relevance_threshold
         self.max_redirect_resolutions = max_redirect_resolutions
+        self.request_interval_seconds = request_interval_seconds
         self._http_get = http_get
         self._resolve_url = resolve_url or self._resolve_publisher_url
+        self._sleeper = sleeper
+        self._monotonic = monotonic
+        self._last_request_at: float | None = None
+
+    def _pace(self) -> None:
+        """Wait out ``request_interval_seconds`` since the previous outbound request.
+
+        Off by default (interval 0), which leaves interactive and scheduled use unchanged. A long
+        manual backfill sets it so its bursts of RSS and redirect requests are spaced.
+        """
+
+        if self.request_interval_seconds <= 0:
+            return
+        if self._last_request_at is not None:
+            remaining = self.request_interval_seconds - (self._monotonic() - self._last_request_at)
+            if remaining > 0:
+                self._sleeper(remaining)
+        self._last_request_at = self._monotonic()
 
     @retry(
         retry=retry_if_exception_type(httpx.HTTPError),
@@ -263,6 +285,7 @@ class GoogleNewsHistoricalProvider:
         reraise=True,
     )
     def _request(self, query: str) -> httpx.Response:
+        self._pace()
         response = self._http_get(
             "https://news.google.com/rss/search",
             params={"q": query, "hl": "en-GB", "gl": "GB", "ceid": "GB:en"},
@@ -279,6 +302,7 @@ class GoogleNewsHistoricalProvider:
     def _resolve_publisher_url(self, url: str) -> str | None:
         """Follow a Google RSS redirect and reject it if it does not reach a publisher."""
 
+        self._pace()
         try:
             response = self._http_get(
                 url,

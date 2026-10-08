@@ -47,6 +47,15 @@ on:
       max_backfill_roles:
         description: "Hard cap on one-off backfill company-role labels across all tickers this run"
         default: "0"
+      # One-off history backfill (MR-009), manual dispatch only. Empty = none, which is also what
+      # every scheduled run gets.
+      backfill_ticker:
+        description: "ONE ticker to backfill back 36 months, ending exactly where its stored history starts (empty = none)"
+        default: ""
+      backfill_plan_only:
+        description: "With backfill_ticker: print the boundary and planned buckets, write nothing, then stop the job"
+        type: boolean
+        default: false
 
 # A second overlapping run would race the same private SQLite database and the same R2 objects.
 # cancel-in-progress stays false so a run already in flight finishes rather than being cut off
@@ -143,6 +152,50 @@ jobs:
           ARGS=()
           for t in "${TICKER_ARR[@]}"; do ARGS+=(--ticker "$t"); done
           uv run python scripts/run_coverage_cycle.py --mode activate "${ARGS[@]}"
+
+      # One-off history backfill (MR-009). Runs only on a manual dispatch that names a ticker, and
+      # sits ahead of public-request admission and the coverage cycle so that (a) a plan-only
+      # dispatch stops before anything that spends or checkpoints, and (b) the backfilled rows are
+      # in the database every later integrity check and checkpoint covers. It is given no OpenAI
+      # secret and runs with --max-new-analyses 0, so it cannot make a paid call.
+      #
+      # The range ends exactly at the earliest article already stored for the ticker (read from
+      # the database downloaded above). Plan-only prints it and the planned buckets, makes no
+      # network call and no write, and then fails this step on purpose: GitHub offers no way to
+      # end a job early and green, and every later step would write (admission, cycle, checkpoint).
+      # A failed run here means "stopped", not "broken"; the notice says so.
+      - name: Historical backfill to the stored start (manual dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.backfill_ticker != '' }}
+        env:
+          BACKFILL_TICKER: ${{ github.event.inputs.backfill_ticker }}
+          BACKFILL_PLAN_ONLY: ${{ github.event.inputs.backfill_plan_only }}
+        run: |
+          if ! [[ "$BACKFILL_TICKER" =~ ^[A-Za-z][A-Za-z0-9.-]{0,9}$ ]]; then
+            echo "::error::backfill_ticker must be exactly one ticker symbol (no commas or spaces); got '$BACKFILL_TICKER'"
+            exit 1
+          fi
+
+          ARGS=(--ticker "$BACKFILL_TICKER")
+          if [ "$BACKFILL_PLAN_ONLY" = "true" ]; then ARGS+=(--plan-only); fi
+          if [ "$BACKFILL_PLAN_ONLY" != "true" ]; then
+            # Fail closed on spend: the steps after this one run in the same job. A dispatch must
+            # have set every paid cap to 0 (a value that fell back to its default fails here too).
+            for cap in MAX_NEW_TOTAL MAX_ARTICLE_REQUESTS MAX_NEW_ROLES_TOTAL MAX_BACKFILL_ROLES; do
+              if [ "${!cap}" != "0" ]; then
+                echo "::error::a backfill dispatch must set $cap to 0 (it is '${!cap}'); the steps after this one would otherwise spend"
+                exit 1
+              fi
+            done
+          fi
+
+          uv run python scripts/backfill_historical_intelligence.py "${ARGS[@]}" \
+            --months 36 --until-stored-start --google-only --max-new-analyses 0 \
+            --request-interval-seconds 5.25
+
+          if [ "$BACKFILL_PLAN_ONLY" = "true" ]; then
+            echo "::notice::Plan only: stopping the job here on purpose. Nothing was fetched or written and no later step ran."
+            exit 1
+          fi
 
       # Shared public requests (marketsentinel/public_requests.py). The public deployment can only
       # *write* small request objects into this dedicated bucket; this is the only place they are
