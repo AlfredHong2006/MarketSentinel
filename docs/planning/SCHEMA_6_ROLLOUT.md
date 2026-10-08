@@ -311,12 +311,12 @@ Check in the run log:
 - the role stage reports NVDA and PFE as the tickers in scope and any other covered ticker as left
   out;
 - 200 paid attempts, stopped on budget, 200 labels analysed;
-- tokens near the measured v1 figures of about 1,004 in and 51 out per label. The v2 instructions
-  are a different length, so expect a shift; if input is above roughly 1,400 per label, stop and
-  revisit the budget;
+- input tokens of roughly 1,500 per label and output near 51. v1 measured 1,004 in; the v2
+  instructions are 4,717 characters against 2,560, which adds an estimated 540 tokens. If input is
+  above roughly 1,900 per label, stop and revisit the budget;
 - no `circuit_breaker` and no `provider_unavailable`.
 
-Expected cost: about $0.04.
+Expected cost: about $0.05.
 
 ### B2.3 Draw the 30 labels
 

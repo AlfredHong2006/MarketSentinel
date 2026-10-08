@@ -1,6 +1,6 @@
 # MR-010 — Company-Role v2 Prompt and Ticker-Scoped Labelling
 
-Status: READY  
+Status: DONE (merged to local main 2026-10-08; the re-pilot is an operational step)  
 Owner: TBD (one worker, unattended run)  
 Depends on: none  
 Worktree: `C:\Dev\MS-worktrees\role-v2`

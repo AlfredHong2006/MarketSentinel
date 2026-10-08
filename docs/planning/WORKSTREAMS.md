@@ -21,7 +21,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | Claude Code worker | DONE | none | removed | verdict: 24+ months OBTAINABLE WITH LIMITS (Google News RSS to 36 months, date-only); report and probe script merged to local main 2026-10-07 |
 | MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | DONE | none; running the backfill is an operational step after the rollout and the pilot | removed | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
-| MR-010 | Company-role v2 prompt and ticker-scoped labelling | TBD | READY | none | `C:\Dev\MS-worktrees\role-v2` (`ms/mr-010-role-v2`) | `company-role-v2` and role labels limited to the dispatch's tickers, built offline with the provider mocked; the re-pilot is Alfred's |
+| MR-010 | Company-role v2 prompt and ticker-scoped labelling | Claude Code worker | DONE | none; the re-pilot is an operational step | removed | `company-role-v2` and role labels limited to the dispatch's tickers, built offline with the provider mocked; the re-pilot is Alfred's |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-007 (2026-10-07) — current plan
@@ -90,6 +90,18 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
   section 2.1 is amended at MR-010's integration. Only NVDA and PFE get role labels until Alfred
   adds others, including on scheduled runs. Known caveat: Pfizer Ltd (India) news is labelled
   `principal` for PFE.
+- **MR-010 reviewed 2026-10-08: criteria met, awaiting integration approval.** Report
+  `C:\Dev\MS-shared\reports\MR-010.md`. Confirmed in the worktree: 1341 tests pass, ruff clean; the
+  prompt version is `company-role-v2`, the schema version and `user_version` are unchanged; the v2
+  text states the three rules, no longer makes the object of an analyst rating `principal`, and
+  contains no real company name; the spec, `docs/DECISIONS.md`, `docs/planning/`, packets, the
+  label table, the role ledger, the engine, the backfill script and Stage A/B/C are untouched. The
+  workflow change is the `--role-tickers "$TICKERS"` pass-through plus the input's description and
+  two comments. One existing test outside the packet's named files was adjusted
+  (`tests/test_backfill_offset.py`, three calls now pass a ticker list). **Cost consequence:** the
+  v2 instructions are 4,717 characters against v1's 2,560, so input tokens per label are expected
+  to rise from the measured 1,004 to roughly 1,500, an estimate until the re-pilot measures it.
+  **Unvalidated:** how a real model applies the v2 wording; the re-pilot is the only evidence.
 - **Critical path, in order:**
   1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — **done 2026-10-08**; schema 6 is
      live; pre-rollout backup at `backups/marketsentinel-v5-20261008-1550.db` in the private bucket;
@@ -98,8 +110,8 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
      and three of five reports of an incident in the company's own operations labelled `mentioned`.
      The calls were split across three covered tickers, not the two intended. Measured: about 1,004
      input and 51 output tokens per label, $0.036 for the 200;
-  2a. MR-010: `company-role-v2` and ticker-scoped labelling, built offline, then integrated and
-     pushed (`docs/workstreams/MR-010-company-role-v2.md`);
+  2a. MR-010: `company-role-v2` and ticker-scoped labelling — **integrated to local main
+     2026-10-08**, spec section 2.1 amended; needs Alfred's push before the re-pilot;
   2b. re-pilot of 200 under v2 on NVDA and PFE, pre-approved, then Alfred's review of 30 drawn with
      seed `20261008` (at least 27 correct) — Alfred. Result: not yet run;
   3. role-label backfill of the stored 12 months, NVDA and PFE (about $0.52 at measured tokens) —

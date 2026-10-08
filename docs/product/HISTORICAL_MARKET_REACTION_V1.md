@@ -2,7 +2,7 @@
 
 Status: approved design; numeric sentiment thresholds to be frozen during validation  
 Amended: 2026-09-19 (principal methodology review — asymmetric thresholds, day-0 timing cohort,
-history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1; Student-t interval and zero-width rule, sections 10 and 11; timing wording, section 17)  
+history sufficiency, benchmark instruments); 2026-10-07 (company-role eligibility, section 2.1; Student-t interval and zero-width rule, sections 10 and 11; timing wording, section 17); 2026-10-08 (role definitions for `company-role-v2`, section 2.1)  
 Owner: Alfred Hong  
 Scope: deterministic historical research layer for MarketSentinel  
 Methodology version: `mr-v1`
@@ -57,6 +57,11 @@ development it reports:
   plaintiff or defendant, contractual counterparty, regulated or investigated entity, or owner of the
   affected asset, right, or liability);
 - `mentioned`: the company is only context for someone else's development.
+
+A counterparty to a transaction, buyer or seller, is `principal`. An incident involving the
+company's own operations or assets is `principal`. Stock-price commentary, buy or sell opinions
+and analyst ratings or price-target changes about the company are `mentioned`: they are someone
+else's view of the company, not a development of the company.
 
 The label is an extraction recorded by a separate paid LLM stage with its own prompt and schema
 versions. It is never a guess: an article that could not be labelled is **unlabelled**, which is a
