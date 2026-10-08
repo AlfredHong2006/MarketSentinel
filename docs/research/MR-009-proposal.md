@@ -219,8 +219,8 @@ integrity check and checkpoint that follow, and the `.bak` upload (the pre-run c
 download step) still holds the state before the backfill.
 
 **Plan-only: the job stops, on purpose.** After printing the plan the step ends with `exit 1` and a
-`::notice::` saying "Plan only: stopping the job here on purpose. Nothing was fetched or written
-and no later step ran." Reason: GitHub gives no way to end a job early and green, and every later
+`::notice::` saying "INTENTIONAL PLAN-ONLY STOP, NOT A FAILURE: the plan above is the result.
+Nothing was fetched or written and no later step ran. This job shows red by design." Reason: GitHub gives no way to end a job early and green, and every later
 step writes (admission, cycle, checkpoint, snapshot, a Render restart). Gating each of them on the
 input would edit the rest of the file. So a plan-only run shows **red by design**; it is read in the
 log, not in the status. A plan dispatch needs no spend caps at 0, because nothing after it runs.
@@ -333,6 +333,12 @@ Do not start before: schema-6 rollout verified (checklist step 8); pilot passed 
 recorded; this change approved and merged to `main`, pushed, CI green; the workflow addition
 merged; the label budget approved.
 
+> **Rule for any dispatch that must not spend on Stage A/B/C: set `max_new_total=0`.**
+> `max_new=0` on its own does **not** stop spend: the per-ticker cap is checked after a turn, so
+> each ticker can still get one paid attempt. `max_new_total=0` is the cap that prevents the paid
+> loop from starting. Set `max_article_requests=0` as well to stop paid public article requests.
+> (Added by the coordinator at integration, 2026-10-08, on Alfred's instruction.)
+
 1. **Confirm idle.** `gh run list --workflow coverage.yml --limit 3`: none `in_progress` or
    `queued`. The cron fires at 00:00, 06:00, 12:00, 18:00 UTC; start well clear of them.
 2. **Back up.** `aws s3 cp "$PRIVATE/state/marketsentinel.db" "$PRIVATE/backups/marketsentinel-pre-mr009-$STAMP.db" --endpoint-url $ENDPOINT`;
@@ -342,7 +348,8 @@ merged; the label budget approved.
    `article_company_roles`, `article_intelligence_analyses`, `daily_sentiment`. Write the numbers down.
 4. **Plan-only dispatch first.** It reads the downloaded database, prints, and stops the job:
    `gh workflow run coverage.yml -f backfill_ticker=NVDA -f backfill_plan_only=true`, then
-   `gh run watch`. **The run ends red on purpose** (§2); the log is the result. Nothing was fetched
+   `gh run watch`. **The run ends red on purpose** (§2); the log is the result. The step's last
+   line reads `INTENTIONAL PLAN-ONLY STOP, NOT A FAILURE`. Nothing was fetched
    or written and no later step ran. Read the plan block and decide before going on:
    - the **boundary** is the stored start you expect (MR-007: about 2025-08-27) and about 360–400
      days old, not much older;

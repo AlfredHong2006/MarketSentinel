@@ -1,6 +1,6 @@
 # MR-009 — Backfill Start Offset and Run Plan (Months 13–36)
 
-Status: REVIEW (first pass approved 2026-10-08; second pass below adds the exact boundary, the read-cap guard and the workflow step)  
+Status: DONE (both passes merged to local main 2026-10-08; the backfill itself is an operational step)  
 Owner: TBD  
 Depends on: none to draft and test; the backfill itself waits for the schema-6 rollout and the label pilot  
 Worktree: `C:\Dev\MS-worktrees\backfill-offset`

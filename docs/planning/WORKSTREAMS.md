@@ -20,7 +20,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | Claude Code worker | DONE | none | removed | verdict: 24+ months OBTAINABLE WITH LIMITS (Google News RSS to 36 months, date-only); report and probe script merged to local main 2026-10-07 |
-| MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | REVIEW (first pass approved; second pass pending) | second pass: exact boundary, read-cap guard, workflow step; the backfill itself waits for the rollout and the pilot | `C:\Dev\MS-worktrees\backfill-offset` (`ms/mr-009-backfill-offset`), work uncommitted | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
+| MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | DONE | none; running the backfill is an operational step after the rollout and the pilot | removed | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-007 (2026-10-07) — current plan
@@ -62,6 +62,26 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
   no paid analysis; about 4,000 role labels approved in dispatches of at most 1,000, only after the
   pilot passes; 5.25-second pacing; a loud guard for the 5,000-article read cap. The second pass
   builds the boundary, the guard and the workflow input and step. Not integrated until it reports.
+- **MR-009 second pass reviewed 2026-10-08: criteria met, awaiting integration approval.** Confirmed
+  in the worktree: 1303 tests pass, ruff clean, no existing test modified; the workflow diff only
+  adds lines (two inputs, one step); the step sits after "Activate coverage" and before public
+  request sync, is gated on a manual dispatch with a ticker, and names no secret; with no new
+  option set the planner's output is byte-identical to main; the spec, `docs/DECISIONS.md`,
+  `docs/planning/`, packets, schema, ledger, coverage cycle, role stage and engine are untouched.
+  Built: `--until-stored-start` (boundary read from the database at run time) with an explicit
+  `--until` override, `--plan-only`, refusal before any fetch on an empty corpus or out-of-horizon
+  boundary, and a read-cap guard that refuses up front or exits non-zero without writing a
+  truncated rebuild. **By design, a plan-only dispatch ends red:** the step exits non-zero so no
+  later step can write. **A real backfill dispatch fails closed** unless the total paid caps are
+  exactly `0`. **Never executed:** the workflow's shell, any run against a real database, and
+  Google at this depth beyond MR-007's 13 probes.
+- **MR-009 integrated 2026-10-08: DONE.** Decisions in `docs/DECISIONS.md` ("Backfill workflow
+  step"): the red plan-only run is accepted, the step position is confirmed, the zero-cap guard and
+  the 5,000 cap stay. The coordinator changed one line of the workflow at integration, on Alfred's
+  instruction: the plan-only stop message now reads `INTENTIONAL PLAN-ONLY STOP, NOT A FAILURE`.
+  Runbook: `docs/research/MR-009-proposal.md`, section 4.
+- **Operating rule:** use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C;
+  `max_new=0` alone does not stop spend. Noted in the backfill runbook and the rollout checklist.
 - **Critical path, in order:**
   1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — Alfred;
   2. pilot of 200 labels, then Alfred's review of 30 (at least 27 correct) — Alfred;

@@ -22,6 +22,22 @@ $env:AWS_SECRET_ACCESS_KEY = "<R2_SECRET_ACCESS_KEY>"
 $env:AWS_DEFAULT_REGION    = "auto"
 ```
 
+## Dispatches that must not spend on Stage A/B/C
+
+**Use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C.** `max_new=0` on its
+own does not stop spend: the per-ticker cap is checked after a turn, so each ticker can still get
+one paid attempt. `max_new_total=0` is the cap that keeps the paid loop from starting. Add
+`max_article_requests=0` to stop paid public article requests too.
+
+```powershell
+gh workflow run coverage.yml -f max_new_total=0 -f max_article_requests=0 -f max_new_roles=0 -f max_new_roles_total=0 -f max_backfill_roles=0
+```
+
+The dispatches in this checklist do not add those two flags, so they pay for Stage A/B/C under the
+usual caps, as a scheduled run does. Add them to any dispatch where that is not wanted. Whether
+GitHub passes an input of `0` through or falls back to the default has not been verified; check the
+run log's cap values on the first such dispatch.
+
 ## Why the order matters
 
 The public service applies a published snapshot only when the snapshot's schema version equals its
@@ -266,7 +282,9 @@ or `circuit_breaker`.
 
 Steady state comes after the backfill, as a reviewed commit that changes the two workflow fallback
 defaults (`MAX_NEW_ROLES` to `10`, `MAX_NEW_ROLES_TOTAL` to `25`; `MAX_BACKFILL_ROLES` stays `0`).
-Then MR-003 resumes.
+The months 13–36 news backfill comes next, one ticker per dispatch, starting with a plan-only
+dispatch: `docs/research/MR-009-proposal.md`, section 4. Its role labels (about 4,000, in
+dispatches of at most 1,000) follow. Then MR-003 resumes.
 
 ## Not verified
 

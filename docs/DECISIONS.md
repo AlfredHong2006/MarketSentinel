@@ -623,3 +623,27 @@ ticker, newest first. It must never truncate silently: a run that would exceed t
 loudly and does not present a truncated result as complete. Raising the cap is a separate decision.
 
 **Order is unchanged:** schema-6 rollout, then the label pilot and its review, then the backfill.
+
+---
+
+## 2026-10-08 — Backfill workflow step: plan-only stop, position, guards
+
+**Context:** MR-009's second pass built the exact-boundary backfill, the read-cap guard and the
+workflow step. Decisions on its four open points, and one operating rule.
+
+**1. A plan-only dispatch ends red, by design.** GitHub cannot end a job early and green, and every
+later step writes, so the step exits non-zero after printing the plan. Its final output line must
+say plainly that this is an intentional plan-only stop and not a failure.
+
+**2. Step position confirmed:** immediately after coverage activation and ahead of public-request
+admission, so a plan-only dispatch cannot admit requests, spend or checkpoint.
+
+**3. The zero-cap guard stays.** A real backfill dispatch refuses to fetch unless the total paid
+caps are exactly `0`. It fails closed because how GitHub passes an input of `0` is unverified.
+
+**4. The 5,000-article read cap stays** for this run. The guard, not a higher limit, is the
+protection; the plan-only dispatch prints the real count before anything is fetched.
+
+**Operating rule: use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C.**
+`max_new=0` alone does not stop spend, because the per-ticker cap is checked after a turn and each
+ticker can still get one paid attempt.
