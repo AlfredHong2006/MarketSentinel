@@ -22,6 +22,12 @@ $env:AWS_SECRET_ACCESS_KEY = "<R2_SECRET_ACCESS_KEY>"
 $env:AWS_DEFAULT_REGION    = "auto"
 ```
 
+## Status
+
+- **Part A, schema rollout: done 2026-10-08.** Schema 6 is live. Backup stamp `20261008-1550`.
+- **Part B, pilot of 200 labels: not yet run.**
+- **Part C: waits for the pilot to pass.**
+
 ## Dispatches that must not spend on Stage A/B/C
 
 **Use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C.** `max_new=0` on its
@@ -76,12 +82,18 @@ The cron fires at 00:00, 06:00, 12:00 and 18:00 UTC, so start well clear of thos
 
 ```powershell
 $STAMP = Get-Date -Format "yyyyMMdd-HHmm"
-aws s3 cp "$PRIVATE/state/marketsentinel.db" "$PRIVATE/backups/marketsentinel-v5-$STAMP.db" --endpoint-url $ENDPOINT
+aws s3 cp "$PRIVATE/state/marketsentinel.db" "$PRIVATE/backups/marketsentinel-v5-$STAMP.db" --copy-props none --endpoint-url $ENDPOINT
 aws s3 ls "$PRIVATE/state/" --endpoint-url $ENDPOINT
 aws s3 ls "$PRIVATE/backups/" --endpoint-url $ENDPOINT
 ```
 
 Check: the backup's size equals `state/marketsentinel.db`'s. Keep `$STAMP`; rollback needs it.
+
+A copy from one R2 key to another needs `--copy-props none`; without it the copy fails on R2.
+Downloads to a local file and uploads from one do not need it.
+
+The rollout of 2026-10-08 used stamp `20261008-1550`: the pre-rollout schema-5 database is at
+`backups/marketsentinel-v5-20261008-1550.db`.
 
 ### 4. Refresh the baked fallback snapshot
 
@@ -163,7 +175,9 @@ $m = Invoke-RestMethod "$PUBLIC/latest.json"
 $m.schema_user_version
 $m.version
 New-Item -ItemType Directory -Force "$env:TEMP\ms-rollout" | Out-Null
-Invoke-WebRequest $m.database.url -OutFile "$env:TEMP\ms-rollout\snapshot.db"
+# database.url in latest.json is relative to the public base URL, so prefix it.
+$dbUrl = if ($m.database.url -match '^https?://') { $m.database.url } else { "$PUBLIC/$($m.database.url.TrimStart('/'))" }
+Invoke-WebRequest $dbUrl -OutFile "$env:TEMP\ms-rollout\snapshot.db"
 @'
 import sqlite3, sys
 db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
@@ -186,7 +200,7 @@ step 6, then restart the service.
 
 ```powershell
 gh workflow disable coverage.yml
-aws s3 cp "$PRIVATE/backups/marketsentinel-v5-$STAMP.db" "$PRIVATE/state/marketsentinel.db" --endpoint-url $ENDPOINT
+aws s3 cp "$PRIVATE/backups/marketsentinel-v5-$STAMP.db" "$PRIVATE/state/marketsentinel.db" --copy-props none --endpoint-url $ENDPOINT
 ```
 
 Then redeploy the previous commit in Render. A schema-5 build that opens a schema-6 file ignores
@@ -228,7 +242,9 @@ the stage labels every actively covered ticker. Check the per-ticker lines in th
 
 ```powershell
 $m = Invoke-RestMethod "$PUBLIC/latest.json"
-Invoke-WebRequest $m.database.url -OutFile "$env:TEMP\ms-rollout\pilot.db"
+New-Item -ItemType Directory -Force "$env:TEMP\ms-rollout" | Out-Null
+$dbUrl = if ($m.database.url -match '^https?://') { $m.database.url } else { "$PUBLIC/$($m.database.url.TrimStart('/'))" }
+Invoke-WebRequest $dbUrl -OutFile "$env:TEMP\ms-rollout\pilot.db"
 @'
 import random, sqlite3, sys
 db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)

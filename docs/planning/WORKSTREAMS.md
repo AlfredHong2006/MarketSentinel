@@ -15,7 +15,7 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 |---|---|---|---|---|---|---|
 | MR-001 | Data readiness | Claude Code A | DONE | none | removed | readiness report + real fixture — in main as `b830183` |
 | MR-002 | Quant core | Claude Code B | DONE | none | removed | deterministic engine + tests — merged to main 2026-10-06 |
-| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | schema rollout, label pilot + review, months 13–36 news backfill, role labels for all 36 months | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
+| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | label pilot + review, months 13–36 news backfill, role labels for all 36 months (schema rollout done 2026-10-08) | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
@@ -83,7 +83,8 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
 - **Operating rule:** use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C;
   `max_new=0` alone does not stop spend. Noted in the backfill runbook and the rollout checklist.
 - **Critical path, in order:**
-  1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — Alfred;
+  1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — **done 2026-10-08**; schema 6 is
+     live; pre-rollout backup at `backups/marketsentinel-v5-20261008-1550.db` in the private bucket;
   2. pilot of 200 labels, then Alfred's review of 30 (at least 27 correct) — Alfred;
   3. role-label backfill of the stored 12 months, NVDA and PFE — Alfred;
   4. MR-009 approved and integrated (can be drafted in parallel with 1–3);
@@ -112,7 +113,7 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07 entry).
   evaluation PASS. Report: `C:\Dev\MS-shared\reports\MR-006.md`. Proposal and runbook:
   `docs/research/MR-006-proposal.md`.
 - **The approved spec amendment is applied** (company-role eligibility, spec section 2.1).
-- **Main is now a schema-6 build and is not pushed.** Pushing starts the rollout, in this order:
+- **Superseded 2026-10-08: main is pushed and schema 6 is live.** The rollout order was:
   refresh the baked fallback snapshot, disable the schedule, push, deploy the public build, dispatch
   one worker run with every role cap at `0`, re-enable the schedule. Push and deploy are Alfred's.
 - **Nothing has been spent and no real label exists.** Role caps default to `0`.

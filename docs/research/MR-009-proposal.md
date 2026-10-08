@@ -341,7 +341,8 @@ merged; the label budget approved.
 
 1. **Confirm idle.** `gh run list --workflow coverage.yml --limit 3`: none `in_progress` or
    `queued`. The cron fires at 00:00, 06:00, 12:00, 18:00 UTC; start well clear of them.
-2. **Back up.** `aws s3 cp "$PRIVATE/state/marketsentinel.db" "$PRIVATE/backups/marketsentinel-pre-mr009-$STAMP.db" --endpoint-url $ENDPOINT`;
+2. **Back up.** `aws s3 cp "$PRIVATE/state/marketsentinel.db" "$PRIVATE/backups/marketsentinel-pre-mr009-$STAMP.db" --copy-props none --endpoint-url $ENDPOINT`
+   (a copy between two R2 keys needs `--copy-props none`);
    check sizes equal. Keep `$STAMP`.
 3. **Record the before-state** from a read-only download of the backup (`sqlite3 ... ?mode=ro`):
    per ticker `COUNT(*)`, `MIN(published_at)`, `MAX(published_at)` of `articles`; counts of
@@ -392,7 +393,7 @@ merged; the label budget approved.
 
 **Roll back.** A dispatch that fails, or is plan-only, never reaches a checkpoint: R2 is unchanged.
 After a green backfill: `gh workflow disable coverage.yml`, then
-`aws s3 cp "$PRIVATE/backups/marketsentinel-pre-mr009-$STAMP.db" "$PRIVATE/state/marketsentinel.db" --endpoint-url $ENDPOINT`,
+`aws s3 cp "$PRIVATE/backups/marketsentinel-pre-mr009-$STAMP.db" "$PRIVATE/state/marketsentinel.db" --copy-props none --endpoint-url $ENDPOINT`,
 re-enable. The backfill is free and idempotent, so the usual remedy is to rerun it. Restoring after
 role labels were paid for loses those labels, so roll back before the first label dispatch.
 The rolling `.bak` is overwritten by the next run; rely on the named backup.
