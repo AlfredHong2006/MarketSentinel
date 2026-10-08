@@ -25,8 +25,13 @@ $env:AWS_DEFAULT_REGION    = "auto"
 ## Status
 
 - **Part A, schema rollout: done 2026-10-08.** Schema 6 is live. Backup stamp `20261008-1550`.
-- **Part B, pilot of 200 labels: not yet run.**
-- **Part C: waits for the pilot to pass.**
+- **Part B, pilot of 200 labels under `company-role-v1`: run 2026-10-08, FAILED.** Alfred judged
+  25 of 30 correct against the 27 required. The 200 calls were split across three covered tickers,
+  not the two intended. Measured: 200,839 input and 10,107 output tokens, about 1,004 in and 51 out
+  per label, $0.036 in total.
+- **Part B2, re-pilot under `company-role-v2`: waits for MR-010 to be integrated and pushed.**
+  Pre-approved. Review seed `20261008`.
+- **Part C: waits for the re-pilot to pass.**
 
 ## Dispatches that must not spend on Stage A/B/C
 
@@ -283,7 +288,91 @@ else's. Judge the role, not the rationale's wording.
 
 Record the count and the date in `docs/planning/WORKSTREAMS.md` either way.
 
-## Part C — Only after the pilot passes
+## Part B2 — Re-pilot of 200 labels under `company-role-v2`
+
+Do not start until MR-010 is integrated, pushed, CI is green, and one scheduled or manual run has
+completed on the new code. MR-010 makes the `tickers` input limit which tickers are labelled, so
+this dispatch labels NVDA and PFE only.
+
+### B2.1 The review seed is fixed
+
+The seed is **20261008**. It was recorded in `docs/DECISIONS.md` on 2026-10-08, before any v2 label
+existed.
+
+### B2.2 Dispatch
+
+```powershell
+gh run list --workflow coverage.yml --limit 3
+gh workflow run coverage.yml -f tickers=NVDA,PFE -f max_new_roles=0 -f max_new_roles_total=0 -f max_backfill_roles=200
+gh run watch
+```
+
+Check in the run log:
+- the role stage reports NVDA and PFE as the tickers in scope and any other covered ticker as left
+  out;
+- 200 paid attempts, stopped on budget, 200 labels analysed;
+- tokens near the measured v1 figures of about 1,004 in and 51 out per label. The v2 instructions
+  are a different length, so expect a shift; if input is above roughly 1,400 per label, stop and
+  revisit the budget;
+- no `circuit_breaker` and no `provider_unavailable`.
+
+Expected cost: about $0.04.
+
+### B2.3 Draw the 30 labels
+
+```powershell
+$m = Invoke-RestMethod "$PUBLIC/latest.json"
+New-Item -ItemType Directory -Force "$env:TEMP\ms-rollout" | Out-Null
+$dbUrl = if ($m.database.url -match '^https?://') { $m.database.url } else { "$PUBLIC/$($m.database.url.TrimStart('/'))" }
+Invoke-WebRequest $dbUrl -OutFile "$env:TEMP\ms-rollout\pilot-v2.db"
+@'
+import random, sqlite3, sys
+db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+rows = db.execute(
+    """
+    SELECT r.article_fingerprint, a.ticker, a.published_at, a.source, a.title,
+           r.role, r.confidence, r.rationale
+    FROM article_company_roles AS r
+    JOIN articles AS a ON a.fingerprint = r.article_fingerprint
+    WHERE r.prompt_version = 'company-role-v2'
+    ORDER BY r.article_fingerprint
+    """
+).fetchall()
+print(f"v2 labels available: {len(rows)}")
+print("by ticker:", dict(db.execute(
+    "SELECT a.ticker, COUNT(*) FROM article_company_roles r JOIN articles a "
+    "ON a.fingerprint = r.article_fingerprint WHERE r.prompt_version = 'company-role-v2' "
+    "GROUP BY a.ticker").fetchall()))
+sample = random.Random(20261008).sample(rows, 30)
+for i, (fp, ticker, published, source, title, role, conf, why) in enumerate(sample, 1):
+    print(f"\n{i:>2}. [{ticker}] {published[:10]}  {source}  ({fp[:12]})")
+    print(f"    {title}")
+    print(f"    label: {role}  confidence: {conf:.2f}")
+    print(f"    why:   {why}")
+'@ | uv run python - "$env:TEMP\ms-rollout\pilot-v2.db"
+```
+
+Check: `v2 labels available` is 200 and `by ticker` shows only NVDA and PFE. If either is off, do
+not review; the scoping or the run did not behave as intended.
+
+### B2.4 Apply the acceptance rule
+
+Same rule as step 12, judged against the v2 definitions:
+
+- a buyer or seller in a transaction is `principal`;
+- an incident involving the company's own operations or assets is `principal`;
+- stock-price commentary, buy or sell opinions and analyst ratings or price targets are
+  `mentioned`.
+
+**27 or more correct:** proceed to Part C. **26 or fewer:** no bulk dispatch; a further prompt
+version, a new pre-registered seed, and another pilot.
+
+Known caveat, recorded as not a blocker: news about Pfizer Ltd, the Indian subsidiary, is labelled
+`principal` for PFE. Note how many of the 30 are such items.
+
+Record the count and the date in `docs/planning/WORKSTREAMS.md` either way.
+
+## Part C — Only after the re-pilot passes
 
 Bulk backfill for NVDA and PFE, in dispatches of at most 1,000:
 

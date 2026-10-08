@@ -647,3 +647,48 @@ protection; the plan-only dispatch prints the real count before anything is fetc
 **Operating rule: use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C.**
 `max_new=0` alone does not stop spend, because the per-ticker cap is checked after a turn and each
 ticker can still get one paid attempt.
+
+---
+
+## 2026-10-08 — Label pilot failed (25 of 30); company-role-v2 approved
+
+**Pilot result: FAIL.** Alfred reviewed the 30 labels drawn with seed `20261007` from the 200-label
+pilot under prompt `company-role-v1` and judged **25 of 30 correct**, against the 27 required. No
+bulk label dispatch runs. The five errors:
+
+- #17: the seller in a transaction was labelled `mentioned`;
+- #16: Pfizer, the actor in the development, was labelled `mentioned`;
+- #8, #13, #21: three of five items about a crash involving Amazon's own operations were labelled
+  `mentioned`. Alfred judges all five `principal`.
+
+**The pilot also labelled a third company.** The 200 calls were split across three covered tickers
+(67, 67 and 66), although the approved budget was NVDA and PFE only: the role stage labelled every
+actively covered ticker and ignored the dispatch's ticker list.
+
+**Measured cost, replacing every earlier estimate.** 200 calls used 200,839 input and 10,107 output
+tokens: about **1,004 input and 51 output tokens per label**, $0.036 in total at `gpt-4o-mini` list
+price ($0.15 / $0.60 per 1M tokens), about $0.00018 per label. At that rate the 2,852 stored
+NVDA and PFE articles cost about $0.52 and the roughly 4,000 backfill articles about $0.72.
+
+**Decisions:**
+
+1. **Draft `company-role-v2` as a new prompt version.** The v1 labels stay as history and are never
+   edited. Rules v2 must state:
+   - a counterparty in a transaction, buyer or seller, is `principal`;
+   - an incident involving the company's own operations or assets is `principal`;
+   - stock-price commentary, buy or sell opinions and analyst ratings are `mentioned`.
+2. **Analyst ratings reverse deliberately.** v1 labelled a company `principal` when it was the
+   object of an analyst rating or price-target change. Under v2 those articles are `mentioned` and
+   so no longer count toward `mr-v1` session sentiment: they are someone else's view of the
+   company, not a development of the company. The spec's role definitions (section 2.1) are amended
+   to match when v2 is integrated.
+3. **The dispatch's `tickers` input limits which tickers get role labels.** Only NVDA and PFE are
+   labelled until Alfred adds others. This applies to scheduled runs too, through the input's
+   default, so a company activated by a public request gets no role labels until it is added.
+4. **Review seed for v2: `20261008`**, fixed here before any v2 label exists.
+5. **Re-pilot pre-approved:** 200 labels on NVDA and PFE under v2, about $0.04, once v2 is built,
+   tested and integrated. The acceptance rule is unchanged: 30 drawn at random with the seed above,
+   at least 27 correct.
+
+**Known caveat, not a blocker:** news about Pfizer Ltd, the Indian subsidiary, is labelled
+`principal` for PFE.

@@ -15,12 +15,13 @@ Goal: establish a leakage-safe, benchmark-adjusted historical market-reaction en
 |---|---|---|---|---|---|---|
 | MR-001 | Data readiness | Claude Code A | DONE | none | removed | readiness report + real fixture — in main as `b830183` |
 | MR-002 | Quant core | Claude Code B | DONE | none | removed | deterministic engine + tests — merged to main 2026-10-06 |
-| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | label pilot + review, months 13–36 news backfill, role labels for all 36 months (schema rollout done 2026-10-08) | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
+| MR-003 | Real-data validation | TBD (rerun needs a new worktree) | BLOCKED | MR-010, a passing re-pilot, months 13–36 news backfill, role labels for all 36 months (schema rollout done 2026-10-08) | removed | report GO WITH LIMITS (provisional); report, scripts and tracker fixture in main as artifacts; nothing frozen |
 | MR-004 | API + snapshot integration | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | public reaction block + endpoint; must settle price persistence |
 | MR-005 | Frontend | TBD | BLOCKED (on hold: data first) | MR-003 contract freeze | created later | Historical Market Reaction UI |
 | MR-006 | Primary-company pre-analysis | Claude Code worker | DONE | none | removed | company-role stage, label storage (`user_version` 6), engine filter — merged to local main 2026-10-07; spends nothing until caps are raised |
 | MR-007 | GDELT investigation for deeper history | Claude Code worker | DONE | none | removed | verdict: 24+ months OBTAINABLE WITH LIMITS (Google News RSS to 36 months, date-only); report and probe script merged to local main 2026-10-07 |
 | MR-009 | Backfill start offset and run plan (months 13–36) | Claude Code worker | DONE | none; running the backfill is an operational step after the rollout and the pilot | removed | small offset change + run plan, drafted offline for Alfred's approval; fetches and writes nothing |
+| MR-010 | Company-role v2 prompt and ticker-scoped labelling | TBD | READY | none | `C:\Dev\MS-worktrees\role-v2` (`ms/mr-010-role-v2`) | `company-role-v2` and role labels limited to the dispatch's tickers, built offline with the provider mocked; the re-pilot is Alfred's |
 | MR-008 | Bootstrap small-sample false-alarm fix | Claude Code worker | DONE | none | removed | Student-t is the default interval; zero-width intervals never count as evidence; measured levels disclosed in the spec — merged to local main 2026-10-07 |
 
 ### After MR-007 (2026-10-07) — current plan
@@ -82,11 +83,27 @@ Decisions are in `docs/DECISIONS.md` (2026-10-07, "After MR-007").
   Runbook: `docs/research/MR-009-proposal.md`, section 4.
 - **Operating rule:** use `max_new_total=0` whenever a dispatch must not spend on Stage A/B/C;
   `max_new=0` alone does not stop spend. Noted in the backfill runbook and the rollout checklist.
+- **After the pilot, 2026-10-08** (`docs/DECISIONS.md`, "Label pilot failed"): v2 makes a
+  transaction counterparty and an incident in the company's own operations `principal`, and makes
+  stock commentary, buy or sell opinions and analyst ratings `mentioned`. The analyst-rating change
+  reverses v1 on purpose and takes those articles out of `mr-v1` session sentiment; the spec's
+  section 2.1 is amended at MR-010's integration. Only NVDA and PFE get role labels until Alfred
+  adds others, including on scheduled runs. Known caveat: Pfizer Ltd (India) news is labelled
+  `principal` for PFE.
 - **Critical path, in order:**
   1. schema-6 rollout (`docs/planning/SCHEMA_6_ROLLOUT.md`) — **done 2026-10-08**; schema 6 is
      live; pre-rollout backup at `backups/marketsentinel-v5-20261008-1550.db` in the private bucket;
-  2. pilot of 200 labels, then Alfred's review of 30 (at least 27 correct) — Alfred;
-  3. role-label backfill of the stored 12 months, NVDA and PFE — Alfred;
+  2. pilot of 200 labels under `company-role-v1` — **run 2026-10-08, FAILED: 25 of 30 correct**
+     (27 required). Errors: a seller labelled `mentioned`, the acting company labelled `mentioned`,
+     and three of five reports of an incident in the company's own operations labelled `mentioned`.
+     The calls were split across three covered tickers, not the two intended. Measured: about 1,004
+     input and 51 output tokens per label, $0.036 for the 200;
+  2a. MR-010: `company-role-v2` and ticker-scoped labelling, built offline, then integrated and
+     pushed (`docs/workstreams/MR-010-company-role-v2.md`);
+  2b. re-pilot of 200 under v2 on NVDA and PFE, pre-approved, then Alfred's review of 30 drawn with
+     seed `20261008` (at least 27 correct) — Alfred. Result: not yet run;
+  3. role-label backfill of the stored 12 months, NVDA and PFE (about $0.52 at measured tokens) —
+     Alfred;
   4. MR-009 approved and integrated (can be drafted in parallel with 1–3);
   5. news backfill of months 13–36, then role labels for those articles — Alfred;
   6. MR-003 resumes on the full labelled corpus: outcome-blind filter-placement check, threshold
