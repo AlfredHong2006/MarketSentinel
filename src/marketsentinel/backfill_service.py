@@ -24,17 +24,21 @@ from marketsentinel.domain import Article, Constituent, DailySentiment, ScoredAr
 from marketsentinel.historical_backfill import (
     BackfillBucket,
     BackfillBucketReport,
+    BackfillPlanReport,
+    BackfillRefusal,
     BackfillRunReport,
     EvidenceRefreshReport,
     SelectionGapBucketReport,
     SelectionGapReport,
     StaleBacklogReport,
     plan_backfill_buckets,
+    resolve_backfill_boundary,
 )
 from marketsentinel.sentiment.finbert import SentimentAnalyzer
 from marketsentinel.service import ArticleAnalysisRunner
 from marketsentinel.sources.historical import HistoricalNewsProvider, HistoricalNewsService
 from marketsentinel.storage.sqlite import SQLiteRepository
+from marketsentinel.timeutils import ensure_utc
 
 # list_scored_articles/list_article_analyses default to smaller limits sized for one live
 # request's ~30-day window; a full-horizon backfill query needs generous, explicit caps of its
@@ -42,6 +46,102 @@ from marketsentinel.storage.sqlite import SQLiteRepository
 # _STORED_ANALYSES_LIMIT).
 _SENTIMENT_AGGREGATION_LIMIT = 5_000
 _STALE_BACKLOG_QUERY_LIMIT = 5_000
+
+
+class ScoredReadCapExceeded(RuntimeError):
+    """A scored-article read hit its cap mid-run, so its result is truncated and was not used.
+
+    Raised instead of returning the rows: a truncated read silently drops the OLDEST articles
+    (newest first), which is exactly the range a deep backfill adds.
+    """
+
+    def __init__(self, *, cap: int, phase: str, state: str) -> None:
+        self.cap = cap
+        self.phase = phase
+        self.state = state
+        super().__init__(
+            f"More than {cap} scored articles are stored in the range read {phase}, so the read "
+            f"is truncated and was not used. {state}"
+        )
+
+
+def stored_history_start(repository: SQLiteRepository, ticker: str) -> datetime | None:
+    """The earliest ``published_at`` among the ticker's non-demo stored articles, if any."""
+
+    return min(
+        (
+            ensure_utc(article.published_at)
+            for article in repository.list_articles(ticker, since=None)
+            if not article.is_demo
+        ),
+        default=None,
+    )
+
+
+def resolve_anchored_boundary(
+    repository: SQLiteRepository,
+    symbol: str,
+    *,
+    now: datetime,
+    horizon_days: int,
+    override: datetime | None = None,
+) -> datetime:
+    """The exclusive end for a boundary-anchored run, read from the database the run uses.
+
+    Reads only: no constituent lookup, no network, no write, so it can run on a read-only
+    repository. Raises ``BackfillRefusal`` when the ticker has no stored articles or the boundary
+    is outside the horizon.
+    """
+
+    ticker = symbol.strip().upper()
+    return resolve_backfill_boundary(
+        ticker=ticker,
+        stored_start=stored_history_start(repository, ticker),
+        override=override,
+        now=now,
+        horizon_days=horizon_days,
+    )
+
+
+def plan_anchored_backfill(
+    repository: SQLiteRepository,
+    symbol: str,
+    *,
+    now: datetime,
+    horizon_days: int,
+    override: datetime | None = None,
+    read_cap: int = _SENTIMENT_AGGREGATION_LIMIT,
+) -> BackfillPlanReport:
+    """Resolve and describe a boundary-anchored run. Reads only; fetches and writes nothing."""
+
+    ticker = symbol.strip().upper()
+    boundary = resolve_anchored_boundary(
+        repository, ticker, now=now, horizon_days=horizon_days, override=override
+    )
+    stored = sorted(
+        ensure_utc(article.published_at)
+        for article in repository.list_articles(ticker, since=None)
+        if not article.is_demo
+    )
+    scored = repository.list_scored_articles(
+        ticker, since=now - timedelta(days=horizon_days), limit=read_cap + 1
+    )
+    return BackfillPlanReport(
+        ticker=ticker,
+        now=now,
+        horizon_days=horizon_days,
+        boundary=boundary,
+        boundary_source="explicit --until" if override is not None else "earliest stored",
+        stored_start=stored[0],
+        earliest_published=tuple(stored[:5]),
+        stored_total=len(stored),
+        stored_in_30_days_after_boundary=sum(
+            1 for value in stored if boundary <= value < boundary + timedelta(days=30)
+        ),
+        scored_in_horizon=len(scored),
+        read_cap=read_cap,
+        buckets=tuple(plan_backfill_buckets(now, horizon_days=horizon_days, until=boundary)),
+    )
 
 
 class ConstituentResolver(Protocol):
@@ -63,7 +163,10 @@ class HistoricalIntelligenceBackfillService:
         max_new_analyses_per_run: int = 60,
         sentiment_half_life_hours: float = 24.0,
         priority_bonus_limit: int = 0,
+        scored_read_cap: int = _SENTIMENT_AGGREGATION_LIMIT,
     ) -> None:
+        if scored_read_cap < 1:
+            raise ValueError("scored_read_cap must be positive")
         if not 1 <= bucket_candidate_cap <= 40:
             raise ValueError("bucket_candidate_cap must be between 1 and 40")
         if max_new_analyses_per_run < 0:
@@ -81,9 +184,60 @@ class HistoricalIntelligenceBackfillService:
         self.max_new_analyses_per_run = max_new_analyses_per_run
         self.sentiment_half_life_hours = sentiment_half_life_hours
         self.priority_bonus_limit = priority_bonus_limit
+        self.scored_read_cap = scored_read_cap
 
-    def backfill(self, symbol: str, *, now: datetime, horizon_days: int = 366) -> BackfillRunReport:
+    def _read_scored(
+        self, ticker: str, since: datetime, *, phase: str, state: str
+    ) -> list[ScoredArticle]:
+        """List scored articles, refusing a result that hit the cap.
+
+        One row more than the cap is requested, so exactly ``scored_read_cap`` rows is a complete
+        read and anything beyond it is detected rather than silently cut off.
+        """
+
+        rows = self.repository.list_scored_articles(
+            ticker, since=since, limit=self.scored_read_cap + 1
+        )
+        if len(rows) > self.scored_read_cap:
+            raise ScoredReadCapExceeded(cap=self.scored_read_cap, phase=phase, state=state)
+        return rows
+
+    def _refuse_if_scored_reads_would_truncate(self, ticker: str, since: datetime) -> None:
+        """Before any fetch: a corpus that already fills the cap cannot be read back completely."""
+
+        rows = self.repository.list_scored_articles(ticker, since=since, limit=self.scored_read_cap)
+        if len(rows) >= self.scored_read_cap:
+            raise BackfillRefusal(
+                f"{ticker} already has {self.scored_read_cap} or more scored articles stored since "
+                f"{since.isoformat()}, which is the read cap ({self.scored_read_cap}). The run "
+                "reads them back newest first to rebuild daily sentiment, so storing more would "
+                "silently drop the oldest. Nothing was fetched or written. Raising the cap is a "
+                "decision for the product owner (see docs/research/MR-009-proposal.md)."
+            )
+
+    def backfill(
+        self,
+        symbol: str,
+        *,
+        now: datetime,
+        horizon_days: int = 366,
+        offset_days: int = 0,
+        until: datetime | None = None,
+    ) -> BackfillRunReport:
         """Populate historical articles/sentiment/analyses for one ticker. Idempotent to re-run.
+
+        ``offset_days`` skips the most recent days of the horizon (see ``plan_backfill_buckets``):
+        nothing is fetched for them. The daily-sentiment rebuild below still spans everything
+        stored from the horizon start onward, as it always has, so the skipped range is rebuilt
+        from its stored articles rather than left stale.
+
+        ``until`` ends the run exactly at an instant (the start of stored history): the bucket
+        containing it is clipped there and no article published at or after it is stored, whatever
+        the provider returns. Mutually exclusive with ``offset_days``.
+
+        A scored-article read that reaches ``scored_read_cap`` is never used as if complete: the
+        run refuses before any fetch when the stored corpus already fills the cap, and raises
+        ``ScoredReadCapExceeded`` (before any daily-sentiment rewrite) if storing pushes it past.
 
         Two phases, not one pass per bucket: every bucket's articles are fetched, persisted, and
         scored FIRST; only then does candidate selection/analysis begin. analyze_article's own
@@ -94,10 +248,18 @@ class HistoricalIntelligenceBackfillService:
         everything before analyzing anything keeps that pool identical run over run.
         """
 
+        run_start = now - timedelta(days=horizon_days)
+        # Everything that can refuse the run happens before the first constituent lookup or fetch.
+        buckets = plan_backfill_buckets(
+            now, horizon_days=horizon_days, offset_days=offset_days, until=until
+        )
+        self._refuse_if_scored_reads_would_truncate(symbol.strip().upper(), run_start)
         constituent = self.constituents.resolve(symbol)
-        buckets = plan_backfill_buckets(now, horizon_days=horizon_days)
 
-        fetch_outcomes = [self._fetch_and_score_bucket(constituent, bucket) for bucket in buckets]
+        fetch_outcomes = [
+            self._fetch_and_score_bucket(constituent, bucket, exclusive_end=until)
+            for bucket in buckets
+        ]
 
         budget = _AnalysisBudget(self.max_new_analyses_per_run)
         bucket_reports = [
@@ -105,7 +267,6 @@ class HistoricalIntelligenceBackfillService:
             for bucket, outcome in zip(buckets, fetch_outcomes, strict=True)
         ]
 
-        run_start = now - timedelta(days=horizon_days)
         daily = self._recompute_historical_sentiment(constituent, run_start)
         bucket_reports = [
             replace(
@@ -122,6 +283,8 @@ class HistoricalIntelligenceBackfillService:
             new_analyses_attempted=budget.attempts,
             circuit_breaker_tripped=budget.tripped,
             sentiment_dates_total=len(daily),
+            offset_days=offset_days,
+            until=until,
         )
 
     def fill_selection_gaps(
@@ -166,8 +329,11 @@ class HistoricalIntelligenceBackfillService:
     ) -> SelectionGapBucketReport:
         stored = [
             item
-            for item in self.repository.list_scored_articles(
-                constituent.symbol, since=bucket.start, limit=_SENTIMENT_AGGREGATION_LIMIT
+            for item in self._read_scored(
+                constituent.symbol,
+                bucket.start,
+                phase=f"for bucket {bucket.label} (selection-gap fill)",
+                state="Nothing was fetched, and no analysis was started for this bucket.",
             )
             if not item.is_demo and item.published_at < bucket.end
         ]
@@ -298,7 +464,10 @@ class HistoricalIntelligenceBackfillService:
         )
 
     def _fetch_and_score_bucket(
-        self, constituent: Constituent, bucket: BackfillBucket
+        self,
+        constituent: Constituent,
+        bucket: BackfillBucket,
+        exclusive_end: datetime | None = None,
     ) -> "_BucketFetchOutcome":
         try:
             articles, fetch_status, health_message = self._fetch_bucket_articles(
@@ -306,6 +475,11 @@ class HistoricalIntelligenceBackfillService:
             )
         except Exception as exc:  # defensive: providers normally report health, never raise
             return _BucketFetchOutcome(fetch_status="failed", message=str(exc))
+
+        if exclusive_end is not None:
+            # Providers bound a window inclusively (published_at <= until); an anchored run stores
+            # nothing at or after its boundary, so the instant itself is dropped here, before storage.
+            articles = [item for item in articles if item.published_at < exclusive_end]
 
         if not articles:
             return _BucketFetchOutcome(fetch_status=fetch_status, message=health_message)
@@ -320,8 +494,15 @@ class HistoricalIntelligenceBackfillService:
 
         bucket_scored = [
             item
-            for item in self.repository.list_scored_articles(
-                constituent.symbol, since=bucket.start, limit=_SENTIMENT_AGGREGATION_LIMIT
+            for item in self._read_scored(
+                constituent.symbol,
+                bucket.start,
+                phase=f"after storing bucket {bucket.label}",
+                state=(
+                    f"Articles and scores for the buckets up to and including {bucket.label} are "
+                    "stored in this database; later buckets were not fetched; daily_sentiment was "
+                    "not rewritten and no analysis ran for this bucket."
+                ),
             )
             if not item.is_demo and item.published_at < bucket.end
         ]
@@ -433,8 +614,15 @@ class HistoricalIntelligenceBackfillService:
 
         real_articles = [
             item
-            for item in self.repository.list_scored_articles(
-                constituent.symbol, since=run_start, limit=_SENTIMENT_AGGREGATION_LIMIT
+            for item in self._read_scored(
+                constituent.symbol,
+                run_start,
+                phase="for the daily-sentiment rebuild",
+                state=(
+                    "Every planned bucket was fetched, stored and scored (and any analysis within "
+                    "the budget ran), but daily_sentiment was NOT deleted or rewritten: it is "
+                    "exactly as it was before this run."
+                ),
             )
             if not item.is_demo
         ]
