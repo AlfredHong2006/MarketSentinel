@@ -24,7 +24,7 @@ from marketsentinel.company_role_ledger import (
     reconcile_role_jobs,
     role_processing_order,
 )
-from marketsentinel.coverage_cycle import CoverageCycleService
+from marketsentinel.coverage_cycle import CoverageCycleService, RoleScope, role_scope
 from marketsentinel.domain import (
     Article,
     CompanyReference,
@@ -44,7 +44,7 @@ from marketsentinel.storage.sqlite import SQLiteRepository
 # Tuesday, noon UTC. The live window is 30 days, so the cut-off between "new" and "backfill" is
 # 2026-08-02 12:00.
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
-NAMES = {"ACME": "Acme Corporation", "OTHER": "Other Inc"}
+NAMES = {"ACME": "Acme Corporation", "OTHER": "Other Inc", "THIRD": "Third Ltd"}
 
 
 class Constituents:
@@ -117,6 +117,7 @@ class Harness:
             max_new_analyses=0,
             ingest=False,
             role_budget=budget,
+            role_tickers=[ticker],
         )
 
 
@@ -520,9 +521,260 @@ def test_a_shared_total_is_allocated_round_robin_across_tickers(writable_tmp_pat
         max_new_total=0,
         ingest=False,
         role_budget=RoleBudget(max_new_per_ticker=2, max_new_total=3),
+        role_tickers=["ACME", "OTHER"],
     )
 
     paid = {r.ticker: r.report.roles.paid_attempts for r in results}
     assert sum(paid.values()) == 3
     assert sorted(paid.values()) == [1, 2]  # neither ticker starved, neither exceeds its own cap
     assert all(r.report.roles.stop_reason == "budget" for r in results)
+
+
+# --- company-role-v2: v1 stays as history -------------------------------------------------------
+
+
+def v1_runner(h: Harness) -> LedgeredCompanyRoleRunner:
+    service = CompanyRoleService(
+        h.repository,
+        h.provider,
+        Constituents(),
+        prompt_version="company-role-v1",
+        clock=h.clock,
+    )
+    return LedgeredCompanyRoleRunner(h.repository, service, clock=h.clock)
+
+
+def test_v1_labels_and_jobs_survive_the_version_change_untouched(writable_tmp_path):
+    h = build(writable_tmp_path)
+    h.add(*new_stories(3), *old_stories(2))
+    h.cycle.role_runner = v1_runner(h)
+    v1_contract = h.role_contract
+    assert "p=company-role-v1;" in v1_contract
+    h.run(RoleBudget(max_new_per_ticker=9, max_new_total=9, max_backfill_total=9))
+    v1_labels = stored_labels(h.repository)
+    v1_jobs = h.role_jobs()
+    assert len(v1_labels) == len(v1_jobs) == 5
+    assert {job.state for job in v1_jobs} == {"analyzed"}
+    spent = h.provider.calls
+
+    # The version changes: the live runner is the default (v2) one.
+    h.cycle.role_runner = LedgeredCompanyRoleRunner(
+        h.repository,
+        CompanyRoleService(h.repository, h.provider, Constituents(), clock=h.clock),
+        clock=h.clock,
+    )
+    v2_contract = h.role_contract
+    assert "p=company-role-v2;" in v2_contract and v2_contract != v1_contract
+
+    # With every cap at 0 nothing is created and nothing is spent.
+    h.run(RoleBudget())
+    h.run(None)
+    assert h.provider.calls == spent
+    assert h.role_jobs() == []
+
+    # Every article gets a fresh pending v2 job; v1 is read as nothing.
+    assert reconcile_role_jobs(h.repository, v2_contract, "ACME", T0) == {"pending": 5}
+    assert {job.state for job in h.role_jobs()} == {"pending"}
+    service = h.cycle.role_runner.service.contract
+    for article in [*new_stories(3), *old_stories(2)]:
+        assert (
+            h.repository.get_company_role(
+                article.fingerprint,
+                service.model_version,
+                service.prompt_version,
+                service.schema_version,
+            )
+            is None
+        )
+    assert (
+        h.repository.list_company_roles(
+            "ACME", service.model_version, service.prompt_version, service.schema_version
+        )
+        == {}
+    )
+
+    # v1 rows are exactly as they were.
+    assert stored_labels(h.repository) == v1_labels
+    assert h.repository.list_analysis_jobs("ACME", v1_contract, None) == v1_jobs
+
+
+def test_v2_labels_are_paid_for_afresh_and_v1_rows_stay_unchanged(writable_tmp_path):
+    h = build(writable_tmp_path)
+    h.add(*new_stories(2))
+    h.cycle.role_runner = v1_runner(h)
+    v1_contract = h.role_contract
+    h.run(RoleBudget(max_new_per_ticker=5, max_new_total=5))
+    v1_labels = stored_labels(h.repository)
+    v1_jobs = h.role_jobs()
+    assert h.provider.calls == 2
+
+    h.cycle.role_runner = LedgeredCompanyRoleRunner(
+        h.repository,
+        CompanyRoleService(h.repository, h.provider, Constituents(), clock=h.clock),
+        clock=h.clock,
+    )
+    roles = h.run(RoleBudget(max_new_per_ticker=5, max_new_total=5)).roles
+
+    assert (roles.paid_attempts, roles.reused, roles.generated) == (2, 0, 2)
+    assert h.provider.calls == 4  # v1 was not reused as v2
+    labels = stored_labels(h.repository)
+    assert [label for label in labels if label.prompt_version == "company-role-v1"] == v1_labels
+    assert len([label for label in labels if label.prompt_version == "company-role-v2"]) == 2
+    assert h.repository.list_analysis_jobs("ACME", v1_contract, None) == v1_jobs
+
+
+# --- ticker-scoped labelling --------------------------------------------------------------------
+
+ALL_THREE = ("ACME", "OTHER", "THIRD")
+
+
+def scoped_harness(tmp_path) -> Harness:
+    h = build(tmp_path, ScriptedRoleProvider(symbol=None), tickers=ALL_THREE)
+    for ticker in ALL_THREE:
+        h.add(*new_stories(4, ticker=ticker), *old_stories(4, ticker=ticker))
+    return h
+
+
+def run_scoped(h: Harness, budget: RoleBudget, role_tickers):
+    return {
+        result.ticker: result.report
+        for result in h.cycle.run_all(
+            list(ALL_THREE),
+            now=T0,
+            max_new_per_ticker=0,
+            max_new_total=0,
+            ingest=False,
+            role_budget=budget,
+            role_tickers=role_tickers,
+        )
+    }
+
+
+def labelled_symbols(h: Harness) -> set[str]:
+    return {label.subject_company.symbol for label in stored_labels(h.repository)}
+
+
+def test_new_article_caps_label_only_the_two_listed_tickers_and_spend_only_on_them(
+    writable_tmp_path,
+):
+    h = scoped_harness(writable_tmp_path)
+
+    # A total of 8 across the two listed tickers: if THIRD took any share, they would get fewer.
+    reports = run_scoped(h, RoleBudget(max_new_per_ticker=4, max_new_total=8), ["ACME", "OTHER"])
+
+    assert labelled_symbols(h) == {"ACME", "OTHER"}
+    assert reports["ACME"].roles.paid_attempts == reports["OTHER"].roles.paid_attempts == 4
+    assert reports["THIRD"].roles is None
+    assert h.provider.calls == 8
+    assert {request.subject_company.symbol for request in h.provider.requests} == {"ACME", "OTHER"}
+    # The unlisted covered ticker has no role job at all, so it consumed nothing and is untouched.
+    assert h.role_jobs("THIRD") == []
+
+
+def test_a_backfill_cap_labels_only_the_two_listed_tickers_and_spends_only_on_them(
+    writable_tmp_path,
+):
+    h = scoped_harness(writable_tmp_path)
+
+    reports = run_scoped(h, RoleBudget(max_backfill_total=8), ["OTHER", "THIRD"])
+
+    assert labelled_symbols(h) == {"OTHER", "THIRD"}
+    assert reports["OTHER"].roles.paid_attempts == reports["THIRD"].roles.paid_attempts == 4
+    assert reports["ACME"].roles is None
+    assert h.provider.calls == 8
+    assert h.role_jobs("ACME") == []
+
+
+def test_the_list_is_case_and_space_insensitive_and_new_and_backfill_share_it(writable_tmp_path):
+    h = scoped_harness(writable_tmp_path)
+
+    run_scoped(
+        h,
+        RoleBudget(max_new_per_ticker=9, max_new_total=9, max_backfill_total=9),
+        [" acme ", "Other", "other"],
+    )
+
+    assert labelled_symbols(h) == {"ACME", "OTHER"}
+    assert h.provider.calls == 16
+
+
+@pytest.mark.parametrize("missing", [None, [], [" ", ""]])
+@pytest.mark.parametrize(
+    "budget",
+    [
+        RoleBudget(max_new_per_ticker=1, max_new_total=1),
+        RoleBudget(max_backfill_total=1),
+    ],
+)
+def test_a_positive_cap_without_a_ticker_list_is_refused_before_any_spend(
+    writable_tmp_path, budget, missing
+):
+    h = scoped_harness(writable_tmp_path)
+
+    with pytest.raises(ValueError, match="role ticker list"):
+        run_scoped(h, budget, missing)
+    with pytest.raises(ValueError, match="role ticker list"):
+        h.cycle.run("ACME", now=T0, max_new_analyses=0, ingest=False, role_budget=budget)
+
+    assert h.provider.calls == 0
+    assert stored_labels(h.repository) == []
+    assert all(h.role_jobs(ticker) == [] for ticker in ALL_THREE)
+
+
+def test_zero_caps_need_no_list_and_spend_nothing_even_with_one(writable_tmp_path):
+    h = scoped_harness(writable_tmp_path)
+
+    run_scoped(h, RoleBudget(), None)
+    run_scoped(h, RoleBudget(), ["ACME"])
+    run_scoped(h, None, ["ACME"])
+
+    assert h.provider.calls == 0
+    assert all(h.role_jobs(ticker) == [] for ticker in ALL_THREE)
+
+
+def test_a_listed_ticker_that_is_not_covered_labels_nothing_and_is_not_an_error(writable_tmp_path):
+    h = build(writable_tmp_path, ScriptedRoleProvider(symbol=None), tickers=("ACME",))
+    h.add(*new_stories(2), *new_stories(2, ticker="OTHER"))  # OTHER is stored but not covered
+
+    results = h.cycle.run_all(
+        ["ACME"],
+        now=T0,
+        max_new_per_ticker=0,
+        max_new_total=0,
+        ingest=False,
+        role_budget=RoleBudget(max_new_per_ticker=5, max_new_total=5),
+        role_tickers=["ACME", "OTHER"],
+    )
+
+    assert [r.error for r in results] == [None]
+    assert labelled_symbols(h) == {"ACME"}
+    assert h.provider.calls == 2
+    assert h.role_jobs("OTHER") == []
+
+
+def test_the_run_report_names_the_tickers_in_scope_and_the_covered_ones_left_out():
+    scope = role_scope(["ACME", "OTHER", "THIRD"], ["acme", "other", "GHOST"])
+
+    assert scope == RoleScope(
+        in_scope=("ACME", "OTHER"), left_out=("THIRD",), not_covered=("GHOST",)
+    )
+    assert scope.render() == (
+        "role scope: labelled tickers=ACME, OTHER; covered tickers left out=THIRD; "
+        "listed but not covered=GHOST"
+    )
+    assert role_scope([], []).render() == (
+        "role scope: labelled tickers=none; covered tickers left out=none; "
+        "listed but not covered=none"
+    )
+
+
+def test_scoping_leaves_the_stage_a_ledger_alone(writable_tmp_path):
+    h = scoped_harness(writable_tmp_path)
+    run_scoped(h, RoleBudget(), None)  # Stage A reconcile only
+    stage_a = h.cycle.contract
+    before = {t: h.repository.analysis_job_summary(t, stage_a) for t in ALL_THREE}
+
+    run_scoped(h, RoleBudget(max_new_per_ticker=9, max_new_total=9), ["ACME"])
+
+    after = {t: h.repository.analysis_job_summary(t, stage_a) for t in ALL_THREE}
+    assert after == before

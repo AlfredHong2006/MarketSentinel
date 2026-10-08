@@ -433,6 +433,7 @@ def test_deep_history_becomes_baseline_and_waits_for_an_explicit_role_budget(
         max_new_analyses=1000,
         ingest=False,
         role_budget=RoleBudget(max_new_per_ticker=10, max_new_total=25),
+        role_tickers=["ACME"],
     )
 
     assert stage_a_provider.total_calls == 0, "no paid Stage A/B/C on 24 months of old articles"
@@ -449,6 +450,7 @@ def test_deep_history_becomes_baseline_and_waits_for_an_explicit_role_budget(
         max_new_analyses=1000,
         ingest=False,
         role_budget=RoleBudget(max_backfill_total=4),
+        role_tickers=["ACME"],
     )
     assert drained.roles is not None
     assert drained.roles.paid_attempts == 4
@@ -462,6 +464,7 @@ def test_deep_history_becomes_baseline_and_waits_for_an_explicit_role_budget(
         max_new_analyses=1000,
         ingest=False,
         role_budget=RoleBudget(max_backfill_total=4),
+        role_tickers=["ACME"],
     )
     assert again.roles is not None
     assert len(stored_labels(repository)) == 8, "the next four, not the same four again"

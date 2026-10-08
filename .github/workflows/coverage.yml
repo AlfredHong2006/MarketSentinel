@@ -17,8 +17,11 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
+      # Also the only tickers the company-role stage may label. A scheduled run has no dispatch
+      # input and uses this default on purpose: a company activated by a public request gets no
+      # role labels until Alfred adds it here.
       tickers:
-        description: "Comma-separated tickers always kept under coverage (activated every run)"
+        description: "Comma-separated tickers always kept under coverage (activated every run) and the only tickers that get company-role labels"
         default: "NVDA,PFE"
       max_new:
         description: "Max new analyses per ticker this run"
@@ -71,6 +74,9 @@ permissions:
 # fixed here and changeable without touching Python: at most MAX_NEW_TOTAL cycle analyses plus
 # MAX_ARTICLE_REQUESTS explicit article analyses, whatever the public request queue holds.
 env:
+  # Also the only tickers the company-role stage may label (passed as --role-tickers). A scheduled
+  # run has no dispatch input and so uses this default, NVDA,PFE, on purpose: a company activated by
+  # a public request gets no role labels until it is added here.
   TICKERS: ${{ github.event.inputs.tickers || 'NVDA,PFE' }}
   MAX_NEW: ${{ github.event.inputs.max_new || '25' }}
   MAX_NEW_TOTAL: ${{ github.event.inputs.max_new_total || '40' }}
@@ -318,7 +324,7 @@ jobs:
           uv run python scripts/run_coverage_cycle.py --all-active \
             --max-new "$MAX_NEW" --max-new-total "$MAX_NEW_TOTAL" --max-tickers "$MAX_TICKERS" \
             --max-new-roles "$MAX_NEW_ROLES" --max-new-roles-total "$MAX_NEW_ROLES_TOTAL" \
-            --max-backfill-roles "$MAX_BACKFILL_ROLES"
+            --max-backfill-roles "$MAX_BACKFILL_ROLES" --role-tickers "$TICKERS"
 
       - name: List covered tickers
         id: covered

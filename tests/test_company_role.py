@@ -90,9 +90,9 @@ def test_stage_a_b_c_and_schema_versions_are_unchanged():
 
 def test_the_role_stage_has_its_own_versions_and_a_ledger_key_that_cannot_collide():
     contract = CompanyRoleContract(model_version="m")
-    assert COMPANY_ROLE_PROMPT_VERSION == "company-role-v1"
-    assert COMPANY_ROLE_SCHEMA_VERSION == "company-role-schema-v1"
-    assert contract.contract_key == "role:m=m;p=company-role-v1;s=company-role-schema-v1"
+    assert COMPANY_ROLE_PROMPT_VERSION == "company-role-v2"
+    assert COMPANY_ROLE_SCHEMA_VERSION == "company-role-schema-v1"  # the output schema is unchanged
+    assert contract.contract_key == "role:m=m;p=company-role-v2;s=company-role-schema-v1"
     stage_abc = ArticleAnalysisCompatibility(
         model_version="m",
         stage_a_prompt_version=STAGE_A_PROMPT_VERSION,
@@ -106,7 +106,7 @@ def test_the_role_stage_has_its_own_versions_and_a_ledger_key_that_cannot_collid
 
 def test_a_version_change_is_a_different_contract_not_an_edit():
     assert (
-        CompanyRoleContract("m", prompt_version="company-role-v2").contract_key
+        CompanyRoleContract("m", prompt_version="company-role-v1").contract_key
         != CompanyRoleContract("m").contract_key
     )
 
@@ -182,6 +182,88 @@ def test_the_prompt_treats_article_text_as_untrusted_and_defines_both_roles():
 )
 def test_the_prompt_names_each_mr003_failure_shape_as_mentioned(shape):
     assert shape in " ".join(_COMPANY_ROLE_INSTRUCTIONS.split())
+
+
+def _flat() -> str:
+    return " ".join(_COMPANY_ROLE_INSTRUCTIONS.split())
+
+
+def test_v2_states_the_three_rules():
+    text = _flat()
+    assert "A counterparty in a transaction, buyer or seller alike, is principal" in text
+    assert "An incident involving the company's own operations or assets is principal" in text
+    assert "Any development in which the company is the actor is principal" in text
+    assert (
+        "Stock-price commentary, buy or sell opinions, and analyst ratings or price-target "
+        "changes are mentioned" in text
+    )
+
+
+def test_v2_no_longer_makes_the_object_of_a_rating_or_price_target_principal():
+    text = _flat()
+    assert "object of an analyst rating" not in text
+    assert "is itself the object of" not in text
+    # Every mention of a rating or price target sits on the mentioned side of the prompt.
+    principal_part, _, mentioned_part = text.partition("Answer mentioned when")
+    assert "price-target" not in principal_part
+    assert "analyst rating" not in principal_part
+    assert "price-target" in mentioned_part
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        # shares move because of a company development vs. only about the move
+        "the development is what the article reports, so principal",
+        "An article that is only about the share-price move, a valuation view, or whether to "
+        "buy or sell is mentioned",
+        # rating or target is mentioned even when the company is the only one named
+        "An analyst rating or price-target change is mentioned even when the company is the only "
+        "company named",
+        # own results alongside analyst reaction
+        "The company's own results, guidance, or announcement reported alongside analyst "
+        "reaction is principal",
+        # own facility vs. a customer or third party using the product
+        "An incident at the company's own facility, fleet, network, or product in the company's "
+        "own hands is principal",
+        "An incident at a customer or other third party that is using the company's product "
+        "stays mentioned",
+    ],
+)
+def test_v2_decides_each_boundary_case(boundary):
+    assert boundary in _flat()
+
+
+def test_v2_keeps_what_v1_got_right():
+    text = _flat()
+    assert "Which company holds the grammatical subject position in the headline decides" in text
+    assert "Do not label by sentiment, by importance" in text
+    assert "rationale of at most 300 characters" in text
+    assert "Return subject_symbol exactly as supplied" in text
+    for kept in (
+        "a roundup, market wrap, list, or trending-names item that names the company in passing",
+        "a competitor's or peer's approval, launch, funding, or results",
+        "the company used as a comparison or benchmark",
+        "the company named only as the supplier or technology a third party buys or builds on",
+        "the company named only as a person's employer when another organisation appoints that "
+        "person",
+    ):
+        assert kept in text
+
+
+def test_v2_adds_no_third_role_and_no_confidence_rule():
+    text = _flat()
+    assert "Answer principal when" in text and "Answer mentioned when" in text
+    assert "third role" not in text and "neutral" not in text
+    # Confidence handling is v1's: genuinely ambiguous means lower confidence, no threshold.
+    assert "express that through a lower confidence" in text
+    assert "threshold" not in text
+
+
+def test_v2_instructions_carry_no_real_headline_company_or_event():
+    text = _flat().lower()
+    for real in ("pfizer", "amazon", "nvidia", "nvda", "pfe", "pfizer ltd", "india"):
+        assert real not in text
 
 
 def test_the_input_fence_cannot_be_closed_early_by_article_text():
@@ -280,16 +362,19 @@ def test_a_stored_label_is_reused_never_paid_for_twice_and_never_overwritten(wri
 def test_a_new_prompt_version_creates_new_rows_instead_of_editing(writable_tmp_path):
     repository, provider, service = build(writable_tmp_path)
     stored = store_article(repository, "Acme Corporation signs a supply agreement")
-    service.label_article(stored.fingerprint)
-
-    newer = CompanyRoleService(
-        repository, provider, FakeConstituents(), prompt_version="company-role-v2", clock=lambda: T0
+    older = CompanyRoleService(
+        repository, provider, FakeConstituents(), prompt_version="company-role-v1", clock=lambda: T0
     )
-    response = newer.label_article(stored.fingerprint)
+    older.label_article(stored.fingerprint)
+
+    response = service.label_article(stored.fingerprint)
 
     assert response.status == "generated"  # a new contract is paid for separately, explicitly
     assert provider.calls == 2
-    assert len(stored_labels(repository)) == 2
+    assert {label.prompt_version for label in stored_labels(repository)} == {
+        "company-role-v1",
+        "company-role-v2",
+    }
 
 
 def test_an_unlabelled_article_is_distinguishable_from_one_labelled_mentioned(writable_tmp_path):

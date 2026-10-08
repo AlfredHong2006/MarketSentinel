@@ -313,6 +313,61 @@ class RolePassReport:
     ledger_output_tokens: int = 0
 
 
+def normalize_role_tickers(tickers: Iterable[str] | None) -> frozenset[str] | None:
+    """Upper-case, trimmed, de-duplicated role ticker list; ``None`` stays ``None`` (no list)."""
+
+    if tickers is None:
+        return None
+    return frozenset(ticker.strip().upper() for ticker in tickers if ticker.strip())
+
+
+@dataclass(frozen=True)
+class RoleScope:
+    """Which tickers the role stage was allowed to label in one run. Pure; spends nothing.
+
+    ``in_scope`` are covered tickers on the list, ``left_out`` are covered tickers not on it (no
+    paid role call, no role budget), ``not_covered`` are listed tickers with no active coverage
+    (reported, label nothing, not an error).
+    """
+
+    in_scope: tuple[str, ...]
+    left_out: tuple[str, ...]
+    not_covered: tuple[str, ...]
+
+    def render(self) -> str:
+        def names(values: tuple[str, ...]) -> str:
+            return ", ".join(values) or "none"
+
+        return (
+            f"role scope: labelled tickers={names(self.in_scope)}; "
+            f"covered tickers left out={names(self.left_out)}; "
+            f"listed but not covered={names(self.not_covered)}"
+        )
+
+
+def role_scope(covered: Iterable[str], role_tickers: Iterable[str]) -> RoleScope:
+    listed = normalize_role_tickers(role_tickers) or frozenset()
+    covered_set = {ticker.upper() for ticker in covered}
+    return RoleScope(
+        in_scope=tuple(sorted(covered_set & listed)),
+        left_out=tuple(sorted(covered_set - listed)),
+        not_covered=tuple(sorted(listed - covered_set)),
+    )
+
+
+def _require_role_tickers(
+    budget: RoleBudget | None, role_tickers: frozenset[str] | None
+) -> frozenset[str] | None:
+    """Fail closed: a positive role cap needs an explicit, non-empty ticker list."""
+
+    if budget is not None and budget.enabled and not role_tickers:
+        raise ValueError(
+            "a positive company-role cap needs an explicit role ticker list; "
+            "refusing before any spend"
+        )
+    return role_tickers
+
+
 @dataclass(frozen=True)
 class EvidenceCheckReport:
     checked: int = 0
@@ -515,9 +570,11 @@ class CoverageCycleService:
         ingest: bool = True,
         analyze: bool = True,
         role_budget: RoleBudget | None = None,
+        role_tickers: Iterable[str] | None = None,
     ) -> CoverageReport:
         if max_new_analyses < 0:
             raise ValueError("max_new_analyses must not be negative")
+        listed = _require_role_tickers(role_budget, normalize_role_tickers(role_tickers))
         constituent = self.constituents.resolve(symbol)
         coverage = self._active_coverage(constituent)
         ingest_report = self._ingest(constituent, now) if ingest else IngestReport()
@@ -526,7 +583,7 @@ class CoverageCycleService:
             self._analyze(constituent, now, max_new_analyses) if analyze else AnalysisPassReport()
         )
         roles = (
-            self._label_roles_many([(constituent, coverage)], now, role_budget).get(
+            self._label_roles_many([(constituent, coverage)], now, role_budget, listed).get(
                 constituent.symbol
             )
             if analyze
@@ -554,6 +611,7 @@ class CoverageCycleService:
         ingest: bool = True,
         analyze: bool = True,
         role_budget: RoleBudget | None = None,
+        role_tickers: Iterable[str] | None = None,
     ) -> list[CoverageRunResult]:
         """Cycle many tickers in one pass, allocating a shared ``max_new_total`` fairly.
 
@@ -574,6 +632,7 @@ class CoverageCycleService:
             raise ValueError("max_new_per_ticker must not be negative")
         if max_new_total is not None and max_new_total < 0:
             raise ValueError("max_new_total must not be negative")
+        listed = _require_role_tickers(role_budget, normalize_role_tickers(role_tickers))
 
         resolved: list[tuple[str, Constituent, CompanyCoverage]] = []
         outcomes: dict[str, CoverageRunResult] = {}
@@ -608,6 +667,7 @@ class CoverageCycleService:
                 [(constituent, coverage) for _, constituent, coverage in resolved],
                 now,
                 role_budget,
+                listed,
             )
 
         for symbol, constituent, coverage in resolved:
@@ -966,8 +1026,13 @@ class CoverageCycleService:
         targets: Sequence[tuple[Constituent, CompanyCoverage]],
         now: datetime,
         budget: RoleBudget | None,
+        role_tickers: frozenset[str] | None = None,
     ) -> dict[str, RolePassReport]:
         """The company-role pass: reconcile, then label under explicit caps, deterministically.
+
+        Only tickers in ``role_tickers`` are labelled. A covered ticker not on the list is dropped
+        before reconcile: no job, no paid call, no share of any cap. A caller reaching this with
+        an enabled budget and no list is refused.
 
         Inert unless a role runner is wired *and* a cap is positive: with the delivered zero
         defaults it creates no job and makes no call. Each article is paid for once per role
@@ -984,11 +1049,14 @@ class CoverageCycleService:
         runner = self.role_runner
         if runner is None or budget is None or not budget.enabled:
             return {}
+        listed = _require_role_tickers(budget, role_tickers) or frozenset()
 
         contract = runner.contract_key
         queues: dict[str, _RoleQueue] = {}
         order: list[str] = []
         for constituent, coverage in targets:
+            if constituent.symbol.upper() not in listed:
+                continue
             reconciled = reconcile_role_jobs(self.repository, contract, constituent.symbol, now)
             due = self.repository.list_due_analysis_jobs(constituent.symbol, contract, now)
             due_ids = {job.article_fingerprint for job in due}
